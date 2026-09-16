@@ -303,6 +303,29 @@ body.cockpit-mode #ckRowsCv{width:100%;height:240px;flex:none;display:block}
 @media(max-width:900px){body.cockpit-mode,body.cockpit-mode main{height:auto;overflow:auto}body.cockpit-mode main{padding:16px 16px}body.cockpit-mode #tab-cockpit{height:auto}.cockpit-mode .lcr{grid-template-columns:1fr;display:flex;flex-direction:column}.cockpit-mode .lcr-col,.cockpit-mode .lcr-card{min-height:auto;height:auto}.cockpit-mode .mid-stage-wrap{height:360px}body.cockpit-mode #ckRowsCv{height:240px}.cockpit-mode .kpi .s{display:block}}
 @media(max-width:900px){body.cockpit-mode .lcr{height:auto;display:flex;flex-direction:column}body.cockpit-mode .lcr-hero{flex:none}body.cockpit-mode .mid-stage-wrap{height:360px}}
 </style>
+<style>
+#gcv{touch-action:none;cursor:grab}
+.graph-tools{position:absolute;right:12px;top:12px;display:flex;align-items:center;gap:4px;background:#fff;border:1px solid #dce6f2;border-radius:6px;padding:4px;z-index:3}
+.graph-tools button{width:30px;height:30px;border:0;border-radius:4px;background:#f1f5f9;color:#334155;cursor:pointer;font-size:20px}
+.graph-tools button:hover{background:#dbeafe;color:#1d4ed8}
+.graph-tools output{width:46px;text-align:center;font-size:12px;color:#64748b}
+#gLegend{max-width:160px;pointer-events:none}
+#gLegend b{display:block;max-width:140px;overflow-wrap:anywhere;font-size:12px;margin-bottom:5px}
+body.cockpit-mode #ckRowsCv{height:320px}
+@media(max-width:600px){#gLegend{max-width:115px;font-size:10px;padding:6px}.graph-tools{right:6px;top:6px}.grid-graph{grid-template-columns:minmax(0,1fr)!important}}
+</style>
+<style>
+body.cockpit-mode .lcr-card > h3{flex:none}
+body.cockpit-mode #ckFeed{flex:1;min-height:0;max-height:none;overflow-y:auto}
+body.cockpit-mode #ckFeed .ev{flex:none}
+@media(min-width:901px){
+  body.cockpit-mode .col-left{display:grid;grid-template-rows:minmax(0,.9fr) minmax(0,1.5fr) minmax(0,1fr)}
+  body.cockpit-mode .col-right{display:grid;grid-template-rows:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:900px){
+  body.cockpit-mode .col-left .lcr-card,body.cockpit-mode .col-right .lcr-card{min-height:0;max-height:420px;flex:none}
+}
+</style>
 </head>
 <body>
 <header>
@@ -337,8 +360,9 @@ body.cockpit-mode #ckRowsCv{width:100%;height:240px;flex:none;display:block}
   <div class="lcr">
     <!-- 左：资源与分布 -->
     <div class="col col-left lcr-col">
-      <section class="card lcr-card"><h3 class="sec-title">纳管数据源 · 实时规模<span class="hint" id="ckSrcHint"></span></h3><div id="ckSrcList" class="lcr-scroll"></div></section>
+      <section class="card lcr-card"><h3 class="sec-title">事件类型分布<span class="hint">本会话</span></h3><div id="ckEvBars" class="lcr-scroll"></div></section>
       <section class="card lcr-card grow2"><h3 class="sec-title">诊断 Top8（就诊次数）<span class="hint">ICD-10 术语对齐</span></h3><div id="ckDiagBars" class="lcr-scroll"></div></section>
+      <section class="card lcr-card"><h3 class="sec-title">纳管数据源 · 实时规模<span class="hint" id="ckSrcHint"></span></h3><div id="ckSrcList" class="lcr-scroll"></div></section>
     </div>
 
     <!-- 中：芯心态势 -->
@@ -346,7 +370,7 @@ body.cockpit-mode #ckRowsCv{width:100%;height:240px;flex:none;display:block}
       <section class="card ck-map-card lcr-hero">
         <div class="ck-panel-head"><h3 class="sec-title">数据要素分布态势</h3><span class="ck-map-badge">按业务科室 · 实时</span></div>
         <div class="lcr-mid-body">
-          <div class="mid-stage-wrap"><canvas id="ckMapCv" role="img" aria-label="按业务科室展示医疗数据点分布的态势图"></canvas><div class="ck-map-caption"><span class="ck-map-dot"></span>数据点持续增长 · MedFabric</div></div>
+          <div class="mid-stage-wrap"><canvas id="ckMapCv" role="img" aria-label="按业务科室展示医疗数据点分布的态势图"></canvas></div>
           <aside class="ck-map-side"><div class="ck-map-side-title">业务域数据排名<span>患者 / 就诊</span></div><div id="ckMapList" class="lcr-scroll"></div><div id="ckMapDetail" class="ck-map-detail lcr-scroll"></div></aside>
         </div>
       </section>
@@ -355,7 +379,6 @@ body.cockpit-mode #ckRowsCv{width:100%;height:240px;flex:none;display:block}
 
     <!-- 右：运行与事件 -->
     <div class="col col-right lcr-col">
-      <section class="card lcr-card"><h3 class="sec-title">事件类型分布<span class="hint">本会话</span></h3><div id="ckEvBars" class="lcr-scroll"></div></section>
       <section class="card lcr-card grow1"><h3 class="sec-title">编排任务实时<span class="hint" id="ckTaskHint"></span></h3><div id="ckTasks" class="lcr-scroll"></div></section>
       <section class="card lcr-card grow2"><h3 class="sec-title">最新元数据事件<span class="hint">SSE</span></h3><div class="feed" id="ckFeed"></div></section>
     </div>
@@ -426,12 +449,19 @@ body.cockpit-mode #ckRowsCv{width:100%;height:240px;flex:none;display:block}
 
 <!-- ============ 语义图谱 ============ -->
 <section class="tab" id="tab-graph">
-  <h3 class="sec-title">统一语义建模 · 知识图谱<span class="hint">点击患者节点可跳转 Patient360；边带身份对齐置信度（虚线越实=置信越高）</span></h3>
+  <h3 class="sec-title">统一语义建模 · 知识图谱</h3>
   <div class="grid-graph">
     <div id="graphWrap">
       <canvas id="gcv"></canvas>
       <div class="legend" id="gLegend"></div>
       <div class="gtip" id="gTip"></div>
+      <div class="graph-tools" role="toolbar" aria-label="图谱视图">
+        <button id="gMinus" title="缩小" aria-label="缩小">−</button>
+        <output id="gZoom" aria-label="缩放比例">100%</output>
+        <button id="gPlus" title="放大" aria-label="放大">+</button>
+        <button id="gFit" title="适应当前节点" aria-label="适应当前节点">⤢</button>
+        <button id="gReset" title="恢复全部节点" aria-label="恢复全部节点">↺</button>
+      </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:10px">
       <div class="card"><h3 class="sec-title">实体类型与语义映射<span class="hint">物理字段 → 统一语义属性（目录自动维护）</span></h3>
@@ -534,8 +564,9 @@ body.cockpit-mode #ckRowsCv{width:100%;height:240px;flex:none;display:block}
   </div>
 </section>
 
-<footer>南京大学 · 《基于数据编织技术的数据基础设施创新路径研究》课题13 —— 医疗数据编织平台原型 · 第一至四部分功能演示<br>
-演示环境：五套医疗数据源（HIS/LIS/PACS/EMR/IoT）均为本地模拟；主动元数据扫描周期4秒，实时业务流持续注入。</footer>
+<footer>南京大学 · 《基于数据编织技术的数据基础设施创新路径研究》</footer>
+<script src="/static/vendor/d3-7.9.0.min.js"></script>
+<script src="/static/exploration.js"></script>
 </main>
 
 <script>
@@ -643,83 +674,15 @@ async function runScan(){
 }
 
 /* ---------------- 语义图谱（Canvas 力导向） ---------------- */
-let G = {nodes:[],edges:[],byId:{}};
-const gState = {alpha:1, hover:null};
-async function loadGraph(){
-  const d = await (await fetch("/api/graph?patients=40")).json();
-  G.nodes = d.nodes.map(n => ({...n, x:(Math.random()-.5)*320+360, y:(Math.random()-.5)*300+300, vx:0, vy:0}));
-  G.edges = d.edges; G.byId = {}; G.nodes.forEach(n=>G.byId[n.id]=n);
-  gState.alpha = 1; startGraphLoop();
-  $("#gLegend").innerHTML = Object.entries(d.stats.by_type).map(([t,c]) => {
-    const meta = (CATALOG?.entity_types||{})[t] || {};
-    return `<div><i style="background:${meta.color||"#888"}"></i>${esc(meta.label||t)} ×${c}</div>`;}).join("");
-}
-let CATALOG = null, graphLoopOn = false;
+let CATALOG = null;
 async function loadCatalog(){
   CATALOG = await (await fetch("/api/catalog")).json();
+  updateGraphLegend();
   $("#mapList").innerHTML = CATALOG.field_map.map(f => `
     <div class="map-item"><b style="color:${f.color}">${esc(f.label)}</b>
       <span style="color:var(--dim);font-size:12px"> ${esc(f.desc)}（${f.mappings.length} 个字段映射）</span>
       <div class="mchips">${f.mappings.map(m=>`<span class="mchip">${esc(m.source+"."+m.table+"."+m.column)} → ${esc(m.attr)}</span>`).join("")}</div></div>`).join("");
 }
-function resizeCanvas(){
-  const cv = $("#gcv"), w = $("#graphWrap"); if(!w) return;
-  const dpr = window.devicePixelRatio||1;
-  cv.width = w.clientWidth*dpr; cv.height = w.clientHeight*dpr;
-  cv.getContext("2d").setTransform(dpr,0,0,dpr,0,0); drawGraphFrame();
-}
-function startGraphLoop(){ if(!graphLoopOn){ graphLoopOn=true; requestAnimationFrame(graphTick); } }
-function graphTick(){
-  if (!document.querySelector("#tab-graph.active")) { graphLoopOn=false; return; }
-  tickPhysics(); drawGraphFrame();
-  if (gState.alpha > 0.015 || gState.hover) requestAnimationFrame(graphTick); else graphLoopOn = false;
-}
-function tickPhysics(){
-  const N=G.nodes, E=G.edges, a=gState.alpha;
-  for (const n of N){ n.fx=0; n.fy=0; }
-  const step = N.length>260?2:1;
-  for(let i=0;i<N.length;i+=step)for(let j=i+step;j<N.length;j+=step){
-    let dx=N[i].x-N[j].x, dy=N[i].y-N[j].y, d2=dx*dx+dy*dy||1;
-    if(d2<48400){ const f=Math.min(90/d2,.5)*a; N[i].fx+=dx*f; N[i].fy+=dy*f; N[j].fx-=dx*f; N[j].fy-=dy*f; }
-  }
-  for(const e of E){ const s=G.byId[e.s], t=G.byId[e.t]; if(!s||!t) continue;
-    let dx=t.x-s.x, dy=t.y-s.y, d=Math.sqrt(dx*dx+dy*dy)||1;
-    const f=(d-70)*.012*a; s.fx+=dx/d*f; s.fy+=dy/d*f; t.fx-=dx/d*f; t.fy-=dy/d*f; }
-  const W=$("#graphWrap").clientWidth, H=$("#graphWrap").clientHeight;
-  for(const n of N){
-    if(n.type==="patient"){ n.vx=(n.vx+n.fx*.9)*.86 + (Math.random()-.5)*.05*a; n.vy=(n.vy+n.fy*.9)*.86 + (Math.random()-.5)*.05*a; }
-    else { n.vx=(n.vx+n.fx*1.4)*.72 + (Math.random()-.5)*.3*a; n.vy=(n.vy+n.fy*1.4)*.72 + (Math.random()-.5)*.3*a; }
-    n.x=Math.max(16,Math.min(W-16,n.x+n.vx)); n.y=Math.max(16,Math.min(H-16,n.y+n.vy));
-  }
-  gState.alpha*=.985;
-}
-function drawGraphFrame(){
-  const cv=$("#gcv"); if(!cv) return; const ctx=cv.getContext("2d");
-  const W=$("#graphWrap").clientWidth, H=$("#graphWrap").clientHeight;
-  ctx.clearRect(0,0,W,H);
-  for(const e of G.edges){ const s=G.byId[e.s], t=G.byId[e.t]; if(!s||!t) continue;
-    const hot = gState.hover && (gState.hover===e.s||gState.hover===e.t);
-    ctx.strokeStyle = hot ? "rgba(34,211,238,.55)" : `rgba(90,120,170,${.16+.2*e.conf})`;
-    ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(s.x,s.y); ctx.lineTo(t.x,t.y); ctx.stroke(); }
-  for(const n of G.nodes){ const meta=(CATALOG?.entity_types||{})[n.type]||{};
-    const r=n.type==="patient"?6.5:4, hov=gState.hover===n.id;
-    if(n.type!=="patient" && !hov) ctx.globalAlpha=.85;
-    ctx.fillStyle=meta.color||"#888"; ctx.beginPath(); ctx.arc(n.x,n.y,r,0,7); ctx.fill(); ctx.globalAlpha=1;
-    if(hov){ ctx.strokeStyle="#2563eb"; ctx.lineWidth=1.4; ctx.beginPath(); ctx.arc(n.x,n.y,r+3,0,7); ctx.stroke(); }
-    if((n.type==="patient"||hov)){ ctx.fillStyle=hov?"#1d4ed8":"#4d6685"; ctx.font="10.5px sans-serif"; ctx.fillText(n.label.slice(0,16), n.x+r+4, n.y+3); }
-  }
-}
-$("#gcv").addEventListener("mousemove", ev => {
-  const r=$("#gcv").getBoundingClientRect(); const mx=ev.clientX-r.left, my=ev.clientY-r.top;
-  let best=null,bd=120; for(const n of G.nodes){ const d=(n.x-mx)**2+(n.y-my)**2; if(d<bd){bd=d;best=n;} }
-  gState.hover = best?best.id:null; startGraphLoop();
-  const tip=$("#gTip");
-  if(best){ tip.style.display="block"; tip.style.left=Math.min(r.width-190,mx+14)+"px"; tip.style.top=(my+12)+"px";
-    const meta=CATALOG?.entity_types[best.type]||{};
-    tip.innerHTML=`<b>${esc(best.label)}</b><br><span style="color:var(--dim)">${esc(meta.label||best.type)} · ${esc(best.id)}${best.type==="patient"?"<br>点击跳转 Patient360":""}</span>`; }
-  else tip.style.display="none";
-});
-$("#gcv").addEventListener("click", () => { if(gState.hover && G.byId[gState.hover]?.type==="patient"){ jumpToPatient(G.byId[gState.hover].id.split(":")[1]); }});
 
 /* ---------------- Patient360 虚拟查询 ---------------- */
 let PATIENTS=[], SERVICES=[];
@@ -901,28 +864,6 @@ function renderLoopStrip(){ if(!CK) return; const L=CK.loop||{}, k=CK.kpis;
     ["反馈 · 元数据回写", (L.feedback_events||0)+" orchestrated_action", "执行结果进入事件流（闭环）", "#2dd4bf"]];
   $("#ckLoop").innerHTML=steps.map(([t,v,su,c],i)=>`${i?`<div class="loop-arrow">→</div>`:""}<div class="loop-step" style="--lc:${c}"><div class="t">${esc(t)}</div><div class="v">${esc(v||"-")}</div>${su?`<div class="s">${esc(su)}</div>`:""}</div>`).join(""); }
 
-function drawRowsChart(){ const cv=$("#ckRowsCv"); if(!cv||!CK) return; const f=fitCanvas(cv); if(!f) return;
-  const {ctx,w,h}=f; ctx.clearRect(0,0,w,h);
-  const hist=(CK.history&&CK.history.length)?CK.history:[{wall:"--",by_source:{}}];
-  const order=["his","lis","pacs","emr","iot"], names={his:"HIS",lis:"LIS",pacs:"PACS",emr:"EMR",iot:"IoT"};
-  const series=order.map(sid=>({name:names[sid],color:SRC_COLORS[sid],data:hist.map(pt=>(pt.by_source&&pt.by_source[sid])||0)}));
-  if(hist.length<2){ ctx.fillStyle="#718198"; ctx.font="12px sans-serif"; ctx.fillText("采样中（每4秒一个点）…", w/2-60, h/2); return; }
-  const small=h<130; const padL=(small?42:54),padR=(small?12:16),padT=(small?20:28),padB=(small?17:24), N=Math.max(2,...series.map(x=>x.data.length));
-  let maxV=-Infinity,minV=Infinity; series.forEach(x=>x.data.forEach(v=>{maxV=Math.max(maxV,v);minV=Math.min(minV,v);}));
-  const span=(maxV-minV)||Math.abs(maxV)*0.1||1; minV-=span*0.12; maxV+=span*0.15;
-  const X=i=>padL+(w-padL-padR)*(i/(N-1)), Y=v=>h-padB-(h-padT-padB)*((v-minV)/(maxV-minV));
-  ctx.font="11px sans-serif";
-  for(let gi=0;gi<=4;gi++){const v=minV+(maxV-minV)*gi/4, y=Y(v);
-    ctx.strokeStyle="#dce6f2";ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(w-padR,y);ctx.stroke();
-    ctx.fillStyle="#718198";ctx.fillText(fmtK(v),6,y+3);}
-  series.forEach(x=>{ if(!x.data.length) return; ctx.strokeStyle=x.color; ctx.lineWidth=1.8; ctx.beginPath(); x.data.forEach((v,i)=>i?ctx.lineTo(X(i),Y(v)):ctx.moveTo(X(0),Y(v))); ctx.stroke(); });
-  let lx=padL; series.forEach(x=>{ const v=x.data[x.data.length-1]; const txt=`${x.name} ${fmtK(v)}`;
-    ctx.fillStyle=x.color; ctx.fillRect(lx,8,9,3); ctx.fillText(txt,lx+12,12); lx+=ctx.measureText(txt).width+40; });
-  const L=String(hist[0].wall), R=new Date().toTimeString().slice(0,5);
-  ctx.fillStyle="#718198"; ctx.fillText(L,padL,h-8);
-  const midT=hist[Math.floor(hist.length/2)].wall||""; if(midT) ctx.fillText(String(midT),(w-padL-padR)/2+padL-14,h-8);
-  ctx.textAlign="right"; ctx.fillText(R,w-padR,h-8); ctx.textAlign="left";
-  $("#ckRowsHint").textContent=`窗口 ${L} → ${R} · 各源行数保持原位增长（零搬迁，逻辑集中管理）`; }
 
 let CK_MAP_NODES=[], CK_MAP_SELECTED=0;
 function mapPalette(){ const s=getComputedStyle(document.documentElement); return ["--cyan","--teal","--violet","--amber","--rose","--green"].map(k=>s.getPropertyValue(k).trim()); }

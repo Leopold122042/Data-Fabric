@@ -43,6 +43,9 @@ orch: "Orchestrator" = None                 # 第二部分：编排引擎（规�
 gov = GovernanceState()                      # 第三+四部分：服务流通控制面与安全治理状态
 HIST = deque(maxlen=400)                      # 驾驶舱时序环形缓冲 {t,wall,by_source,rows_total,ev,svc_calls}
 HIST_LOCK = threading.Lock()
+HISTORY_ORIGIN = None
+SERVER_STARTED_AT = None
+SERVER_STARTED_MONOTONIC = None
 
 
 def publish(evs):
@@ -59,14 +62,17 @@ def publish(evs):
 
 def _sample_metrics():
     """驾驶舱时序采样：各源行数 / 事件累计 / 服务调用累计"""
+    global HISTORY_ORIGIN
     if engine is None:
         return
     with HIST_LOCK:
         rows = {sid: (engine.stats.get(sid, {}) or {}).get("rows", 0) for sid in engine.adapters}
-        HIST.append({"t": time.monotonic(), "wall": time.strftime("%H:%M:%S"),
+        HIST.append({"t": time.monotonic(), "epoch": time.time(), "wall": time.strftime("%H:%M:%S"),
                      "by_source": rows, "rows_total": sum(int(x or 0) for x in rows.values()),
                      "ev": len(BUS.events),
                      "svc_calls": sum(v["calls"] for v in SERVICE_STATS.values())})
+        if HISTORY_ORIGIN is None:
+            HISTORY_ORIGIN = dict(HIST[-1], t=SERVER_STARTED_MONOTONIC, epoch=SERVER_STARTED_AT)
 
 
 def _hist_rate(key):
@@ -178,8 +184,11 @@ def _circulation_loop():
 
 @app.on_event("startup")
 def startup():
-    global engine, vlayer, sim
+    global engine, vlayer, sim, SERVER_STARTED_AT, SERVER_STARTED_MONOTONIC, HISTORY_ORIGIN
     t0 = time.time()
+    SERVER_STARTED_AT = t0
+    SERVER_STARTED_MONOTONIC = time.monotonic()
+    HISTORY_ORIGIN = None
     if not os.path.exists(os.path.join(medsim.DATA_DIR, "his.db")):
         medsim.generate_base()
     engine = DiscoveryEngine()
@@ -272,8 +281,8 @@ def catalog():
 
 
 @app.get("/api/graph")
-def graph(patients: int = 40):
-    g = build_graph(engine, limit_patients=min(int(patients), 80))
+def graph(patients: int = 100):
+    g = build_graph(engine, limit_patients=min(int(patients), 100))
     n_nodes = len(g["nodes"]); n_edges = len(g["edges"])
     type_counts = {}
     for nd in g["nodes"]:
@@ -768,7 +777,7 @@ def cockpit_api():
                                   "abnormal_items": abnormal, "studies": studies,
                                   "data_points": int(visits + abnormal + studies)})
     con_his.close()
-    g = build_graph(engine, limit_patients=40) if engine else {"nodes": [], "edges": []}
+    g = build_graph(engine, limit_patients=100) if engine else {"nodes": [], "edges": []}
     ev_by_type = {}
     for e in BUS.events:
         ev_by_type[e["etype"]] = ev_by_type.get(e["etype"], 0) + 1
@@ -786,6 +795,7 @@ def cockpit_api():
                  "patients": patients_n, "visits": visits_n},
         "sources": [{"id": s["id"], "name": s["name"], "rows": int(s["rows"] or 0)} for s in srcs],
         "history": history[::step],
+        "history_origin": HISTORY_ORIGIN,
         "ev_by_type": ev_by_type,
         "top_diags": top_diags,
         "dept_distribution": dept_distribution,

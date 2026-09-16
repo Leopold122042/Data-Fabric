@@ -85,7 +85,7 @@ def lab_item_term(item_code, item_name):
     return None
 
 
-def build_graph(engine, limit_patients=40):
+def build_graph(engine, limit_patients=100):
     """以患者为核心构建知识图谱（限幅实例，边带置信度）"""
     nodes, edges = [], []
     seen_nodes = set()
