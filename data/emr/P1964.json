@@ -1,0 +1,11 @@
+{
+ "patient_id": "P1964",
+ "dept": "骨科",
+ "chief_complaint": "咳嗽咳痰1周、发热2天",
+ "present_illness_history": "刘静，男，因急诊症状入院，查体见下文。",
+ "physical_exam": "T 37.8℃、P 102次/分、R 20次/分、BP 156/94mmHg。神志清楚，急性病容。",
+ "preliminary_diagnosis": [
+  "腰椎间盘突出症伴神经根病"
+ ],
+ "treatment_plan": "完善检验与影像学检查，对症支持治疗，密切监护生命体征变化。"
+}

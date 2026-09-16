@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>MedFabric · 医疗数据编织平台（第一至四部分）</title>
+<style>
+:root{
+  --bg:#0b1220; --panel:#101a2e; --panel2:#0d1626; --line:#1f2c47; --tx:#dbe4f3; --dim:#8fa0bd;
+  --cyan:#22d3ee; --teal:#2dd4bf; --amber:#fbbf24; --violet:#a78bfa; --rose:#fb7185; --slate:#94a3b8; --green:#34d399;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;font-size:14px}
+header{display:flex;align-items:center;gap:16px;padding:12px 20px;border-bottom:1px solid var(--line);background:#0d1527}
+.logo{font-weight:700;font-size:17px;color:var(--cyan)}
+.logo small{color:var(--dim);font-weight:400;margin-left:8px;font-size:12px}
+.hstatus{margin-left:auto;display:flex;gap:14px;align-items:center;color:var(--dim);font-size:12.5px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#64748b;margin-right:5px}
+.dot.on{background:var(--green);box-shadow:0 0 6px var(--green)}
+nav{display:flex;gap:2px;padding:10px 20px 0;background:#0d1527;border-bottom:1px solid var(--line)}
+nav button{appearance:none;border:none;background:transparent;color:var(--dim);padding:9px 18px;font-size:14.5px;cursor:pointer;border-radius:8px 8px 0 0}
+nav button.active{color:#fff;background:linear-gradient(180deg,rgba(34,211,238,.16),transparent);box-shadow:inset 0 -2px 0 var(--cyan)}
+main{padding:18px 20px;max-width:1560px;margin:0 auto}
+.tab{display:none}.tab.active{display:block}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+h3.sec-title{font-size:15.5px;margin-bottom:10px;color:#fff;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+h3.sec-title .hint{color:var(--dim);font-weight:400;font-size:12px}
+.grid-arch{display:grid;grid-template-columns:minmax(620px,2.1fr) minmax(300px,1fr);gap:14px}
+@media(max-width:1100px){.grid-arch,.grid-disc,.grid-graph,.grid-svc{grid-template-columns:1fr!important}}
+.layer{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--panel2)}
+.layer .ltitle{font-size:13.5px;color:#fff;margin-bottom:9px;display:flex;gap:8px}
+.layer .ltitle b{color:var(--cyan)}
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chip{border:1px solid var(--line);background:#0b1526;border-radius:8px;padding:6px 9px;font-size:12.5px;line-height:1.45}
+.chip .k{color:var(--dim)}
+.chip b{display:block;font-size:13px;color:#fff}
+.flow-arrow{text-align:center;color:var(--cyan);font-size:12px;padding:7px 0;letter-spacing:.5px}
+.mech-row{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:4px}
+.mech{border:1px solid var(--line);background:#0b1526;border-radius:10px;padding:9px 11px;font-size:12.5px;color:var(--dim)}
+.mech b{display:block;color:#fff;font-size:13.5px;margin-bottom:4px}
+.mech.core{border-color:rgba(34,211,238,.5);background:linear-gradient(180deg,rgba(34,211,238,.09),transparent)}
+.stat-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-bottom:12px}
+.stat-card{border:1px solid var(--line);background:#0b1526;border-radius:10px;padding:10px 12px}
+.stat-card .v{font-size:21px;font-weight:700;color:var(--cyan)}
+.stat-card .k{color:var(--dim);font-size:12px;margin-top:2px}
+.grid-disc{display:grid;grid-template-columns:minmax(430px,1.5fr) minmax(460px,1fr);gap:14px}
+.src-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:9px;margin-bottom:12px}
+.src-card .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.badge{font-size:11.5px;border-radius:6px;padding:2px 7px;border:1px solid var(--line);color:var(--dim)}
+.feed{max-height:520px;overflow-y:auto;display:flex;flex-direction:column-reverse;gap:6px}
+.ev{border-left:3px solid var(--slate);background:#0b1526;border-radius:8px;padding:7px 10px;font-size:12.5px;line-height:1.5}
+.ev .t{color:var(--dim)}
+.ev b{color:#fff;font-weight:600}
+.ev .d{color:var(--dim);margin-top:2px}
+.et-data_update{border-color:var(--cyan)}.et-schema_change{border-color:var(--amber)}
+.et-quality_anomaly{border-color:var(--rose)}.et-semantic_link_discovered{border-color:var(--violet)}
+.et-catalog_built{border-color:var(--teal)}.et-service_invoked{border-color:#64748b}
+.tag-ev{font-size:11px;border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:1px}
+.fbtns button{appearance:none;border:1px solid var(--line);background:#0b1526;color:var(--dim);border-radius:7px;font-size:12.5px;padding:4px 10px;cursor:pointer;margin-right:6px}
+.fbtns button.on{color:#fff;border-color:var(--cyan)}
+button.act{appearance:none;border:none;background:linear-gradient(90deg,#0ea5e9,#22d3ee);color:#04121a;font-weight:700;border-radius:8px;padding:8px 16px;cursor:pointer}
+button.ghost{appearance:none;border:1px solid var(--line);background:#0b1526;color:var(--tx);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px}
+.grid-graph{display:grid;grid-template-columns:minmax(560px,1.7fr) minmax(320px,1fr);gap:14px;height:auto}
+#graphWrap{position:relative;height:600px;border-radius:12px;overflow:hidden;background:#0a1120;border:1px solid var(--line)}
+canvas{display:block;width:100%;height:100%}
+.legend{position:absolute;top:10px;left:10px;background:rgba(8,13,26,.85);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:12px;line-height:1.9}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px}
+.gtip{position:absolute;pointer-events:none;background:#0d1830f0;border:1px solid var(--cyan);border-radius:8px;padding:6px 9px;font-size:12.5px;display:none;z-index:5;max-width:240px}
+.map-list{max-height:600px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+.map-item{border:1px solid var(--line);background:#0b1526;border-radius:9px;padding:9px 11px;font-size:12.5px}
+.map-item b{font-size:13.5px;color:#fff}
+.mchips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.mchip{background:#0e1a30;border:1px solid var(--line);border-radius:5px;padding:2px 6px;font-size:11.5px;color:var(--dim)}
+.qrow{display:flex;gap:9px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+input,select{background:#0b1526;border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:8px 11px;font-size:13.5px;outline:none}
+input:focus{border-color:var(--cyan)}
+#pSearchList{position:absolute;z-index:9;background:#0d1830;border:1px solid var(--line);border-radius:9px;width:340px;max-height:260px;overflow-y:auto;display:none}
+#pSearchList div{padding:7px 11px;font-size:13px;cursor:pointer;border-bottom:1px solid #16233c}
+#pSearchList div:hover{background:#122040}
+.phead{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:12px;font-size:13.5px;color:var(--dim);align-items:center}
+.phead b{color:#fff;font-size:16px}
+.tagchips{margin-top:7px;display:flex;gap:6px;flex-wrap:wrap;width:100%}
+.dtag{background:#0e1a30;border:1px solid rgba(167,139,250,.45);color:#d8ccff;border-radius:7px;padding:3px 9px;font-size:12.5px}
+.secs{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.sec .meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;color:var(--dim);font-size:12px;margin-bottom:7px}
+.vbadge{background:#0e2a3d;border:1px solid rgba(45,212,191,.5);color:var(--teal);border-radius:6px;padding:1.5px 8px;font-size:11.5px}
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px}
+.tbl th{text-align:left;color:var(--dim);font-weight:400;border-bottom:1px solid var(--line);padding:4px 8px;white-space:nowrap}
+.tbl td{border-bottom:1px solid #16233c;padding:5px 8px;vertical-align:top}
+.flag-H{color:#fca5a5;font-weight:700}.flag-L{color:#93c5fd;font-weight:700}
+.kvgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+.kv .k{color:var(--dim);font-size:12px}.kv .v{margin-top:1px;color:#fff;font-size:13.5px}
+.dossier p{line-height:1.75;margin-bottom:6px;font-size:13px}
+.dossier b.kk{color:var(--teal);display:inline-block;min-width:64px}
+.grid-svc{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-bottom:14px}
+.svc-card h4{color:#fff;font-size:15px;display:flex;justify-content:space-between}
+.svc-id{font-family:Consolas,monospace;color:var(--cyan);font-size:12.5px}
+.svc-desc{color:var(--dim);font-size:12.8px;margin:7px 0;line-height:1.6;min-height:40px}
+.prow{display:flex;justify-content:space-between;font-size:12.3px;color:var(--dim);border-top:1px dashed #1a2942;padding:5px 0}
+#svcOut{margin-top:14px;display:none}
+pre.jsonbox{background:#070d1b;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12.3px;overflow:auto;max-height:420px;line-height:1.55;color:#c9e8ff}
+.note{color:var(--dim);font-size:12.8px;line-height:1.8;margin-top:10px;border-left:3px solid var(--violet);padding-left:10px}
+footer{margin-top:26px;padding:14px 20px;color:#5b6c8c;font-size:12px;text-align:center;line-height:1.7}
+</style>
+<style>
+/* ---------- 驾驶舱 & 智能编排（第二部分） ---------- */
+.ck-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:9px;margin-bottom:12px}
+.kpi{background:linear-gradient(180deg,#0e1a30,#0b1526);border:1px solid var(--line);border-radius:12px;padding:11px 13px;position:relative;overflow:hidden}
+.kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--kc,var(--cyan))}
+.kpi .v{font-size:22px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;line-height:1.25}
+.kpi .k{color:var(--dim);font-size:12.3px;margin-top:3px}
+.kpi .s{color:var(--kc,var(--cyan));font-size:11.8px;margin-top:4px;font-weight:600}
+.loop-strip{display:flex;align-items:stretch;gap:7px;flex-wrap:wrap}
+.loop-step{flex:1;min-width:152px;border:1px solid var(--line);background:#0b1526;border-radius:10px;padding:9px 12px;text-align:center}
+.loop-step .t{color:var(--dim);font-size:12.3px;margin-bottom:4px}
+.loop-step .v{font-size:16.5px;font-weight:700;color:#fff;line-height:1.3}
+.loop-step .s{color:var(--lc,var(--teal));font-size:11.8px;margin-top:3px}
+.loop-arrow{align-self:center;color:var(--cyan);font-size:15px;padding:0 2px}
+.grid-ck{display:grid;grid-template-columns:minmax(640px,2fr) minmax(360px,1.15fr);gap:14px}
+@media(max-width:1180px){.grid-ck,.grid-ck2{grid-template-columns:1fr!important}}
+.grid-ck2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+#ckRowsCv{width:100%;height:248px;display:block}
+.barrow{margin-bottom:8px}
+.barrow .bl{display:flex;justify-content:space-between;font-size:12.3px;color:var(--dim);margin-bottom:3px;gap:8px}
+.barrow .bt{height:9px;background:#0b1526;border-radius:5px;overflow:hidden;border:1px solid #14213a}
+.barrow .bf{height:100%;border-radius:5px 0 0 5px;background:var(--cyan)}
+.task-item{border-left:3px solid var(--slate);background:#0b1526;border-radius:8px;padding:7px 10px;font-size:12.5px;line-height:1.5;margin-bottom:6px}
+.task-item .tt{color:var(--dim)}
+.task-item b{color:#fff;font-weight:600}
+.task-item .d{color:var(--dim);margin-top:3px}
+.st-queued{border-color:#64748b}.st-running{border-color:var(--amber)}.st-done{border-color:var(--green)}.st-failed{border-color:var(--rose)}
+.pri-P0,.pri-P1,.pri-P2{font-size:11.5px;border-radius:6px;padding:1px 7px;display:inline-block}
+.pri-P0{background:#2a1220;border:1px solid rgba(251,113,133,.5);color:var(--rose)}
+.pri-P1{background:#241c0e;border:1px solid rgba(251,191,36,.5);color:var(--amber)}
+.pri-P2{background:#0d1f2a;border:1px solid rgba(34,211,238,.4);color:var(--cyan)}
+.orch-rule{border:1px solid var(--line);background:#0b1526;border-radius:10px;padding:10px 13px;font-size:12.8px;line-height:1.75}
+.orch-rule .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap}
+.orch-rule b{color:#fff;font-size:13.5px}
+.tgl{cursor:pointer;border:1px solid var(--line);background:#0e1a30;color:var(--green);border-radius:7px;padding:3px 12px;font-size:12.5px}
+.tgl.off{color:#64748b;text-decoration:line-through}
+.gov-row{display:flex;gap:9px;align-items:center;border-bottom:1px dashed #1a2942;padding:6px 0;font-size:12.8px;color:var(--dim)}
+.gov-row b{color:#fff;width:36px;display:inline-block}
+.qrow{position:relative}
+.flow-status{font-size:11.5px;border-radius:6px;padding:2px 7px;border:1px solid rgba(52,211,153,.35);color:var(--green);background:#0b211d}
+.flow-status.warn{color:var(--amber);border-color:rgba(251,191,36,.35);background:#241c0e}
+.registry-table{max-height:390px;overflow:auto}
+.registry-table .tbl td,.registry-table .tbl th{white-space:nowrap}
+.security-grid{display:grid;grid-template-columns:minmax(560px,1.45fr) minmax(400px,1fr);gap:14px}
+.sec-stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:9px;margin-bottom:12px}
+.sec-stat .stat-card .v{font-size:20px}
+.decision{border-radius:10px;padding:10px 12px;margin-top:10px;border:1px solid var(--line);background:#0b1526;line-height:1.65;font-size:12.5px}
+.decision.allow{border-color:rgba(52,211,153,.55)}.decision.deny{border-color:rgba(251,113,133,.65)}
+.risk-row{border-left:3px solid var(--rose);background:#0b1526;border-radius:8px;padding:8px 10px;font-size:12.3px;line-height:1.5;margin-bottom:6px}
+.risk-row.resolved{border-color:var(--green);opacity:.75}
+.asset-row{border:1px solid var(--line);background:#0b1526;border-radius:9px;padding:8px 10px;margin-bottom:6px;font-size:12.3px}
+.asset-row b{color:#fff}.asset-row .muted{color:var(--dim)}
+.form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;align-items:end}
+@media(max-width:900px){.security-grid{grid-template-columns:1fr!important}.form-grid{grid-template-columns:1fr}}
+</style>
+<style>
+/* ---------- 商业后台浅色主题（仅视觉层，不改变功能） ---------- */
+:root{
+  --bg:#f3f6fb; --panel:#ffffff; --panel2:#f8fbff; --line:#e3eaf3; --tx:#1f2f46; --dim:#718198;
+  --cyan:#2563eb; --teal:#0f9f9a; --amber:#c77a08; --violet:#7357c8; --rose:#d94b68; --slate:#64748b; --green:#168653;
+}
+html{background:var(--bg)}
+body{background:linear-gradient(180deg,#f7faff 0,#f3f6fb 260px,#eef3f9 100%);color:var(--tx);font-size:14px;letter-spacing:.05px}
+header{position:sticky;top:0;z-index:30;min-height:72px;padding:14px 28px;background:rgba(255,255,255,.96);border-bottom:1px solid #dfe7f1;box-shadow:0 2px 12px rgba(31,55,88,.06)}
+.logo{color:#164ca3;font-size:18px;letter-spacing:.1px}
+.logo::before{content:"";display:inline-block;width:8px;height:22px;margin-right:10px;vertical-align:-5px;border-radius:4px;background:linear-gradient(180deg,#3b82f6,#1d4ed8)}
+.logo small{display:block;margin:4px 0 0 18px;color:#8090a8;font-size:11.5px;letter-spacing:0}
+.hstatus{color:#6d7f96}
+.dot{background:#94a3b8}.dot.on{background:#16a36f;box-shadow:0 0 0 4px rgba(22,163,111,.12)}
+nav{position:sticky;top:72px;z-index:25;gap:5px;padding:10px 28px;background:rgba(255,255,255,.97);border-bottom:1px solid #dfe7f1;box-shadow:0 4px 12px rgba(31,55,88,.04);overflow-x:auto}
+nav button{color:#64748b;padding:9px 15px;font-size:13.5px;border-radius:8px;white-space:nowrap}
+nav button:hover{color:#1d4ed8;background:#eff6ff}
+nav button.active{color:#fff;background:linear-gradient(135deg,#2563eb,#1d4ed8);box-shadow:0 4px 10px rgba(37,99,235,.22)}
+main{max-width:1680px;padding:24px 28px}
+section.tab>h3.sec-title{margin:3px 0 17px;padding-left:12px;border-left:3px solid #2563eb}
+.card{background:#fff;border:1px solid #e3eaf3;border-radius:14px;padding:17px 18px;box-shadow:0 5px 18px rgba(31,55,88,.055)}
+h3.sec-title{color:#172b4d!important;font-size:16px}
+h3.sec-title .hint{color:#8090a8}
+.layer,.mech,.chip,.stat-card,.map-item,.svc-card,.orch-rule,.task-item,.asset-row,.decision,.risk-row,.ev,.loop-step{background:#fff!important;border-color:#e3eaf3!important;box-shadow:0 2px 8px rgba(31,55,88,.035)}
+.layer{background:#f8fbff!important}
+.layer .ltitle,.mech b,.chip b,.mech b,.svc-card h4,.orch-rule b,.task-item b,.map-item b,.asset-row b,.decision b{color:#20385d!important}
+.mech{color:#718198}
+.mech.core{background:linear-gradient(180deg,#eff6ff,#fff)!important;border-color:#b9d3ff!important}
+.chip{background:#fff!important}
+.chip .k,.stat-card .k,.loop-step .t,.task-item .tt,.svc-desc,.prow,.asset-row .muted{color:#718198}
+.stat-card .v{color:#2563eb}
+.flow-arrow{color:#2563eb}
+.badge{color:#718198;border-color:#dbe5f0}
+.ev .t,.ev .d,.task-item .d{color:#718198}
+.ev b{color:#20385d!important}
+.fbtns button{background:#fff;color:#718198;border-color:#dbe5f0}
+.fbtns button.on{color:#1d4ed8;border-color:#7aa7ed;background:#eff6ff}
+button.act{background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;box-shadow:0 4px 10px rgba(37,99,235,.2)}
+button.act:hover{background:linear-gradient(135deg,#1d4ed8,#1e40af);transform:translateY(-1px)}
+button.ghost{background:#fff;color:#31547e;border-color:#cfdceb}
+button.ghost:hover{color:#1d4ed8;border-color:#7aa7ed;background:#f5f9ff}
+input,select{background:#fff;color:#263b5b;border-color:#cfdceb;box-shadow:inset 0 1px 2px rgba(33,61,94,.03)}
+input:focus,select:focus{border-color:#4c8bea;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+#graphWrap{background:#f8fbff;border-color:#dce6f2}
+.legend{background:rgba(255,255,255,.94);border-color:#dce6f2;color:#49617f;box-shadow:0 3px 12px rgba(31,55,88,.08)}
+.gtip{background:rgba(255,255,255,.98);border-color:#4c8bea;color:#20385d;box-shadow:0 4px 14px rgba(31,55,88,.13)}
+.map-item{background:#fff!important}
+.mchip,.dtag{background:#f2f7ff;border-color:#d3e2f7;color:#315f9a}
+.vbadge{background:#edf9f8;border-color:#b7e4df;color:#168f89}
+#pSearchList{background:#fff;border-color:#d7e2ee;box-shadow:0 8px 20px rgba(31,55,88,.12)}
+#pSearchList div{border-bottom-color:#edf1f6}
+#pSearchList div:hover{background:#f2f7ff}
+.phead b,.kv .v{color:#20385d!important}
+.tbl th{color:#718198;border-bottom-color:#dfe7f1}
+.tbl td{color:#314867;border-bottom-color:#edf1f6}
+.svc-id{color:#2563eb}
+.prow{border-top-color:#e8eef5}
+pre.jsonbox{background:#f7faff;border-color:#dce6f2;color:#294568}
+footer{color:#8190a6;border-top:1px solid #e3eaf3;background:rgba(255,255,255,.5)}
+.kpi{background:linear-gradient(180deg,#fff,#f8fbff)!important;border-color:#dfe7f1!important;box-shadow:0 5px 15px rgba(31,55,88,.06)}
+.kpi .v{color:#20385d}
+.kpi .s{font-weight:600}
+.loop-step .v{color:#20385d}
+.barrow .bt{background:#f0f4f8;border-color:#e3eaf3}
+.task-item{background:#fff!important}
+.pri-P0{background:#fff1f3;border-color:#f3bcc8;color:#c33e5a}
+.pri-P1{background:#fff8e8;border-color:#efd49a;color:#a56a08}
+.pri-P2{background:#edf6ff;border-color:#b9d5f4;color:#2563eb}
+.tgl{background:#f3f8ff;color:#168653;border-color:#cfe0f1}
+.tgl.off{color:#718198}
+.gov-row{color:#718198;border-bottom-color:#e6edf5}
+.gov-row b{color:#20385d!important}
+.flow-status{background:#edf9f3;color:#168653;border-color:#b9e2ca}
+.flow-status.warn{background:#fff8e8;color:#a56a08;border-color:#efd49a}
+.decision{background:#f8fbff!important}
+.risk-row{background:#fff7f8!important}
+.risk-row.resolved{background:#f3fbf7!important}
+.secs svg{background:#f3f7fb!important}
+.meta code{background:#eef4fb!important;color:#34649a!important}
+b[style*="color:#fff"]{color:#20385d!important}
+td[style*="#d8ccff"]{color:#41668f!important}
+.sec-stat{margin-bottom:16px}
+.ck-command-bar{display:flex;justify-content:space-between;align-items:center;gap:18px;margin:0 0 14px;padding:16px 20px;border:1px solid #d7e4f3;border-radius:15px;background:linear-gradient(120deg,#f8fbff 0%,#eef5ff 55%,#fff 100%);box-shadow:0 6px 18px rgba(37,99,235,.07)}
+.ck-command-title{display:flex;flex-direction:column;gap:3px}.ck-command-title strong{font-size:18px;color:#163c78;letter-spacing:.2px}.ck-command-title>span:last-child{color:#72839a;font-size:12px}.ck-eyebrow{font-size:10px!important;letter-spacing:1.6px;color:#2563eb!important;font-weight:700}
+.ck-command-status{display:flex;align-items:center;gap:8px;white-space:nowrap;color:#718198;font-size:12px}.ck-command-status b{color:#168653;font-size:11px;letter-spacing:1px}.ck-command-status i{height:16px;border-left:1px solid #d5e0ec}.ck-live-dot{width:9px;height:9px;border-radius:50%;background:#16a36f;box-shadow:0 0 0 5px rgba(22,163,111,.12)}
+.ck-map-card{margin:16px 0 18px;padding:18px 20px!important}.ck-panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px}.ck-panel-head h3{margin-bottom:3px!important}.ck-panel-head p{color:#718198;font-size:12px;margin:0;line-height:1.6}.ck-map-badge{flex:none;color:#2563eb;background:#edf5ff;border:1px solid #cfe0f7;border-radius:7px;padding:5px 9px;font-size:11.5px}.ck-map-layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px}.ck-map-stage{position:relative;height:430px;overflow:hidden;border:1px solid #dbe6f2;border-radius:13px;background:radial-gradient(circle at 50% 49%,rgba(219,234,254,.75),rgba(248,251,255,.94) 39%,#f8fbff 72%)}.ck-map-stage::before{content:"";position:absolute;inset:0;opacity:.42;background:linear-gradient(rgba(92,137,190,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(92,137,190,.08) 1px,transparent 1px);background-size:38px 38px;pointer-events:none}.ck-map-stage canvas{position:relative;z-index:1;width:100%;height:100%}.ck-map-caption{position:absolute;left:15px;bottom:12px;z-index:2;color:#718198;background:rgba(255,255,255,.86);border:1px solid #dce6f1;border-radius:7px;padding:5px 8px;font-size:11px}.ck-map-dot{display:inline-block;width:7px;height:7px;margin-right:5px;border-radius:50%;background:#2563eb;box-shadow:0 0 0 4px rgba(37,99,235,.12)}.ck-map-side{padding:4px 0;min-width:0}.ck-map-side-title{display:flex;justify-content:space-between;padding:2px 4px 10px;color:#20385d;font-size:13px;font-weight:700;border-bottom:1px solid #e4ebf3}.ck-map-side-title span{font-weight:400;color:#8a9ab0;font-size:11px}.ck-map-row{display:grid;grid-template-columns:22px minmax(0,1fr) auto;align-items:center;gap:7px;width:100%;padding:10px 6px;border:0;border-bottom:1px solid #edf1f6;background:transparent;color:#47617f;text-align:left;cursor:pointer;font:inherit}.ck-map-row:hover,.ck-map-row.active{background:#f2f7ff;color:#1d4ed8}.ck-map-row .rank{font-size:11px;color:#8a9ab0;text-align:center}.ck-map-row .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}.ck-map-row .counts{font-size:11px;color:#718198;text-align:right;white-space:nowrap}.ck-map-row.active .counts{color:#2563eb}.ck-map-detail{margin-top:12px;padding:11px 12px;min-height:76px;color:#718198;background:#f8fbff;border:1px solid #e1eaf4;border-radius:9px;font-size:12px;line-height:1.7}.ck-map-detail b{color:#20385d}.ck-map-detail .detail-num{color:#2563eb;font-size:16px;font-weight:700;margin-right:3px}
+.grid-ck,.grid-disc,.grid-arch,.grid-graph,.security-grid{gap:18px}
+.grid-ck2{gap:18px}
+.ck-kpis{grid-template-columns:repeat(4,1fr);gap:12px}
+.kpi{padding:15px 16px;min-height:88px}
+.kpi .v{font-size:24px}
+.grid-svc{gap:16px}
+.svc-card{transition:transform .16s ease,box-shadow .16s ease}
+.svc-card:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(31,55,88,.1)}
+@media(max-width:1280px){.ck-kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:900px){.ck-map-layout{grid-template-columns:1fr}.ck-map-side{display:grid;grid-template-columns:1fr 1fr;column-gap:12px}.ck-map-side-title{grid-column:1/-1}.ck-map-detail{margin-top:8px}}
+@media(max-width:760px){header{padding:12px 16px}.logo small{display:none}nav{top:64px;padding:8px 14px}main{padding:18px 14px}.ck-kpis{grid-template-columns:repeat(2,1fr)}.kpi .v{font-size:20px}.ck-command-bar{align-items:flex-start;flex-direction:column}.ck-command-status{align-self:flex-end}.ck-map-stage{height:350px}.ck-map-side{display:block}}
+/* ---------- 驾驶舱全屏大屏：左-中-右指挥式布局，仅驾驶舱锁定一屏 ---------- */
+body.cockpit-mode{height:100dvh;overflow:hidden}
+body.cockpit-mode main{height:calc(100dvh - 142px);min-height:0;overflow:hidden;padding:12px 28px 14px}
+
+/* 顶部导航：标题 + LIVE */
+body.cockpit-mode .ck-topbar{flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px}
+body.cockpit-mode .ck-main-title{margin:0;padding-left:12px;border-left:3px solid #3b82f6;font-size:17.5px;line-height:1.4;color:#fff;display:flex;align-items:center;gap:9px;white-space:nowrap;overflow:hidden}
+body.cockpit-mode .ck-main-title small{color:var(--dim);font-weight:400;font-size:12px;border-left:1px solid var(--line);padding-left:9px}
+
+/* KPI 指标带（一行 8 项） */
+body.cockpit-mode #tab-cockpit{height:100%;min-height:0;display:flex;flex-direction:column;gap:9px;overflow:hidden}
+body.cockpit-mode .ck-kpis{flex:none;margin:0;grid-template-columns:repeat(8,1fr);gap:7px}
+body.cockpit-mode .kpi{padding:9px 11px}.cockpit-mode .kpi .v{font-size:20px;line-height:1.2}.cockpit-mode .kpi .s{display:-webkit-box;-webkit-line-clamp:1;overflow:hidden;font-size:10.3px}
+
+/* 闭环条（上传宽度） */
+body.cockpit-mode .ck-loop-card{flex:none;margin:0;padding:6px 12px;display:flex;align-items:center}
+body.cockpit-mode .loop-strip{width:100%;height:auto;gap:6px;flex-wrap:nowrap}.cockpit-mode .loop-step{min-width:0;padding:6px 9px}.cockpit-mode .loop-step .t{font-size:11px;white-space:nowrap}.cockpit-mode .loop-step .v{font-size:15px}.cockpit-mode .loop-step .s{display:none}.cockpit-mode .loop-arrow{font-size:14px;padding:0 3px}
+
+/* 左-中-右三列 */
+body.cockpit-mode .lcr{flex:1;min-height:0;display:grid;grid-template-columns:minmax(238px,.9fr) minmax(0,1.75fr) minmax(250px,1.02fr);gap:9px}
+body.cockpit-mode .lcr-col{display:flex;flex-direction:column;gap:9px;min-height:0;min-width:0}
+body.cockpit-mode .lcr-card{margin:0;padding:10px 13px;display:flex;flex-direction:column;min-height:0;overflow:hidden;background:#fff;border:1px solid var(--line);border-radius:12px}
+body.cockpit-mode .lcr-card h3.sec-title{margin-bottom:7px;font-size:13.5px;line-height:1.4;padding-left:9px;border-left:3px solid #cbd8ea;color:#20385d;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+body.cockpit-mode .lcr-card h3.sec-title .hint{border:none;padding:0;font-weight:400}
+body.cockpit-mode .grow1{flex:1 1 auto}.cockpit-mode .grow2{flex:1.25 1 auto}
+body.cockpit-mode .lcr-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;padding-right:3px}
+
+/* 中柱：芯心态势图 */
+body.cockpit-mode .lcr-hero{flex:1.5 1 auto;display:flex;flex-direction:column;padding:12px 15px!important}
+body.cockpit-mode .ck-panel-head{margin-bottom:8px}.cockpit-mode .ck-panel-head h3.sec-title{padding-left:9px;border-left:3px solid #cbd8ea;font-size:14px;color:#20385d;margin-bottom:2px}
+body.cockpit-mode .lcr-mid-body{flex:1;min-height:0;display:flex;gap:14px}
+body.cockpit-mode .mid-stage-wrap{flex:1 1 auto;min-width:0;height:auto;border:1px solid #dbe6f2;border-radius:13px;background:radial-gradient(circle at 50% 49%,rgba(219,234,254,.7),rgba(248,251,255,.94) 40%,#f8fbff 74%)}
+body.cockpit-mode .mid-stage-wrap canvas{position:relative;z-index:1;width:100%;height:100%}
+body.cockpit-mode .ck-map-side{flex:none;width:256px;display:flex;flex-direction:column;min-height:0;padding:4px 0}
+
+/* 中柱：趋势图 */
+body.cockpit-mode .lcr-trend{flex:1 1 auto;display:flex;flex-direction:column;min-height:96px}
+body.cockpit-mode #ckRowsCv{width:100%;height:auto;min-height:84px;flex:1 1 auto;display:block}
+
+/* 左柱：数据源列表 */
+.lcr-src-row{display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid #edf1f6;font-size:12.3px;color:#47617f}
+.lcr-src-row:last-child{border-bottom:none}.lcr-src-row .dotc{width:9px;height:9px;border-radius:50%;flex:none;box-shadow:0 0 0 3px rgba(37,99,235,.06)}
+.lcr-src-row .nm{font-weight:600;color:#20385d;min-width:46px}.lcr-src-row .bar{flex:1 1 auto;height:8px;background:#eef3f9;border-radius:4px;overflow:hidden}
+.lcr-src-row .bar i{display:block;height:100%;border-radius:4px 0 0 4px}.lcr-src-row .val{font-variant-numeric:tabular-nums;color:#2563eb;font-weight:700;min-width:58px;text-align:right}
+
+/* 忍具：狭屏 / 站下 */
+@media(max-width:1280px) and (min-width:901px){body.cockpit-mode .lcr{grid-template-columns:minmax(212px,.86fr) minmax(0,1.65fr) minmax(226px,1fr)}.cockpit-mode #ckRowsCv{min-height:74px}.cockpit-mode .kpi .s{display:none}}
+@media(max-width:900px){body.cockpit-mode,body.cockpit-mode main{height:auto;overflow:auto}body.cockpit-mode main{padding:16px 16px}body.cockpit-mode #tab-cockpit{height:auto}.cockpit-mode .lcr{grid-template-columns:1fr;display:flex;flex-direction:column}.cockpit-mode .lcr-col,.cockpit-mode .lcr-card{min-height:auto;height:auto}.cockpit-mode .mid-stage-wrap{height:360px}body.cockpit-mode #ckRowsCv{height:240px}.cockpit-mode .kpi .s{display:block}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">MedFabric · 医疗数据编织平台<small>数据基础设施创新路径研究 —— 架构 × 编织 × 服务流通 × 安全合规 · 医疗多系统场景</small></div>
+  <div class="hstatus"><span><i id="feedDot" class="dot"></i>主动元数据流</span><span id="clock">--:--:--</span></div>
+</header>
+
+<nav id="tabsNav">
+  <button data-tab="cockpit" class="active">数据驾驶舱</button>
+  <button data-tab="arch">架构总览</button>
+  <button data-tab="discovery">元数据发现</button>
+  <button data-tab="graph">语义图谱</button>
+  <button data-tab="query">虚拟查询 · Patient360</button>
+  <button data-tab="orch">智能编排调度</button>
+  <button data-tab="services">服务层</button>
+  <button data-tab="dataflow">服务流通</button>
+  <button data-tab="security">安全合规</button>
+</nav>
+
+<main>
+<!-- ============ 数据驾驶舱 ============ -->
+<section class="tab active" id="tab-cockpit">
+  <div class="ck-topbar">
+    <h3 class="sec-title ck-main-title">数据驾驶舱 · 医疗数据编织平台<small>第一+二部分 × 左-中-右指挥大屏：资源规模 / 元数据流 / 语义图谱 / 编排闭环（4s自动刷新）</small></h3>
+    <div class="ck-command-status"><span class="ck-live-dot"></span><b>LIVE</b><span>一页式 · 4s</span><i></i><span id="ckLastSync">--:--:--</span></div>
+  </div>
+
+  <div class="ck-kpis" id="ckKpis"></div>
+
+  <div class="card ck-loop-card"><div class="loop-strip" id="ckLoop"></div></div>
+
+  <div class="lcr">
+    <!-- 左：资源与分布 -->
+    <div class="col col-left lcr-col">
+      <section class="card lcr-card"><h3 class="sec-title">纳管数据源 · 实时规模<span class="hint" id="ckSrcHint"></span></h3><div id="ckSrcList" class="lcr-scroll"></div></section>
+      <section class="card lcr-card grow2"><h3 class="sec-title">诊断 Top8（就诊次数）<span class="hint">ICD-10 术语对齐</span></h3><div id="ckDiagBars" class="lcr-scroll"></div></section>
+    </div>
+
+    <!-- 中：芯心态势 -->
+    <div class="col col-center lcr-col">
+      <section class="card ck-map-card lcr-hero">
+        <div class="ck-panel-head"><h3 class="sec-title">数据要素分布态势</h3><span class="ck-map-badge">按业务科室 · 实时</span></div>
+        <div class="lcr-mid-body">
+          <div class="mid-stage-wrap"><canvas id="ckMapCv" role="img" aria-label="按业务科室展示医疗数据点分布的态势图"></canvas><div class="ck-map-caption"><span class="ck-map-dot"></span>数据点持续增长 · MedFabric</div></div>
+          <aside class="ck-map-side"><div class="ck-map-side-title">业务域数据排名<span>患者 / 就诊</span></div><div id="ckMapList" class="lcr-scroll"></div><div id="ckMapDetail" class="ck-map-detail lcr-scroll"></div></aside>
+        </div>
+      </section>
+      <section class="card lcr-card lcr-trend"><h3 class="sec-title">数据量增长趋势<span class="hint" id="ckRowsHint"></span></h3><canvas id="ckRowsCv"></canvas></section>
+    </div>
+
+    <!-- 右：运行与事件 -->
+    <div class="col col-right lcr-col">
+      <section class="card lcr-card"><h3 class="sec-title">事件类型分布<span class="hint">本会话</span></h3><div id="ckEvBars" class="lcr-scroll"></div></section>
+      <section class="card lcr-card grow1"><h3 class="sec-title">编排任务实时<span class="hint" id="ckTaskHint"></span></h3><div id="ckTasks" class="lcr-scroll"></div></section>
+      <section class="card lcr-card grow2"><h3 class="sec-title">最新元数据事件<span class="hint">SSE</span></h3><div class="feed" id="ckFeed"></div></section>
+    </div>
+  </div>
+</section>
+
+  <!-- ============ 架构总览 ============ -->
+<section class="tab" id="tab-arch">
+  <div class="grid-arch">
+    <div class="card">
+      <h3 class="sec-title">“资源层 — 编织层 — 服务层”分层架构<span class="hint">逻辑统一 · 物理分散（数据不搬迁、按需联邦访问）</span></h3>
+
+      <div class="layer" style="margin-bottom:0">
+        <div class="ltitle"><b>① 数据资源层</b><span class="hint">多源异构 · 物理分散存储（演示用本地模拟：Oracle/MySQL/DICOM/MongoDB/Kafka）</span></div>
+        <div class="chips" id="archSources"></div>
+      </div>
+
+      <div class="flow-arrow">▲▼ &nbsp;统一纳管 / 主动元数据发现 / 变更感知&nbsp; ▲▼</div>
+
+      <div class="layer">
+        <div class="ltitle"><b>② 数据编织层</b><span class="hint" id="archWeaveNote"></span></div>
+        <div class="mech-row">
+          <div class="mech core"><b>主动元数据驱动（核心）</b>周期扫描五源 → 结构/内容差异比对 → 事件流触发目录更新、图谱重建与质量告警。</div>
+          <div class="mech"><b>数据虚拟化支撑</b>基于发现结果构建逻辑视图，跨系统零拷贝联邦取数（Patient360 / 检索服务）。</div>
+          <div class="mech"><b>智能化编排为协同</b><span style="cursor:pointer;color:var(--cyan);text-decoration:underline dotted" onclick="switchTab('orch')">规则引擎 + P0&gt;P1&gt;P2 优先级任务队列，事件→动作闭环已上线（详见“智能编排调度”页）。</span></div>
+        </div>
+      </div>
+
+      <div class="flow-arrow">▲▼ &nbsp;服务化封装 / 统一 API 供给&nbsp; ▲▼</div>
+
+      <div class="layer" style="margin-bottom:0">
+        <div class="ltitle"><b>③ 数据服务层</b><span class="hint">可注册、可发现、可调用的数据能力（面向要素化方向）</span></div>
+        <div class="chips" id="archServices"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="stat-cards" id="archStats"></div>
+      <div class="card" style="flex:1">
+        <h3 class="sec-title">最近元数据动态</h3>
+        <div class="feed" id="archFeed" style="max-height:420px"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 元数据发现 ============ -->
+<section class="tab" id="tab-discovery">
+  <h3 class="sec-title">主动元数据发现引擎<span class="hint">扫描周期 4s · 结构变更 / 增量数据 / 质量异常 / 跨系统身份对齐</span>
+    &nbsp;<button class="act" onclick="runScan()">立即触发全量扫描</button></h3>
+  <div class="grid-disc">
+    <div>
+      <div class="src-grid" id="srcCards"></div>
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;flex-wrap:wrap">
+        <b>实时事件流（SSE 推送）</b><span class="fbtns" id="evFilters"></span></div>
+        <div class="feed" id="evFeed"></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card">
+        <h3 class="sec-title">发现机制说明</h3>
+        <p id="discExpl" style="color:var(--dim);line-height:1.9;font-size:13px"></p>
+      </div>
+      <div class="card"><h3 class="sec-title">事件类型统计（本会话）</h3><div class="kvgrid" id="evTypeStats"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 语义图谱 ============ -->
+<section class="tab" id="tab-graph">
+  <h3 class="sec-title">统一语义建模 · 知识图谱<span class="hint">点击患者节点可跳转 Patient360；边带身份对齐置信度（虚线越实=置信越高）</span></h3>
+  <div class="grid-graph">
+    <div id="graphWrap">
+      <canvas id="gcv"></canvas>
+      <div class="legend" id="gLegend"></div>
+      <div class="gtip" id="gTip"></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="card"><h3 class="sec-title">实体类型与语义映射<span class="hint">物理字段 → 统一语义属性（目录自动维护）</span></h3>
+        <div class="map-list" id="mapList"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 虚拟查询 ============ -->
+<section class="tab" id="tab-query">
+  <h3 class="sec-title">数据虚拟化 · Patient360 联邦视图<span class="hint">零拷贝：各源保持原位，逻辑关联整合后按需取数（附来源溯源与耗时）</span></h3>
+  <div class="qrow card">
+    <input id="pInput" placeholder="输入患者ID或姓名（如 P0042 / 王），回车直接查询" style="width:300px" autocomplete="off">
+    <button class="act" onclick="loadPatient360()">生成 Patient360</button>
+    <span id="pStatus" style="color:var(--dim);font-size:12.5px"></span>
+  </div>
+  <div id="pSearchList"></div>
+  <div class="qrow card">
+    <input id="dInput" placeholder="跨源诊断检索（如：高血压 / I10）" style="width:340px">
+    <button class="ghost" onclick="runDiagSearch()">术语对齐检索</button>
+  </div>
+  <div id="diagOut"></div>
+  <div id="p360Out"></div>
+</section>
+
+<!-- ============ 智能编排调度（第二部分） ============ -->
+<section class="tab" id="tab-orch">
+  <h3 class="sec-title">智能化编排与智能调度<span class="hint">规则驱动“事件→动作” + 180s定时巡检；P0&gt;P1&gt;P2 优先级队列 · 任务血缘：触发事件 → 任务tid → 反馈</span>
+    &nbsp;<button class="act" onclick="runPatrol()">手动执行一次全源巡检</button></h3>
+  <div class="grid-disc">
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card"><h3 class="sec-title">编排规则<span class="hint">点击右侧按钮启停，命中统计实时更新</span></h3><div id="orchRules" style="display:flex;flex-direction:column;gap:9px"></div></div>
+      <div class="card"><h3 class="sec-title">治理元数据 · 访问控制登记<span class="hint">全生命周期主动元数据维度：结构 / 字段语义 / 质量 / 血缘 + 分级脱敏策略</span></h3><div id="orchGov"></div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="stat-cards" id="orchStats"></div>
+      <div class="card"><h3 class="sec-title">任务执行流<span class="hint">queued → running → done/failed（最多保留60条）</span></h3><div class="feed" id="taskFeed" style="max-height:520px"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 服务层 ============ -->
+<section class="tab" id="tab-services">
+  <h3 class="sec-title">数据服务目录（要素化方向预览）<span class="hint">将编织能力封装为可注册、可发现、可调用的标准接口，调用计入运行统计</span></h3>
+  <div class="grid-svc" id="svcCards"></div>
+  <div class="card" id="svcOut">
+    <h3 class="sec-title">最近调用结果<span class="hint" id="svcMeta"></span></h3>
+    <div id="svcWaterfall" style="display:none;margin-bottom:10px"></div><div id="svcProvenance" style="display:none;font-size:12.5px;color:#cbd5e1;background:#0b1626;border:1px solid #1c2f4a;border-radius:8px;padding:7px 10px;margin-bottom:10px"></div>
+    <pre class="jsonbox" id="svcJson"></pre>
+  </div>
+</section>
+
+<!-- ============ 第三部分：数据服务与流通 ============ -->
+<section class="tab" id="tab-dataflow">
+  <h3 class="sec-title">数据服务与流通模式<span class="hint">服务抽象 → 组合供给 → 跨域协同 → 价值反馈（第三部分研究内容）</span></h3>
+  <div class="sec-stat" id="dfMetrics"></div>
+  <div class="card" style="margin-bottom:12px;border-color:#1c4a3a"><h3 class="sec-title">实时数据流通<span class="hint">后台自主调用 · 跨主体计量与价值反馈（无需点击，自行生长）</span></h3><div id="dfTicker" style="max-height:260px;overflow:auto"></div></div>
+  <div class="card" style="margin-bottom:12px">
+    <h3 class="sec-title">服务登记与发布<span class="hint">把数据资源、语义标签、质量属性和调用边界封装为可发现服务</span></h3>
+    <div class="form-grid">
+      <label>服务ID<input id="dfRegId" value="SVC-COHORT-DEMO"></label>
+      <label>服务名称<input id="dfRegName" value="科研队列脱敏服务"></label>
+      <label>数据分级<select id="dfRegClass"><option value="L2">L2 · 内部</option><option value="L3" selected>L3 · 敏感</option><option value="L4">L4 · 高度敏感</option></select></label>
+    </div>
+    <button class="act" style="margin-top:9px" onclick="registerDemoService()">登记并发布服务</button><span id="dfRegMsg" class="hint" style="margin-left:10px"></span>
+  </div>
+  <div class="security-grid">
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card"><h3 class="sec-title">服务目录与运行价值<span class="hint">注册、发现、调用、复用、质量评价</span></h3><div class="registry-table" id="dfServices"></div></div>
+      <div class="card"><h3 class="sec-title">最近流通记录<span class="hint">跨主体调用、授权结果、脱敏状态、响应性能</span></h3><div class="feed" id="dfCirculation" style="max-height:300px"></div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card"><h3 class="sec-title">服务组合供给<span class="hint">按场景动态编排服务链</span></h3><div id="dfFlows"></div></div>
+      <div class="card"><h3 class="sec-title">组合运行结果<span class="hint">服务链各阶段取数瀑布 + 血缘</span></h3><div id="dfWaterfall" style="display:none;margin-bottom:10px"></div><div id="dfProvenance" style="display:none;font-size:12.5px;color:#cbd5e1;background:#0b1626;border:1px solid #1c2f4a;border-radius:8px;padding:7px 10px;margin-bottom:10px"></div><pre class="jsonbox" id="dfOut" style="display:none;max-height:330px"></pre></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 第四部分：安全保障 ============ -->
+<section class="tab" id="tab-security">
+  <h3 class="sec-title">安全保障与合规治理<span class="hint">分级分类 → 动态授权 → 全链路审计 → 风险预警处置（第四部分研究内容）</span></h3>
+  <div class="sec-stat" id="secStats"></div>
+  <div class="security-grid">
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card"><h3 class="sec-title">数据分级分类与保护策略<span class="hint">敏感级别、使用范围、动态脱敏方式</span></h3><div id="secAssets"></div></div>
+      <div class="card"><h3 class="sec-title">风险预警处置<span class="hint">发现—响应—追溯—复盘</span></h3><div id="secRisks"></div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card"><h3 class="sec-title">动态授权策略评估<span class="hint">基于角色、用途、资产分级和跨域标志实时决策</span></h3>
+        <div class="form-grid" style="grid-template-columns:1fr 1fr">
+          <label>角色<select id="secRole"><option value="analyst">数据分析师</option><option value="clinician">临床医生</option><option value="researcher">科研人员</option><option value="operator">平台运维</option></select></label>
+          <label>用途<select id="secPurpose"><option value="research">科研分析</option><option value="care">临床诊疗</option><option value="quality">质量治理</option><option value="operations">平台运维</option></select></label>
+          <label>数据资产<select id="secAsset"></select></label>
+          <label style="padding-top:9px"><input id="secCrossOrg" type="checkbox" style="width:auto;margin-right:6px">跨组织调用</label>
+        </div>
+        <button class="act" style="margin-top:10px" onclick="evaluateAccess()">评估访问请求</button><div id="secDecision"></div>
+      </div>
+      <div class="card"><h3 class="sec-title">全链路审计<span class="hint">访问主体、用途、决策、脱敏和处置依据可追溯</span></h3><div class="feed" id="secAudit" style="max-height:340px"></div></div>
+    </div>
+  </div>
+</section>
+
+<footer>南京大学 · 《基于数据编织技术的数据基础设施创新路径研究》课题13 —— 医疗数据编织平台原型 · 第一至四部分功能演示<br>
+演示环境：五套医疗数据源（HIS/LIS/PACS/EMR/IoT）均为本地模拟；主动元数据扫描周期4秒，实时业务流持续注入。</footer>
+</main>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const esc = x => String(x ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+setInterval(() => { $("#clock").textContent = new Date().toTimeString().slice(0,8); }, 1000);
+$$("#tabsNav button").forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+function switchTab(id){
+  $$("#tabsNav button").forEach(b => b.classList.toggle("active", b.dataset.tab === id));
+  $$(".tab").forEach(t => t.classList.toggle("active", t.id === "tab-" + id));
+  document.body.classList.toggle("cockpit-mode", id === "cockpit");
+  if (id === "graph") requestAnimationFrame(resizeCanvas);
+  if (id === "cockpit") loadCockpit();
+  if (id === "orch") loadOrch();
+  if (id === "dataflow") loadDataServices();
+  if (id === "security") loadSecurity();
+  try{ history.replaceState(null, "", "#" + id); }catch(e){}
+}
+document.body.classList.add("cockpit-mode");
+
+/* ---------------- SSE 事件流 ---------------- */
+let lastSeq = 0;
+const evCounts = {};
+function initStream(){
+  const es = new EventSource("/api/stream?after=0");
+  es.onopen = () => $("#feedDot").classList.add("on");
+  es.onerror = () => $("#feedDot").classList.remove("on");
+  es.onmessage = m => {
+    let ev; try{ ev = JSON.parse(m.data); }catch(e){ return; }
+    if (ev.seq <= lastSeq) return;
+    lastSeq = Math.max(lastSeq, ev.seq);
+    pushEvent(ev);
+  };
+}
+function eventBadge(etype){
+  const map = {data_update:["数据增量","var(--cyan)"], schema_change:["结构变更","var(--amber)"],
+               quality_anomaly:["质量异常","var(--rose)"], semantic_link_discovered:["语义链接","var(--violet)"],
+               catalog_built:["目录纳管","var(--teal)"], service_invoked:["服务调用","#64748b"]};
+  const [t,c] = map[etype] || [etype,"#94a3b8"];
+  return `<span class="tag-ev" style="border:1px solid ${c};color:${c}">${t}</span>`;
+}
+function pushEvent(ev){
+  evCounts[ev.etype] = (evCounts[ev.etype]||0)+1;
+  const html = `<div class="ev et-${esc(ev.etype)}"><span class="t">${esc(ev.ts)}</span> ${eventBadge(ev.etype)} <b>${esc(ev.title)}</b><div class="d">${esc(ev.detail||"")}</div></div>`;
+  for (const feedId of ["#archFeed","#evFeed","#ckFeed"]){
+    const f = $(feedId); if (!f) continue;
+    f.insertAdjacentHTML("afterbegin", html);
+    while (f.children.length > 80) f.lastChild.remove();
+  }
+  renderEvTypeStats();
+}
+function renderEvTypeStats(){
+  $("#evTypeStats").innerHTML = Object.entries(evCounts).map(([k,v]) =>
+    `<div class="kv"><div class="k">${esc(k)}</div><div class="v" style="color:var(--cyan)">${v}</div></div>`).join("") || '<span style="color:var(--dim)">暂无事件</span>';
+}
+
+/* ---------------- 架构总览 & 源状态轮询 ---------------- */
+let OV = null;
+async function loadOverview(){
+  try{ OV = await (await fetch("/api/overview")).json(); }catch(e){ return; }
+  renderArchSources(); renderSrcCards(); renderStats(); renderArchServices();
+}
+function renderArchSources(){
+  $("#archSources").innerHTML = OV.sources.map(s =>
+    `<span class="chip"><b>${esc(s.name)}</b><span class="k">${esc(s.engine)} · ${s.tables}表/${(s.rows||0).toLocaleString()}行</span></span>`).join("");
+  const totalRows = OV.sources.reduce((a,s)=>a+(s.rows||0),0);
+  $("#archWeaveNote").textContent = `已纳管逻辑表 ${OV.sources.reduce((a,s)=>a+s.tables,0)} 张 · ${(totalRows/1000).toFixed(1)}k 行物理记录保持原位`;
+}
+function renderArchServices(){ $("#archServices").innerHTML = (SERVICES||[]).map(s=>`<span class="chip"><b>${esc(s.name)}</b><span class="k">${s.id}</span></span>`).join(""); }
+async function loadServices(silent){
+  const d=await (await fetch("/api/services")).json(); SERVICES=d.services||[];
+  $("#archServices").innerHTML = SERVICES.map(s=>`<span class="chip"><b>${esc(s.name)}</b><span class="k">${s.id}</span></span>`).join("");
+  if(!silent) renderSvcCards(d);
+}
+function renderStats(){
+  const c = OV.counts;
+  $("#archStats").innerHTML = [
+    ["纳管数据源", OV.sources.length], ["跨系统总记录", (OV.sources.reduce((a,s)=>a+(s.rows||0),0)/1000).toFixed(1)+"k"],
+    ["元数据事件累计", c.meta_events], ["语义实体类型", 6], ["患者/就诊规模", c.patients+"/"+c.visits]
+  ].map(([k,v]) => `<div class="stat-card"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join("");
+}
+function renderSrcCards(){
+  $("#srcCards").innerHTML = OV.sources.map(s => `
+    <div class="card src-card">
+      <div class="top"><b style="font-size:13.5px;color:#fff">${esc(s.name)}</b>
+        <span class="badge" style="${s.status==="online"?"color:var(--green);border-color:rgba(52,211,153,.4)":""}">● ${s.status}</span></div>
+      <div style="font-size:12px;color:var(--dim);line-height:1.7">${esc(s.desc)}<br><span class="k">${esc(s.location)}</span><br>
+        逻辑表 <b style="color:#fff">${s.tables}</b> · 行 <b style="color:#fff">${(s.rows||0).toLocaleString()}</b> · 最近扫描 ${esc(s.last_scan)}</div>
+    </div>`).join("");
+}
+
+/* ---------------- 元数据发现页 ---------------- */
+const FILTERS = [["all","全部"],["data_update","数据增量"],["schema_change","结构变更"],["quality_anomaly","质量异常"],["semantic_link_discovered","语义链接"]];
+let activeFilter = "all";
+function renderFilters(){
+  $("#evFilters").innerHTML = FILTERS.map(([k,t]) => `<button class="${activeFilter===k?"on":""}" onclick="setFilter('${k}')">${t}</button>`).join("");
+}
+window.setFilter = k => { activeFilter=k; renderFilters(); };
+async function runScan(){
+  const r = await (await fetch("/api/discovery/run",{method:"POST",body:JSON.stringify({})})).json();
+  (r.events||[]).forEach(pushEvent);
+}
+
+/* ---------------- 语义图谱（Canvas 力导向） ---------------- */
+let G = {nodes:[],edges:[],byId:{}};
+const gState = {alpha:1, hover:null};
+async function loadGraph(){
+  const d = await (await fetch("/api/graph?patients=40")).json();
+  G.nodes = d.nodes.map(n => ({...n, x:(Math.random()-.5)*320+360, y:(Math.random()-.5)*300+300, vx:0, vy:0}));
+  G.edges = d.edges; G.byId = {}; G.nodes.forEach(n=>G.byId[n.id]=n);
+  gState.alpha = 1; startGraphLoop();
+  $("#gLegend").innerHTML = Object.entries(d.stats.by_type).map(([t,c]) => {
+    const meta = (CATALOG?.entity_types||{})[t] || {};
+    return `<div><i style="background:${meta.color||"#888"}"></i>${esc(meta.label||t)} ×${c}</div>`;}).join("");
+}
+let CATALOG = null, graphLoopOn = false;
+async function loadCatalog(){
+  CATALOG = await (await fetch("/api/catalog")).json();
+  $("#mapList").innerHTML = CATALOG.field_map.map(f => `
+    <div class="map-item"><b style="color:${f.color}">${esc(f.label)}</b>
+      <span style="color:var(--dim);font-size:12px"> ${esc(f.desc)}（${f.mappings.length} 个字段映射）</span>
+      <div class="mchips">${f.mappings.map(m=>`<span class="mchip">${esc(m.source+"."+m.table+"."+m.column)} → ${esc(m.attr)}</span>`).join("")}</div></div>`).join("");
+}
+function resizeCanvas(){
+  const cv = $("#gcv"), w = $("#graphWrap"); if(!w) return;
+  const dpr = window.devicePixelRatio||1;
+  cv.width = w.clientWidth*dpr; cv.height = w.clientHeight*dpr;
+  cv.getContext("2d").setTransform(dpr,0,0,dpr,0,0); drawGraphFrame();
+}
+function startGraphLoop(){ if(!graphLoopOn){ graphLoopOn=true; requestAnimationFrame(graphTick); } }
+function graphTick(){
+  if (!document.querySelector("#tab-graph.active")) { graphLoopOn=false; return; }
+  tickPhysics(); drawGraphFrame();
+  if (gState.alpha > 0.015 || gState.hover) requestAnimationFrame(graphTick); else graphLoopOn = false;
+}
+function tickPhysics(){
+  const N=G.nodes, E=G.edges, a=gState.alpha;
+  for (const n of N){ n.fx=0; n.fy=0; }
+  const step = N.length>260?2:1;
+  for(let i=0;i<N.length;i+=step)for(let j=i+step;j<N.length;j+=step){
+    let dx=N[i].x-N[j].x, dy=N[i].y-N[j].y, d2=dx*dx+dy*dy||1;
+    if(d2<48400){ const f=Math.min(90/d2,.5)*a; N[i].fx+=dx*f; N[i].fy+=dy*f; N[j].fx-=dx*f; N[j].fy-=dy*f; }
+  }
+  for(const e of E){ const s=G.byId[e.s], t=G.byId[e.t]; if(!s||!t) continue;
+    let dx=t.x-s.x, dy=t.y-s.y, d=Math.sqrt(dx*dx+dy*dy)||1;
+    const f=(d-70)*.012*a; s.fx+=dx/d*f; s.fy+=dy/d*f; t.fx-=dx/d*f; t.fy-=dy/d*f; }
+  const W=$("#graphWrap").clientWidth, H=$("#graphWrap").clientHeight;
+  for(const n of N){
+    if(n.type==="patient"){ n.vx=(n.vx+n.fx*.9)*.86 + (Math.random()-.5)*.05*a; n.vy=(n.vy+n.fy*.9)*.86 + (Math.random()-.5)*.05*a; }
+    else { n.vx=(n.vx+n.fx*1.4)*.72 + (Math.random()-.5)*.3*a; n.vy=(n.vy+n.fy*1.4)*.72 + (Math.random()-.5)*.3*a; }
+    n.x=Math.max(16,Math.min(W-16,n.x+n.vx)); n.y=Math.max(16,Math.min(H-16,n.y+n.vy));
+  }
+  gState.alpha*=.985;
+}
+function drawGraphFrame(){
+  const cv=$("#gcv"); if(!cv) return; const ctx=cv.getContext("2d");
+  const W=$("#graphWrap").clientWidth, H=$("#graphWrap").clientHeight;
+  ctx.clearRect(0,0,W,H);
+  for(const e of G.edges){ const s=G.byId[e.s], t=G.byId[e.t]; if(!s||!t) continue;
+    const hot = gState.hover && (gState.hover===e.s||gState.hover===e.t);
+    ctx.strokeStyle = hot ? "rgba(34,211,238,.55)" : `rgba(90,120,170,${.16+.2*e.conf})`;
+    ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(s.x,s.y); ctx.lineTo(t.x,t.y); ctx.stroke(); }
+  for(const n of G.nodes){ const meta=(CATALOG?.entity_types||{})[n.type]||{};
+    const r=n.type==="patient"?6.5:4, hov=gState.hover===n.id;
+    if(n.type!=="patient" && !hov) ctx.globalAlpha=.85;
+    ctx.fillStyle=meta.color||"#888"; ctx.beginPath(); ctx.arc(n.x,n.y,r,0,7); ctx.fill(); ctx.globalAlpha=1;
+    if(hov){ ctx.strokeStyle="#2563eb"; ctx.lineWidth=1.4; ctx.beginPath(); ctx.arc(n.x,n.y,r+3,0,7); ctx.stroke(); }
+    if((n.type==="patient"||hov)){ ctx.fillStyle=hov?"#1d4ed8":"#4d6685"; ctx.font="10.5px sans-serif"; ctx.fillText(n.label.slice(0,16), n.x+r+4, n.y+3); }
+  }
+}
+$("#gcv").addEventListener("mousemove", ev => {
+  const r=$("#gcv").getBoundingClientRect(); const mx=ev.clientX-r.left, my=ev.clientY-r.top;
+  let best=null,bd=120; for(const n of G.nodes){ const d=(n.x-mx)**2+(n.y-my)**2; if(d<bd){bd=d;best=n;} }
+  gState.hover = best?best.id:null; startGraphLoop();
+  const tip=$("#gTip");
+  if(best){ tip.style.display="block"; tip.style.left=Math.min(r.width-190,mx+14)+"px"; tip.style.top=(my+12)+"px";
+    const meta=CATALOG?.entity_types[best.type]||{};
+    tip.innerHTML=`<b>${esc(best.label)}</b><br><span style="color:var(--dim)">${esc(meta.label||best.type)} · ${esc(best.id)}${best.type==="patient"?"<br>点击跳转 Patient360":""}</span>`; }
+  else tip.style.display="none";
+});
+$("#gcv").addEventListener("click", () => { if(gState.hover && G.byId[gState.hover]?.type==="patient"){ jumpToPatient(G.byId[gState.hover].id.split(":")[1]); }});
+
+/* ---------------- Patient360 虚拟查询 ---------------- */
+let PATIENTS=[], SERVICES=[];
+async function loadPatients(){ const d=await (await fetch("/api/patients?limit=400")).json(); PATIENTS=d.patients||[]; }
+$("#pInput").addEventListener("input", e => {
+  const q=e.target.value.trim(); if(q.length<1){ $("#pSearchList").style.display="none"; return;}
+  const hits=PATIENTS.filter(p=>(p.name&&p.name.includes(q))||p.id.toLowerCase().includes(q.toLowerCase())).slice(0,12);
+  const box=$("#pSearchList");
+  box.innerHTML=hits.map(h=>`<div onclick='pickPatient("${h.id}")'><b>${esc(h.name)}</b> <span style="color:var(--dim)">${esc(h.id)} · ${esc(h.gender||"")} · ${esc(h.last_dept||"-")}</span></div>`).join("");
+  box.style.display=hits.length?"block":"none";
+});
+$("#pInput").addEventListener("keydown", e => { if(e.key==="Enter"){ $("#pSearchList").style.display="none"; loadPatient360(); } });
+window.pickPatient = id => { $("#pInput").value=id; $("#pSearchList").style.display="none"; loadPatient360(); };
+function jumpToPatient(pid){ switchTab("query"); pickPatient(pid); }
+
+async function loadPatient360(){
+  const pid=$("#pInput").value.trim().toUpperCase(); if(!pid) return;
+  $("#pStatus").textContent="联邦查询中…";
+  try{
+    const r=await (await fetch("/api/query/patient_360",{method:"POST",body:JSON.stringify({patient_id:pid})})).json();
+    if(r.error){ $("#pStatus").textContent=r.error; return; }
+    renderP360(r); $("#pStatus").textContent=`已完成 · 全链路 ${r.total_latency_ms} ms（零拷贝）`;
+  }catch(e){ $("#pStatus").textContent="请求失败："+e.message; }
+}
+
+function sparkline(rows, key, color){
+  const vals=(rows||[]).map(r=>r[key]).filter(v=>v!=null); if(!vals.length) return "";
+  const w=420,h=56,pad=4, min=Math.min(...vals), max=Math.max(...vals)||1;
+  const pts=vals.map((v,i)=>[pad+i*(w-2*pad)/Math.max(1,vals.length-1), h-pad-(max===min?(h-2*pad)/2:(v-min)*(h-2*pad)/(max-min))]);
+  return `<svg width="${w}" height="${h}" style="background:#070d1b;border-radius:8px"><polyline fill="none" stroke="${color}" stroke-width="1.6" points="${pts.map(p=>p.join(",")).join(" ")}"/></svg>`;
+}
+function renderP360(r){
+  const basic=(r.sections?.[0]?.rows||[])[0]||{};
+  let html=`<div class="card phead"><b>${esc(basic.name||r.patient_id)}</b>
+    <span>ID ${esc(r.patient_id)} · ${esc(basic.gender||"")} · 出生 ${esc(String(basic.birth_date||"").replace("-",""))}年</span>
+    <span>参保 ${esc(basic.insurance_type||"-")}</span><span>证件(脱敏) ${esc(basic.id_card_masked||"-")}</span>`;
+  if(r.semantic_tags?.length){ html+=`<div class="tagchips">${r.semantic_tags.map(t=>`<span class="dtag">${esc(t.code)} · ${esc(t.name)}</span>`).join("")}<span style="color:var(--dim);font-size:12px;align-self:center">↑ ICD-10 术语自动对齐（主动元数据打标）</span></div>`;}
+  html+=`</div><div class="secs">`;
+  for(const s of (r.sections||[])){
+    if(s.title==="基本信息") continue;   // already rendered in header card
+    let body="";
+    if(s.title.startsWith("就诊")){
+      const rows=(s.rows||[]).map(v=>`<tr><td>${esc(v.time)}</td><td>${esc(v.vtype)}·${esc(v.dept)}</td><td>${esc(v.doctor)}</td>
+        <td style="color:#d8ccff">${esc(v.code||"")} ${esc(v.diag||"")}</td>
+        <td>${(v.orders||[]).slice(0,6).map(o=>`<span class="mchip">${esc(o.otype)}:${esc(o.item)}</span>`).join(" ")}</td></tr>`).join("");
+      body=`<table class="tbl"><tr><th>时间</th><th>类型/科室</th><th>医生</th><th>诊断(ICD-10)</th><th>医嘱（节选）</th></tr>${rows||"<tr><td colspan=5 style='color:var(--dim)'>无就诊记录</td></tr>"}</table>`; }
+    else if(s.title==="检验结果"){
+      const rows=(s.rows||[]).map(t=>`<div style="margin-bottom:9px"><b style="font-size:12.8px">${esc(t.test_no)}</b> <span style="color:var(--dim);font-size:12px">· ${esc(t.sample_type)} · ${esc(t.collect_time)}</span>
+        <table class="tbl" style="margin-top:4px"><tr><th>项目</th><th>结果值</th><th>单位</th><th>参考区间</th></tr>${t.items.map(i=>`<tr><td>${esc(i.name)} ${i.flag?`<span class="flag-${i.flag}">${i.flag==="H"?"↑":"↓"}</span>`:""}</td><td style="color:#fff">${esc(i.value)}</td><td>${esc(i.unit||"-")}</td><td style="color:var(--dim)">${esc(i.ref||"-")}</td></tr>`).join("")}</table></div>`).join("");
+      body=(s.rows?.length?rows:"<span style='color:var(--dim);font-size:12.5px'>暂无检验记录</span>") + ` <span class="vbadge">异常项 ${s.abnormal_items||0} 个（H/L 标记）</span>`; }
+    else if(s.title==="影像检查"){
+      body=(s.rows?.length) ? `<table class="tbl"><tr><th>DICOM UID</th><th>模态</th><th>部位</th><th>日期</th><th>文件数/大小</th><th>报告摘要</th></tr>${s.rows.map(x=>`<tr><td style="font-family:Consolas,monospace;font-size:11.5px">${esc(String(x.uid).slice(0,24))}…</td><td>${esc(x.modality)}</td><td>${esc(x.body_part)}</td><td>${esc(x.date)}</td><td>${x.files} / ${x.size_mb}MB</td><td style="color:var(--dim)">${esc(String(x.report||"").slice(0,46))}…</td></tr>`).join("")}</table>`
+        : "<span style='color:var(--dim);font-size:12.5px'>暂无影像检查（DICOM 文件保持原位，不搬迁）</span>"; }
+    else if(s.title.startsWith("生命体征")){ const rows=s.rows||[]; 
+      body=rows.length?`<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+        <div>${sparkline(rows,"hr","#fb7185")}<div class="k" style="color:var(--dim);font-size:12px;margin-top:3px">心率 bpm（近${rows.length}点）</div></div>
+        <div>${sparkline(rows,"spo2","#2dd4bf")}<div class="k" style="color:var(--dim);font-size:12px;margin-top:3px">血氧 %</div></div>
+        <div class="kvgrid"><div class="kv"><div class="k">平均心率</div><div class="v">${s.stats?.avg_hr??"-"}</div></div>
+        <div class="kv"><div class="k">峰值心率</div><div class="v" ${s.stats&&s.stats.max_hr>=125?'style="color:var(--rose)"':""}>${s.stats?.max_hr??"-"}${s.stats&&s.stats.max_hr>=125?" ⚠":""}</div></div>
+        <div class="kv"><div class="k">最低血氧</div><div class="v">${s.stats?.min_spo2??"-"}</div></div></div></div>`
+      :"<span style='color:var(--dim);font-size:12.5px'>该患者暂无接入监护（仅住院/急诊纳管）</span>"; }
+    else if(s.title==="病历文书"){ const d=(s.rows||[])[0]; 
+      body=d?`<div class="dossier">${["chief_complaint","present_illness_history","physical_exam"].filter(k=>d&&d[k]).map(k=>{const names={chief_complaint:"主诉",present_illness_history:"现病史",physical_exam:"查体"};return `<p><b class="kk">${names[k]}</b>${esc(d[k])}</p>`}).join("")}
+        <p><b class="kk">初步诊断</b>${(d.preliminary_diagnosis||[]).map(x=>`<span class="dtag" style="margin-right:5px">${esc(x)}</span>`).join("")}</p>
+        ${d.treatment_plan?`<p><b class="kk">诊疗计划</b>${esc(d.treatment_plan)}</p>`:""}</div>`:(s.note||"<span style='color:var(--dim);font-size:12.5px'>暂无病历文书登记</span>"); }
+    html+=`<div class="card sec"><h3 class="sec-title">${esc(s.title)} <span class="vbadge">${esc(s.mode)}</span></h3>
+      <div class="meta"><span>${esc(s.source_name)}</span><code style="font-size:11.5px;color:#7dd3fc;background:#0a1826;padding:2px 7px;border-radius:5px">${esc(s.physical||"")}</code>
+      <span>取数耗时 ${s.latency_ms} ms</span></div>${body}</div>`;
+  }
+  html+="</div>";
+  $("#p360Out").innerHTML=html;
+}
+
+/* ---------------- 诊断术语检索 ---------------- */
+window.runDiagSearch = async () => {
+  const q=$("#dInput").value.trim(); if(!q) return;
+  const r=await (await fetch("/api/search?q="+encodeURIComponent(q))).json();
+  $("#diagOut").innerHTML=`<div class="card" style="margin-bottom:12px"><h3 class="sec-title">跨源检索结果（HIS诊断 ⋈ LIS术语对齐）</h3>
+    ${(r.diagnosis?.length)?`<table class="tbl"><tr><th>患者</th><th>ID</th><th>ICD-10</th><th>诊断</th><th>就诊次数</th><th>最近就诊</th></tr>${r.diagnosis.map(d=>`<tr style="cursor:pointer" onclick='pickPatient("${d.pid}")'><td>${esc(d.name)}</td><td>${esc(d.pid)}</td><td>${esc(d.code)}</td><td>${esc(d.diag)}</td><td>${d.count}</td><td style="color:var(--dim)">${esc(d.last)}</td></tr>`).join("")}</table>`:"<span style='color:var(--dim);font-size:12.5px'>未检索到匹配诊断（试试：高血压 / 糖尿病）</span>"}
+    ${(r.lab_terms?.length)?`<div class="mchips" style="margin-top:9px">${r.lab_terms.map(t=>`<span class="mchip">LIS术语对齐：${esc(t.code)} ${esc(t.name)}（${esc(t.unit)}）</span>`).join("")}</div>`:""}
+  </div>`;
+};
+
+/* ---------------- 服务层 ---------------- */
+function renderSvcCards(d){
+  $("#svcCards").innerHTML=(d.services||[]).map(s=>`<div class="card svc-card">
+    <h4>${esc(s.name)}<span class="svc-id">${s.id}</span></h4>
+    <div class="svc-desc">${esc(s.desc)}</div>
+    ${(s.params||[]).map(p=>`<div class="prow"><span><code style="color:#7dd3fc">${esc(p.k)}</code>${p.req?" *":""} ${esc(p.type)}</span><span style="color:var(--dim)">示例：${JSON.stringify(p.demo??"")}</span></div>`).join("")||'<div class="prow"><span>无参数</span><span></span></div>'}
+    <button class="ghost" style="margin-top:9px;width:100%" onclick='invokeSvc("${s.id}")'>▶ 调用示例（自动填演示参数）</button></div>`).join(""); 
+}
+window.invokeSvc = async sid => {
+  const svc=(SERVICES||[]).find(s=>s.id===sid); if(!svc) return;
+  const params={}; (svc.params||[]).forEach(p=>{ if(p.req&&p.demo!=null) params[p.k]=p.demo; else if(typeof p.demo==="string" && p.demo!=="") params[p.k]=p.demo; });
+  if(sid==="SVC-VITALS-TREND"){ const d=await (await fetch("/api/patients?limit=1")).json(); params.patient_id=d.patients?.[0]?.id||""; }
+  $("#svcMeta").textContent=`${sid} · ${new Date().toTimeString().slice(0,8)}（演示参数：${JSON.stringify(params)}）`;
+  const r=await (await fetch("/api/services/"+sid+"/invoke",{method:"POST",body:JSON.stringify(params)})).json();
+  $("#svcOut").style.display="block";
+if(!r.error){ renderWaterfall(r.waterfall||[], "svcWaterfall"); renderProvenance((typeof r.result==="string")?r.result:((r.result&&r.result.provenance)||""), "svcProvenance"); } else { var w=$("#svcWaterfall"),p=$("#svcProvenance"); if(w)w.style.display="none"; if(p)p.style.display="none"; }
+  $("#svcJson").textContent=r.error?`ERROR: ${r.error}`:JSON.stringify(r,null,1);
+};
+
+/* ---------------- 第三部分：服务注册、组合供给、价值反馈 ---------------- */
+let DF=null, SEC=null;
+function renderDfMetrics(){ const m=DF?.metrics||{}; $("#dfMetrics").innerHTML=[
+  ["已登记服务",m.registered||0,"可发现服务单元", "#22d3ee"], ["已发布",m.published||0,"生命周期状态", "#34d399"],
+  ["流通调用",m.calls||0,"跨主体计量", "#a78bfa"], ["价值积分",m.value_points||0,"性能 × 复用反馈", "#fbbf24"],
+  ["平均响应",(m.avg_latency_ms??"-")+" ms","服务供给效率", "#fb7185"]].map(x=>kpiCard(x[0],x[1],x[2],x[3])).join(""); }
+function renderDfServices(){ const ss=DF?.services||[]; $("#dfServices").innerHTML=`<table class="tbl"><tr><th>服务</th><th>场景/分级</th><th>生命周期</th><th>调用</th><th>复用/质量</th><th>动作</th></tr>${ss.map(s=>{const st=s.stats||{};return `<tr><td><b style="color:#fff">${esc(s.name)}</b><br><code style="color:var(--cyan);font-size:11px">${esc(s.id)}</code></td><td>${esc(s.scene||"-")}<br><span class="vbadge">${esc(s.class||"-")}</span></td><td><span class="flow-status">${esc(s.lifecycle||"-")}</span></td><td>${st.calls||0}<br><span style="color:var(--dim)">${st.avg_ms??"-"} ms</span></td><td>${s.reuse_score||0} / ${s.quality_score||0}</td><td><button class="ghost" style="padding:4px 8px" onclick='runGovernedSvc("${esc(s.id)}")'>调用</button></td></tr>`}).join("")}</table>`; }
+function renderDfFlows(){ $("#dfFlows").innerHTML=(DF?.flows||[]).map(f=>`<div class="asset-row"><b>${esc(f.name)}</b> <span class="flow-status">${esc(f.status)}</span><div class="muted">${esc(f.scene)} · ${esc(f.mode)}<br>${esc(f.description)}</div><div class="mchips">${f.service_ids.map(x=>`<span class="mchip">${esc(x)}</span>`).join("<span style='color:var(--cyan)'> → </span>")}</div><button class="ghost" style="margin-top:7px" onclick='runFlow("${esc(f.id)}")'>▶ 运行组合流</button></div>`).join(""); }
+function renderDfCirculation(){ const rows=DF?.recent_circulation||[]; $("#dfCirculation").innerHTML=rows.length?rows.map(x=>`<div class="ev et-data_update"><div class="t">${esc(x.ts)} · ${esc(x.actor)} · ${esc(x.latency_ms)} ms</div><b>${esc(x.service_id)} ${x.flow_id?`· ${esc(x.flow_id)}`:""}</b><div class="d">${esc(x.decision)} · ${x.masked?"已动态脱敏":"授权字段"} · 价值积分 ${x.value_points}</div></div>`).join(""):'<span style="color:var(--dim)">暂无流通记录——运行一个组合流开始演示</span>'; }
+async function loadDataServices(){ try{ DF=await (await fetch("/api/data-services")).json(); renderDfMetrics(); renderDfServices(); renderDfFlows(); renderDfCirculation(); }catch(e){} }
+/* ---- 联邦瀑布 & 实时流通（第三部分可视化，全部复用现有接口）---- */
+var WF_SRC_COLOR = { HIS:"#22d3ee", LIS:"#fbbf24", PACS:"#a78bfa", EMR:"#94a3b8", IoT:"#fb7185" };
+function wfColor(src){ var s=String(src||"").toLowerCase(); for(var k in WF_SRC_COLOR){ if(s.indexOf(String(k).toLowerCase())>=0) return WF_SRC_COLOR[k]; } return "#22d3ee"; }
+window.renderWaterfall = function(wf, boxId){ var el=document.getElementById(boxId); if(!el) return;
+  if(!wf||!Array.isArray(wf)||!wf.length){ el.style.display="none"; el.innerHTML=""; return; }
+  var max=1e-6; for(var i=0;i<wf.length;i++){ if((wf[i].ms||0)>max) max=wf[i].ms||0; }
+  var html='<h3 class="sec-title" style="margin-bottom:9px">联邦取数瀑布<span class="hint">各源原位计算 + 跨系统回传耗时（零拷贝）</span></h3>';
+  for(var i=0;i<wf.length;i++){ var x=wf[i]; var total=x.ms||0; var pct=Math.max(2, total/max*100); var cpct=(total>0)?((x.compute_ms||0)/total*pct):0; var c=wfColor(x.source);
+    html+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">'
+      +'<span style="width:52px;text-align:right;font-weight:700;color:'+c+';font-size:12.5px">'+esc(x.source)+'</span>'
+      +'<div style="flex:1;background:#0e1a2b;border-radius:6px;height:20px;overflow:hidden;display:flex">'
+        +'<div title="原位计算 '+(x.compute_ms||0)+' ms" style="width:'+cpct.toFixed(1)+'%;height:100%;background:'+c+';opacity:.9"></div>'
+        +'<div title="跨系统回传 '+(x.transfer_ms||0)+' ms" style="width:'+Math.max(0,pct-cpct).toFixed(1)+'%;height:100%;background:'+c+';opacity:.35"></div></div>'
+      +'<span style="width:74px;font-size:12px;color:#cbd5e1">'+total+' ms</span></div>'; }
+  el.style.display="block"; el.innerHTML=html; };
+window.renderProvenance = function(prov, boxId){ var el=document.getElementById(boxId); if(!el) return;
+  var s=(typeof prov==="string")?prov:((prov&&prov.provenance)||"");
+  if(s){ el.style.display="block"; el.innerHTML='<span style="color:#22d3ee">血缘：</span>'+esc(s); } else { el.style.display="none"; el.innerHTML=""; } };
+async function pollCirc(){ try{ var d=await (await fetch("/api/circulation/recent?limit=8")).json(); renderCircTicker(d);}catch(e){} }
+function renderCircTicker(d){ var box=document.getElementById("dfTicker"); if(!box) return; var m=d.metrics||{}; var rows=(d.recent||[]);
+  var head='<div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">'
+    +'<span style="width:9px;height:9px;border-radius:50%;background:#34d399;display:inline-block;box-shadow:0 0 8px #34d399"></span>'
+    +'<b style="color:#fff">实时数据流通</b><span class="muted" id="dfTickerMeta">累计调用 '+(m.circ_calls||0)+' · 价值积分 '+ (m.value_points||0)+'</span></div>';
+  var body = rows.length ? '' : '<span style="color:var(--dim)">等待首次自主流通…</span>';
+  for(var i=0;i<rows.length && i<8;i++){ var x=rows[i];
+    body += '<div class="ev et-data_update"><div class="t">'+esc(x.ts)+' · '+esc(x.actor)+'</div><b>'+esc(x.service_id)+(x.flow_id?' <span style="color:#22d3ee">· '+esc(x.flow_id)+'</span>':'')
+      +'</b><div class="d">'+esc(x.decision||"-")+(x.masked?" · 已脱敏":"")+ ' · '+(x.latency_ms)+' ms · 价值积分 +'+(x.value_points||0)+'</div></div>'; }
+  box.innerHTML=head+body; }
+pollCirc(); setInterval(pollCirc, 2500);
+window.registerDemoService=async()=>{ const body={id:$("#dfRegId").value.trim(),name:$("#dfRegName").value.trim(),class:$("#dfRegClass").value,scene:"科研分析",scope:"院内/科研",lifecycle:"published",tags:["可发现","可组合","脱敏"]}; const r=await (await fetch("/api/data-services/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); $("#dfRegMsg").textContent=r.error||"登记成功，已进入服务目录"; loadDataServices(); };
+window.runGovernedSvc=async sid=>{ const payload={actor:{id:"demo-analyst",role:"analyst",org:"院内研究中心"},purpose:"research",params:{patient_id:"P0042",group_by:"dept",top_n:5}}; const r=await (await fetch("/api/data-services/"+sid+"/invoke",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})).json(); renderWaterfall(r.waterfall||[], "dfWaterfall"); renderProvenance((r.result&&r.result.provenance)||"", "dfProvenance"); $("#dfOut").style.display="block"; $("#dfOut").textContent=JSON.stringify(r,null,1); loadDataServices(); loadSecurity(); };
+window.runFlow=async flowId=>{ const r=await (await fetch("/api/data-services/flows/"+flowId+"/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({actor:{id:"researcher-01",role:"researcher",org:"联合科研中心"},purpose:"research",cross_org:true,params:{patient_id:"P0315",top_n:5}})})).json(); (function(){var st=(r.stages||[]),wf=null,prov="";for(var i=0;i<st.length;i++){if(st[i].result&&st[i].result.waterfall&&!wf)wf=st[i].result.waterfall;if(st[i].result&&st[i].result.provenance)prov=st[i].result.provenance;}renderWaterfall(wf||[],"dfWaterfall");renderProvenance(prov||(r.flow?(r.flow.name+":"+(r.flow.service_ids||[]).join(" -> ")):""),"dfProvenance");})(); $("#dfOut").style.display="block"; $("#dfOut").textContent=JSON.stringify(r,null,1); loadDataServices(); loadSecurity(); };
+
+/* ---------------- 第四部分：分级、授权、审计、风险处置 ---------------- */
+function renderSecStats(){ const m=SEC?.metrics||{}; $("#secStats").innerHTML=[["审计记录",m.total||0,"全链路留痕","#22d3ee"],["授权通过",m.allow||0,"允许/脱敏允许","#34d399"],["动态脱敏",m.masked||0,"最小必要输出","#fbbf24"],["已阻断",m.denied||0,"策略引擎拒绝","#fb7185"],["开放风险",m.open_risks||0,"待复核处置","#a78bfa"]].map(x=>kpiCard(x[0],x[1],x[2],x[3])).join(""); }
+function renderSecAssets(){ const as=SEC?.assets||[]; $("#secAssets").innerHTML=as.map(a=>`<div class="asset-row"><b>${esc(a.name)}</b> <span class="vbadge">${esc(a.class)} · ${esc(a.class==='L4'?'高度敏感':a.class==='L3'?'敏感':a.class==='L2'?'内部':'公开')}</span><span class="muted"> ${esc(a.source)} · ${esc(a.scope)}</span><div class="muted">字段：${a.fields.map(esc).join(" · ")}<br>保护：${esc(a.masking)}</div></div>`).join(""); $("#secAsset").innerHTML=as.map((a,i)=>`<option value="${esc(a.id)}" ${i===1?'selected':''}>${esc(a.name)} · ${esc(a.class)}</option>`).join(""); }
+function renderSecAudit(){ const rows=SEC?.audit||[]; $("#secAudit").innerHTML=rows.length?rows.map(x=>`<div class="ev ${x.decision==='deny'?'et-quality_anomaly':'et-data_update'}"><div class="t">${esc(x.ts)} · ${esc(x.id)}</div><b>${esc(x.action)} · ${esc(x.target)}</b><div class="d">${esc(x.actor)} · <span style="color:${x.decision==='deny'?'var(--rose)':'var(--green)'}">${esc(x.decision)}</span>${x.masked?' · 已脱敏':''}<br>${esc(x.reason)}</div></div>`).join(""):'<span style="color:var(--dim)">暂无审计记录</span>'; }
+function renderSecRisks(){ const rows=SEC?.risks||[]; $("#secRisks").innerHTML=rows.length?rows.map(x=>`<div class="risk-row ${x.status==='resolved'?'resolved':''}"><b>${esc(x.level==='high'?'高风险':'中风险')} · ${esc(x.target)}</b> <span style="color:var(--dim)">${esc(x.status)}</span><div>${esc(x.summary)}</div>${x.status==='open'?`<button class="ghost" style="padding:3px 8px;margin-top:5px" onclick='resolveRisk("${esc(x.id)}")'>标记已处置</button>`:""}</div>`).join(""):'<span style="color:var(--dim)">当前无开放风险</span>'; }
+async function loadSecurity(){ try{ SEC=await (await fetch("/api/security/overview")).json(); renderSecStats(); renderSecAssets(); renderSecAudit(); renderSecRisks(); }catch(e){} }
+window.evaluateAccess=async()=>{ const body={actor:{id:"ui-actor",role:$("#secRole").value,org:"联合科研中心"},asset_id:$("#secAsset").value,purpose:$("#secPurpose").value,cross_org:$("#secCrossOrg").checked,operation:"query"}; const r=await (await fetch("/api/security/authorize",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); const cls=r.allowed?(r.masked?"allow":"allow"):"deny"; $("#secDecision").innerHTML=`<div class="decision ${cls}"><b>${r.allowed?(r.masked?"允许访问 · 动态脱敏":"允许访问 · 授权字段"):"拒绝访问"}</b><br>${esc(r.reason)}<br><span style="color:var(--dim)">审计号 ${esc(r.audit_id||"-")} · ${esc((r.trace||[]).join(" → "))}</span></div>`; loadSecurity(); };
+window.resolveRisk=async rid=>{ await fetch("/api/security/risks/"+rid+"/resolve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({note:"平台界面完成人工复核并关闭风险"})}); loadSecurity(); };
+
+/* ---------------- 数据驾驶舱（第一+二部分） ---------------- */
+const SRC_COLORS = {his:"#22d3ee", lis:"#fbbf24", pacs:"#a78bfa", emr:"#94a3b8", iot:"#fb7185"};
+let CK=null, ORCHD=null;
+function fmtK(v){ v=+v||0; return Math.abs(v)>=1000 ? (v/1000).toFixed(1)+"k" : String(Math.round(v)); }
+function fitCanvas(cv){ const dpr=window.devicePixelRatio||1, w=cv.clientWidth, h=cv.clientHeight; if(!w) return null; cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr); const ctx=cv.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0); return {ctx,w,h}; }
+
+function kpiCard(k,v,sub,color){ return `<div class="kpi" style="--kc:${color}"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div>${sub?`<div class="s">${esc(sub)}</div>`:""}</div>`; }
+function renderKpis(){ if(!CK) return; const k=CK.kpis, L=CK.loop||{}; $("#ckKpis").innerHTML=[
+  ["纳管数据源", `${k.sources_online}/${k.source_total}`, "全部在线 · 物理分散原位存储", "#34d399"],
+  ["跨系统总记录", fmtK(k.total_rows), (k.rows_per_min!=null?`+${fmtK(k.rows_per_min)}/min`:"实时增长中"), "#22d3ee"],
+  ["元数据事件累计", k.events_total, (k.ev_per_min!=null?`${Math.round(k.ev_per_min)}条/min · SSE推送`:"SSE推送中"), "#a78bfa"],
+  ["语义图谱规模", `${k.graph_nodes}节点·${k.graph_edges}边`, "随流式数据持续生长", "#2dd4bf"],
+  ["编排任务完成", L.tasks_done||0, (L.success_rate!=null?`成功率 ${(L.success_rate*100).toFixed(1)}% · P0>P1>P2调度`:"P0>P1>P2优先级调度"), "#fbbf24"],
+  ["服务调用累计", CK.svc_calls_total||0, (CK.svc_avg_ms!=null?`平均 ${CK.svc_avg_ms} ms（含编排内部调用）`:"统一接口供给"), "#fb7185"],
+  ["纳管患者", k.patients, "跨系统身份对齐覆盖", "#22d3ee"],
+  ["就诊事件累计", k.visits, "HIS · ICD-10术语打标", "#94a3b8"]].map(([kk,vv,su,c])=>kpiCard(kk,vv,su,c)).join(""); }
+
+function renderLoopStrip(){ if(!CK) return; const L=CK.loop||{}, k=CK.kpis;
+  const steps=[
+    ["感知 · 元数据事件", fmtK(k.events_total)+" 累计", (k.ev_per_min!=null?`${Math.round(k.ev_per_min)}条/min`:"4s周期扫描"), "#22d3ee"],
+    ["规则匹配", "已触发 "+(L.triggered||0), "5类编排规则可启停", "#a78bfa"],
+    ["任务调度", "队列深度 "+(L.queue_depth||0), "优先级 P0>P1>P2 串行执行", "#fbbf24"],
+    ["智能执行", (L.tasks_done||0)+" 完成", L.success_rate!=null?`成功率 ${(L.success_rate*100).toFixed(1)}%`:"任务血缘全程可溯", "#34d399"],
+    ["服务调用", String(L.svc_calls||CK.svc_calls_total||0), "含 SVC-FED-QUERY 联邦查询", "#fb7185"],
+    ["反馈 · 元数据回写", (L.feedback_events||0)+" orchestrated_action", "执行结果进入事件流（闭环）", "#2dd4bf"]];
+  $("#ckLoop").innerHTML=steps.map(([t,v,su,c],i)=>`${i?`<div class="loop-arrow">→</div>`:""}<div class="loop-step" style="--lc:${c}"><div class="t">${esc(t)}</div><div class="v">${esc(v||"-")}</div>${su?`<div class="s">${esc(su)}</div>`:""}</div>`).join(""); }
+
+function drawRowsChart(){ const cv=$("#ckRowsCv"); if(!cv||!CK) return; const f=fitCanvas(cv); if(!f) return;
+  const {ctx,w,h}=f; ctx.clearRect(0,0,w,h);
+  const hist=(CK.history&&CK.history.length)?CK.history:[{wall:"--",by_source:{}}];
+  const order=["his","lis","pacs","emr","iot"], names={his:"HIS",lis:"LIS",pacs:"PACS",emr:"EMR",iot:"IoT"};
+  const series=order.map(sid=>({name:names[sid],color:SRC_COLORS[sid],data:hist.map(pt=>(pt.by_source&&pt.by_source[sid])||0)}));
+  if(hist.length<2){ ctx.fillStyle="#718198"; ctx.font="12px sans-serif"; ctx.fillText("采样中（每4秒一个点）…", w/2-60, h/2); return; }
+  const small=h<130; const padL=(small?42:54),padR=(small?12:16),padT=(small?20:28),padB=(small?17:24), N=Math.max(2,...series.map(x=>x.data.length));
+  let maxV=-Infinity,minV=Infinity; series.forEach(x=>x.data.forEach(v=>{maxV=Math.max(maxV,v);minV=Math.min(minV,v);}));
+  const span=(maxV-minV)||Math.abs(maxV)*0.1||1; minV-=span*0.12; maxV+=span*0.15;
+  const X=i=>padL+(w-padL-padR)*(i/(N-1)), Y=v=>h-padB-(h-padT-padB)*((v-minV)/(maxV-minV));
+  ctx.font="11px sans-serif";
+  for(let gi=0;gi<=4;gi++){const v=minV+(maxV-minV)*gi/4, y=Y(v);
+    ctx.strokeStyle="#dce6f2";ctx.beginPath();ctx.moveTo(padL,y);ctx.lineTo(w-padR,y);ctx.stroke();
+    ctx.fillStyle="#718198";ctx.fillText(fmtK(v),6,y+3);}
+  series.forEach(x=>{ if(!x.data.length) return; ctx.strokeStyle=x.color; ctx.lineWidth=1.8; ctx.beginPath(); x.data.forEach((v,i)=>i?ctx.lineTo(X(i),Y(v)):ctx.moveTo(X(0),Y(v))); ctx.stroke(); });
+  let lx=padL; series.forEach(x=>{ const v=x.data[x.data.length-1]; const txt=`${x.name} ${fmtK(v)}`;
+    ctx.fillStyle=x.color; ctx.fillRect(lx,8,9,3); ctx.fillText(txt,lx+12,12); lx+=ctx.measureText(txt).width+40; });
+  const L=String(hist[0].wall), R=new Date().toTimeString().slice(0,5);
+  ctx.fillStyle="#718198"; ctx.fillText(L,padL,h-8);
+  const midT=hist[Math.floor(hist.length/2)].wall||""; if(midT) ctx.fillText(String(midT),(w-padL-padR)/2+padL-14,h-8);
+  ctx.textAlign="right"; ctx.fillText(R,w-padR,h-8); ctx.textAlign="left";
+  $("#ckRowsHint").textContent=`窗口 ${L} → ${R} · 各源行数保持原位增长（零搬迁，逻辑集中管理）`; }
+
+let CK_MAP_NODES=[], CK_MAP_SELECTED=0;
+function mapPalette(){ const s=getComputedStyle(document.documentElement); return ["--cyan","--teal","--violet","--amber","--rose","--green"].map(k=>s.getPropertyValue(k).trim()); }
+function drawDeptMap(){
+  const cv=$("#ckMapCv"); if(!cv||!CK) return; const f=fitCanvas(cv); if(!f) return;
+  const {ctx,w,h}=f, data=(CK.dept_distribution||[]).slice(0,8), colors=mapPalette();
+  if(!data.length){ ctx.fillStyle="#718198";ctx.font="13px sans-serif";ctx.fillText("业务域数据聚合中…",w/2-65,h/2);return; }
+  const cx=w*.49, cy=h*.5, orbit=Math.min(w*.35,h*.35), maxP=Math.max(...data.map(x=>x.patients),1), minP=Math.min(...data.map(x=>x.patients));
+  ctx.clearRect(0,0,w,h); ctx.lineWidth=1;
+  [0.34,0.58,0.82,1].forEach(r=>{ctx.strokeStyle="#dce8f5";ctx.beginPath();ctx.arc(cx,cy,orbit*r,0,Math.PI*2);ctx.stroke();});
+  ctx.strokeStyle="#c6dbf2";ctx.setLineDash([3,6]);ctx.beginPath();ctx.moveTo(cx-orbit-25,cy);ctx.lineTo(cx+orbit+25,cy);ctx.moveTo(cx,cy-orbit-25);ctx.lineTo(cx,cy+orbit+25);ctx.stroke();ctx.setLineDash([]);
+  CK_MAP_NODES=data.map((d,i)=>{ const angle=-Math.PI/2+i*(Math.PI*2/data.length), rr=orbit*(.78+(i%3)*.065); return {...d,x:cx+Math.cos(angle)*rr,y:cy+Math.sin(angle)*rr,r:15+(d.patients-minP)/Math.max(1,maxP-minP)*15,color:colors[i%colors.length]}; });
+  CK_MAP_NODES.forEach((n,i)=>{ ctx.strokeStyle="rgba(99,145,201,.28)";ctx.lineWidth=1.2;ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(n.x,n.y);ctx.stroke();
+    ctx.globalAlpha=.12;ctx.fillStyle=n.color;ctx.beginPath();ctx.arc(n.x,n.y,n.r+10,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+    ctx.fillStyle=n.color;ctx.beginPath();ctx.arc(n.x,n.y,n.r,0,Math.PI*2);ctx.fill();
+    if(i===CK_MAP_SELECTED){ctx.strokeStyle="#1d4ed8";ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(n.x,n.y,n.r+5,0,Math.PI*2);ctx.stroke();}
+    const points=Math.max(2,Math.min(10,Math.round(n.data_points/Math.max(1,maxP/2))));
+    for(let j=0;j<points;j++){const a=j*6.283/points;ctx.globalAlpha=.58;ctx.fillStyle=n.color;ctx.beginPath();ctx.arc(n.x+Math.cos(a)*(n.r+6),n.y+Math.sin(a)*(n.r+6),2.2,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;}
+    ctx.fillStyle="#385777";ctx.font="12px Microsoft YaHei, sans-serif";ctx.textAlign=n.x<cx?"right":n.x>cx?"left":"center";ctx.fillText(n.name,n.x+(n.x<cx?-n.r-10:n.x>cx?n.r+10:0),n.y+4);
+  });
+  ctx.textAlign="center";ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(cx,cy,38,0,Math.PI*2);ctx.fill();ctx.strokeStyle="#a9c8ec";ctx.lineWidth=2;ctx.stroke();ctx.fillStyle="#1d4ed8";ctx.font="700 12px Microsoft YaHei, sans-serif";ctx.fillText("DATA",cx,cy-2);ctx.fillStyle="#718198";ctx.font="10px Microsoft YaHei, sans-serif";ctx.fillText("FABRIC",cx,cy+13);ctx.textAlign="left";
+  renderMapList(); renderMapDetail();
+  if(!cv.dataset.bound){cv.dataset.bound="1";cv.addEventListener("click",e=>{const rect=cv.getBoundingClientRect(),mx=(e.clientX-rect.left)/rect.width*cv.clientWidth,my=(e.clientY-rect.top)/rect.height*cv.clientHeight;let best=-1,bd=Infinity;CK_MAP_NODES.forEach((n,i)=>{const dd=(n.x-mx)**2+(n.y-my)**2;if(dd<bd){bd=dd;best=i;}});if(best>=0&&bd<55**2)selectMapNode(best);});}
+}
+function renderMapList(){ const el=$("#ckMapList"); if(!el) return; el.innerHTML=CK_MAP_NODES.map((n,i)=>`<button type="button" class="ck-map-row ${i===CK_MAP_SELECTED?"active":""}" onclick="selectMapNode(${i})"><span class="rank">${String(i+1).padStart(2,"0")}</span><span class="label"><b>${esc(n.name)}</b></span><span class="counts">${n.patients} / ${n.visits}</span></button>`).join(""); }
+function renderMapDetail(){ const el=$("#ckMapDetail"), n=CK_MAP_NODES[CK_MAP_SELECTED]; if(!el||!n) return; el.innerHTML=`<b>${esc(n.name)}</b> · 业务域数据构成<br><span class="detail-num">${n.patients}</span>患者 <span class="detail-num">${n.visits}</span>次就诊<br><span style="color:#c77a08">${n.abnormal_items}</span>项异常检验 · <span style="color:#7357c8">${n.studies}</span>项影像检查`; }
+window.selectMapNode=i=>{CK_MAP_SELECTED=Math.max(0,Math.min(i,Math.max(0,CK_MAP_NODES.length-1)));drawDeptMap();};
+
+function barsHTML(items,color){ const max=Math.max(1,...items.map(i=>i.value)); return items.length? items.map(it=>`<div class="barrow"><div class="bl"><span>${esc(it.label)}</span><b style="color:#fff">${it.value}</b></div><div class="bt"><div class="bf" style="width:${Math.max(2,it.value/max*100)}%;background:${it.color||color}"></div></div></div>`).join("") : '<span style="color:var(--dim)">暂无数据</span>'; }
+function renderEvBars(){ if(!CK) return; const ET_COLORS={data_update:"var(--cyan)",schema_change:"var(--amber)",quality_anomaly:"var(--rose)",semantic_link_discovered:"var(--violet)",catalog_built:"var(--teal)",service_invoked:"#64748b",orchestrated_action:"var(--green)"};
+  const items=Object.entries(CK.ev_by_type||{}).map(([k,v])=>({label:k,value:v,color:ET_COLORS[k]||"#94a3b8"})).sort((a,b)=>b.value-a.value);
+  $("#ckEvBars").innerHTML=barsHTML(items,"var(--cyan)"); }
+function renderDiagBars(){ if(!CK) return; const items=(CK.top_diags||[]).map(d=>({label:d.name,value:d.n})); $("#ckDiagBars").innerHTML=barsHTML(items,"#a78bfa"); }
+
+const ST_LABEL={queued:"排队",running:"执行中",done:"完成",failed:"失败"};
+function taskItemHTML(t){ const seq=(t.trigger&&t.trigger.seq!=null)?String(t.trigger.seq):"-";
+  return `<div class="task-item st-${esc(t.status)}"><span class="tt">${esc(t.ts)}</span> <span class="pri ${esc(t.priority)}">${esc(t.priority)} · ${ST_LABEL[t.status]||""}</span> <b>${esc(t.name)}</b><div class="d">${esc((t.summary&&t.summary!=="")?t.summary:"等待调度…")}</div><div class="d" style="margin-top:2px;font-size:11.5px;color:#64748b">${esc(t.tid||"-")}${(t.latency_ms!=null)?` · ${t.latency_ms} ms`:""} ← 触发事件#${esc(seq)} (${esc((t.trigger&&t.trigger.etype)||"")})</div></div>`; }
+function renderCkTasks(){ if(!CK) return; const ts=CK.recent_tasks||[]; $("#ckTaskHint").textContent=`队列深度 ${ (CK.loop&&CK.loop.queue_depth)!=null?CK.loop.queue_depth:0 } · 最近完成任务`;
+  $("#ckTasks").innerHTML=(ts.length?ts:[{tid:"-",status:"queued",priority:"P2",name:"等待首个编排任务…",summary:"",trigger:{seq:null,etype:"-"},ts:new Date().toTimeString().slice(0,8)}]).map(taskItemHTML).join(""); }
+
+function renderCkSources(){ if(!CK) return; const el=$("#ckSrcList"); if(!el) return; const list=(CK.sources||[]).slice().sort((a,b)=>(b.rows||0)-(a.rows||0)); const max=Math.max(1,...list.map(s=>s.rows||0));
+  el.innerHTML=list.length?list.map(s=>{const c=SRC_COLORS[s.id]||"#94a3b8";return `<div class="lcr-src-row"><span class="dotc" style="background:${c}"></span><span class="nm">${esc(s.name)}</span><span class="bar"><i style="width:${Math.max(2,(s.rows/max)*100)}%;background:${c}"></i></span><b class="val">${fmtK(s.rows)}</b></div>`}).join(""):'<span style="color:var(--dim)">无数据</span>';
+  const hint=$("#ckSrcHint"); if(hint)hint.textContent=(CK.kpis&&CK.kpis.total_rows!=null)?("合计 "+fmtK(CK.kpis.total_rows)+" 行"):""; }
+
+async function loadCockpit(){ try{ CK=await (await fetch("/api/cockpit")).json();
+  renderKpis(); renderLoopStrip(); renderCkSources(); drawRowsChart(); drawDeptMap(); renderEvBars(); renderDiagBars(); renderCkTasks(); $("#ckLastSync").textContent=CK.ts||new Date().toTimeString().slice(0,8); }catch(e){} }
+
+/* ---------------- 智能编排调度（第二部分） ---------------- */
+function renderOrchRules(){ if(!ORCHD||!ORCHD.rules) return; $("#orchRules").innerHTML=ORCHD.rules.map(r=>`<div class="orch-rule ${r.enabled?"":"st-off"}"><div class="top"><b>${esc(r.id)} · ${esc(r.name)}</b><span style="display:flex;gap:8px;align-items:center"><span class="pri-${esc(r.priority)}">${esc(r.priority)}</span><button class="tgl ${r.enabled?"":"off"}" onclick="toggleRule('${r.id}')">${r.enabled?"已启用":"已停用"}</button></span></div>触发：${esc(r.trigger_desc)}<br>动作：<span style="color:#9fb2d4">${esc(r.action)}</span><div class="prow"><span>命中 ${ (r.stats&&r.stats.triggered)||0 } · 完成 ${ (r.stats&&r.stats.done)||0 }${(r.stats&&r.stats.avg_ms!=null)?` · 平均 ${r.stats.avg_ms} ms`:''}</span></div></div>`).join(""); }
+function renderGov(){ if(!ORCHD) return; $("#orchGov").innerHTML=Object.entries(ORCHD.governance||{}).map(([sid,g])=>`<div class="gov-row"><b>${esc(sid)}</b><span>分级：<span style="color:#fff">${esc(g["class"])}</span> · 脱敏：${esc(g.masking)}</span></div>`).join(""); }
+function renderOrchStats(){ const c=(ORCHD&&ORCHD.counters)||{}; $("#orchStats").innerHTML=[["任务总数",c.total??0],["成功率",c.success_rate!=null?(c.success_rate*100).toFixed(1)+"%":"-"],["平均时延",c.avg_ms!=null?c.avg_ms+" ms":"-"],["队列深度",(ORCHD&&ORCHD.queue_depth)??0]].map(([k,v])=>`<div class="stat-card"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join(""); }
+function renderTaskFeed(){ const ts=(ORCHD&&ORCHD.recent_tasks)||[]; $("#taskFeed").innerHTML=ts.length?ts.map(taskItemHTML).join(""):'<span style="color:var(--dim)">暂无任务——元数据事件命中规则后自动生成</span>'; }
+async function loadOrch(){ try{ ORCHD=await (await fetch("/api/orchestrator")).json(); renderOrchRules(); renderGov(); renderOrchStats(); renderTaskFeed(); }catch(e){} }
+window.toggleRule = async id => { await fetch(`/api/rules/${id}/toggle`,{method:"POST"}); loadOrch(); };
+window.runPatrol = async () => { const r=await (await fetch("/api/orchestrator/patrol",{method:"POST"})).json(); setTimeout(loadOrch, 800); };
+
+// 全局轮询：可见的重页面每4s刷新（与扫描周期对齐）
+setInterval(()=>{ if($("#tab-cockpit").classList.contains("active")) loadCockpit();
+                  if($("#tab-orch").classList.contains("active")) loadOrch();
+                  if($("#tab-dataflow").classList.contains("active")) loadDataServices();
+                  if($("#tab-security").classList.contains("active")) loadSecurity(); }, 4000);
+window.addEventListener("resize",()=>{ if(CK && $("#tab-cockpit").classList.contains("active")){ drawRowsChart(); drawDeptMap(); } });
+
+/* ---------------- 初始化 ---------------- */
+(async function init(){
+  renderFilters(); loadCockpit(); loadOrch(); loadGraph(); loadCatalog(); await loadPatients();
+  await loadServices(false);          // 服务目录先行（arch chips + services tab）
+  await loadDataServices(); loadSecurity();
+  await loadOverview(); setInterval(loadOverview, 8000);
+  $("#discExpl").innerHTML=`<b>主动元数据（Active Metadata）</b>：区别于静态目录，引擎每 <b>4秒</b>对五套源做<b>结构+内容双维指纹比对</b>——<br><br>
+    · <span style="color:var(--cyan)">增量感知</span>：行数/最新记录变化 → data_update 事件（含可读摘要）；<br>
+    · <span style="color:var(--amber)">Schema漂移</span>：新表/新列自动纳入目录并刷新语义映射；<br>
+    · <span style="color:var(--rose)">质量异常</span>：流式体征越界（HR≥125 / SpO₂≤93.5）→ 实时告警事件；<br>
+    · <span style="color:var(--violet)">身份对齐</span>：patient_id 在 ≥2 个源出现即建立语义链接并通知图谱。<br><br>
+    本演示中，StreamingSim 持续向各源注入新患者（IoT→HIS→LIS→PACS/EMR 依次落库），观察事件流可看到“<b style="color:#fff">数据尚未集中、关联已经发生</b>”的编织效果。`;
+  initStream(); resizeCanvas();
+  window.addEventListener("resize", ()=>{ if($("#tab-graph").classList.contains("active")) resizeCanvas(); });
+
+  // URL深链：#arch | #discovery | #graph | #query?pid=P0042&q=高血压&svc=SVC-PATIENT-360
+  const raw=(location.hash||"").replace(/^#/,"");
+  const [htab, qstr]=raw.split("?");
+  if(["cockpit","arch","discovery","graph","query","orch","services","dataflow","security"].includes(htab)) switchTab(htab);
+  const qp=new URLSearchParams(qstr||"");
+  const pid=qp.get("pid"), dq=qp.get("q"), svcId=qp.get("svc");
+  if(dq){ $("#dInput").value=dq; runDiagSearch(); }
+  if(pid){ $("#pInput").value=String(pid).toUpperCase(); loadPatient360(); }
+  if(svcId){ (SERVICES.length?Promise.resolve():new Promise(r=>setTimeout(r,1200))).then(()=>invokeSvc(svcId)); }
+})();
+</script>
+</body>
+</html>

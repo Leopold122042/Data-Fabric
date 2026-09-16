@@ -1,0 +1,9 @@
+@app.get("/api/circulation/recent")
+def circulation_recent(limit: int = 8):
+    with gov.lock:
+        recs = list(gov.circulation)[:max(1, min(int(limit), 50))]
+        circ_calls = sum(st["calls"] for st in gov.service_stats.values())
+        value_points = sum(st.get("value_points", 0) for st in gov.service_stats.values())
+    return {"recent": recs, "metrics": {"circ_calls": circ_calls, "value_points": value_points}}
+
+

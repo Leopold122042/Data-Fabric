@@ -1,0 +1,29 @@
+/* ---- 联邦瀑布 & 实时流通（第三部分可视化，全部复用现有接口）---- */
+var WF_SRC_COLOR = { HIS:"#22d3ee", LIS:"#fbbf24", PACS:"#a78bfa", EMR:"#94a3b8", IoT:"#fb7185" };
+function wfColor(src){ var s=String(src||"").toLowerCase(); for(var k in WF_SRC_COLOR){ if(s.indexOf(String(k).toLowerCase())>=0) return WF_SRC_COLOR[k]; } return "#22d3ee"; }
+window.renderWaterfall = function(wf, boxId){ var el=document.getElementById(boxId); if(!el) return;
+  if(!wf||!Array.isArray(wf)||!wf.length){ el.style.display="none"; el.innerHTML=""; return; }
+  var max=1e-6; for(var i=0;i<wf.length;i++){ if((wf[i].ms||0)>max) max=wf[i].ms||0; }
+  var html='<h3 class="sec-title" style="margin-bottom:9px">联邦取数瀑布<span class="hint">各源原位计算 + 跨系统回传耗时（零拷贝）</span></h3>';
+  for(var i=0;i<wf.length;i++){ var x=wf[i]; var total=x.ms||0; var pct=Math.max(2, total/max*100); var cpct=(total>0)?((x.compute_ms||0)/total*pct):0; var c=wfColor(x.source);
+    html+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">'
+      +'<span style="width:52px;text-align:right;font-weight:700;color:'+c+';font-size:12.5px">'+esc(x.source)+'</span>'
+      +'<div style="flex:1;background:#0e1a2b;border-radius:6px;height:20px;overflow:hidden;display:flex">'
+        +'<div title="原位计算 '+(x.compute_ms||0)+' ms" style="width:'+cpct.toFixed(1)+'%;height:100%;background:'+c+';opacity:.9"></div>'
+        +'<div title="跨系统回传 '+(x.transfer_ms||0)+' ms" style="width:'+Math.max(0,pct-cpct).toFixed(1)+'%;height:100%;background:'+c+';opacity:.35"></div></div>'
+      +'<span style="width:74px;font-size:12px;color:#cbd5e1">'+total+' ms</span></div>'; }
+  el.style.display="block"; el.innerHTML=html; };
+window.renderProvenance = function(prov, boxId){ var el=document.getElementById(boxId); if(!el) return;
+  var s=(typeof prov==="string")?prov:((prov&&prov.provenance)||"");
+  if(s){ el.style.display="block"; el.innerHTML='<span style="color:#22d3ee">血缘：</span>'+esc(s); } else { el.style.display="none"; el.innerHTML=""; } };
+async function pollCirc(){ try{ var d=await (await fetch("/api/circulation/recent?limit=8")).json(); renderCircTicker(d);}catch(e){} }
+function renderCircTicker(d){ var box=document.getElementById("dfTicker"); if(!box) return; var m=d.metrics||{}; var rows=(d.recent||[]);
+  var head='<div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">'
+    +'<span style="width:9px;height:9px;border-radius:50%;background:#34d399;display:inline-block;box-shadow:0 0 8px #34d399"></span>'
+    +'<b style="color:#fff">实时数据流通</b><span class="muted" id="dfTickerMeta">累计调用 '+(m.circ_calls||0)+' · 价值积分 '+ (m.value_points||0)+'</span></div>';
+  var body = rows.length ? '' : '<span style="color:var(--dim)">等待首次自主流通…</span>';
+  for(var i=0;i<rows.length && i<8;i++){ var x=rows[i];
+    body += '<div class="ev et-data_update"><div class="t">'+esc(x.ts)+' · '+esc(x.actor)+'</div><b>'+esc(x.service_id)+(x.flow_id?' <span style="color:#22d3ee">· '+esc(x.flow_id)+'</span>':'')
+      +'</b><div class="d">'+esc(x.decision||"-")+(x.masked?" · 已脱敏":"")+ ' · '+(x.latency_ms)+' ms · 价值积分 +'+(x.value_points||0)+'</div></div>'; }
+  box.innerHTML=head+body; }
+pollCirc(); setInterval(pollCirc, 2500);

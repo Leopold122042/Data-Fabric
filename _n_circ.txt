@@ -1,0 +1,55 @@
+# ---------------------------------------------------------------- 第三部分：自主数据流通 ticker（后台轮询不同主体按策略调用，产生真实计量与审计）
+CIRC_ACTORS = [
+    {"id": "researcher-b01", "role": "researcher", "org": "B院 · 联合科研中心"},
+    {"id": "analyst-a02", "role": "analyst", "org": "A院 · 临床数据中心"},
+    {"id": "clinician-c03", "role": "clinician", "org": "院内急诊科"},
+]
+CIRC_SVC_PARAMS = [
+    ("SVC-FED-QUERY", {"group_by": "dept", "top_n": 6}),
+    ("SVC-PATIENT-360", {"patient_id": "P0042"}),
+    ("SVC-LAB-RESULT", {"patient_id": "P0042", "limit_tests": 2}),
+]
+
+
+def _simulate_circulation_tick(i):
+    """后台自主流通：轮询不同主体按策略调用单个服务或组合流，写入真实流通计量并留痕。"""
+    actor = CIRC_ACTORS[i % len(CIRC_ACTORS)]
+    cross_org = actor["role"] == "researcher"
+    purpose = {"clinician": "care", "analyst": "operations", "researcher": "research"}[actor["role"]]
+    if i % 4 == 0:   # 每第 4 次跑一条科研队列组合流（两跳）
+        flow_id, targets = "FLOW-RESEARCH-COHORT", [("SVC-FED-QUERY", {"group_by": "dept", "top_n": 5}), ("SVC-LAB-RESULT", {"patient_id": "P0315", "limit_tests": 2})]
+    else:
+        flow_id = None; targets = [CIRC_SVC_PARAMS[i % len(CIRC_SVC_PARAMS)]]
+    last_rec, total_ms = None, 0.0
+    for sid, params in targets:
+        asset = SERVICE_ASSET.get(sid, "clinical_visit")
+        auth = gov.authorize(actor, asset, "flow_invoke", purpose, cross_org)
+        if not auth["allowed"]:
+            continue
+        t0 = time.perf_counter()
+        try:
+            result = _dispatch(sid, params); err = None
+        except Exception as exc:
+            result, err = {}, str(exc)[:160]
+        ms = round((time.perf_counter() - t0) * 1000, 2)
+        if auth["masked"]:
+            gov.mask_payload(result)
+        last_rec = gov.record_service(sid, latency_ms=ms, success=err is None, actor=str(actor.get("id")), flow_id=flow_id, masked=auth["masked"], decision=auth["decision"])
+        total_ms += ms
+    if last_rec:
+        publish([{"source_id": "service-flow", "etype": "data_circulation", "severity": "info",
+                  "title": "自主数据流通完成：%s" % (flow_id or targets[0][0]),
+                  "detail": "%s · %s · %.2f ms" % (actor.get("org"), actor.get("role"), total_ms)}])
+
+
+def _circulation_loop():
+    i = 0
+    while True:
+        time.sleep(5.5)
+        try:
+            if gov is not None and engine is not None:
+                _simulate_circulation_tick(i); i += 1
+        except Exception as exc:   # 守护线程不允许崩溃
+            print("[circ] error:", exc, flush=True)
+
+

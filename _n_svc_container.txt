@@ -1,0 +1,3 @@
+    <h3 class="sec-title">最近调用结果<span class="hint" id="svcMeta"></span></h3>
+    <div id="svcWaterfall" style="display:none;margin-bottom:10px"></div><div id="svcProvenance" style="display:none;font-size:12.5px;color:#cbd5e1;background:#0b1626;border:1px solid #1c2f4a;border-radius:8px;padding:7px 10px;margin-bottom:10px"></div>
+    <pre class="jsonbox" id="svcJson"></pre>
