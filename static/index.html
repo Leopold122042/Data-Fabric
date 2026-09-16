@@ -253,9 +253,9 @@ td[style*="#d8ccff"]{color:#41668f!important}
 @media(max-width:1280px){.ck-kpis{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:900px){.ck-map-layout{grid-template-columns:1fr}.ck-map-side{display:grid;grid-template-columns:1fr 1fr;column-gap:12px}.ck-map-side-title{grid-column:1/-1}.ck-map-detail{margin-top:8px}}
 @media(max-width:760px){header{padding:12px 16px}.logo small{display:none}nav{top:64px;padding:8px 14px}main{padding:18px 14px}.ck-kpis{grid-template-columns:repeat(2,1fr)}.kpi .v{font-size:20px}.ck-command-bar{align-items:flex-start;flex-direction:column}.ck-command-status{align-self:flex-end}.ck-map-stage{height:350px}.ck-map-side{display:block}}
-/* ---------- 驾驶舱全屏大屏：左-中-右指挥式布局，仅驾驶舱锁定一屏 ---------- */
-body.cockpit-mode{height:100dvh;overflow:hidden}
-body.cockpit-mode main{height:calc(100dvh - 142px);min-height:0;overflow:hidden;padding:12px 28px 14px}
+/* Keep the dashboard scrollable when its charts exceed the viewport. */
+body.cockpit-mode{min-height:100dvh;overflow-y:auto}
+body.cockpit-mode main{min-height:calc(100dvh - 142px);padding:12px 28px 14px}
 
 /* 顶部导航：标题 + LIVE */
 body.cockpit-mode .ck-topbar{flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px}
@@ -263,7 +263,7 @@ body.cockpit-mode .ck-main-title{margin:0;padding-left:12px;border-left:3px soli
 body.cockpit-mode .ck-main-title small{color:var(--dim);font-weight:400;font-size:12px;border-left:1px solid var(--line);padding-left:9px}
 
 /* KPI 指标带（一行 8 项） */
-body.cockpit-mode #tab-cockpit{height:100%;min-height:0;display:flex;flex-direction:column;gap:9px;overflow:hidden}
+body.cockpit-mode #tab-cockpit{min-height:0;display:flex;flex-direction:column;gap:9px}
 body.cockpit-mode .ck-kpis{flex:none;margin:0;grid-template-columns:repeat(8,1fr);gap:7px}
 body.cockpit-mode .kpi{padding:9px 11px}.cockpit-mode .kpi .v{font-size:20px;line-height:1.2}.cockpit-mode .kpi .s{display:-webkit-box;-webkit-line-clamp:1;overflow:hidden;font-size:10.3px}
 
@@ -272,7 +272,7 @@ body.cockpit-mode .ck-loop-card{flex:none;margin:0;padding:6px 12px;display:flex
 body.cockpit-mode .loop-strip{width:100%;height:auto;gap:6px;flex-wrap:nowrap}.cockpit-mode .loop-step{min-width:0;padding:6px 9px}.cockpit-mode .loop-step .t{font-size:11px;white-space:nowrap}.cockpit-mode .loop-step .v{font-size:15px}.cockpit-mode .loop-step .s{display:none}.cockpit-mode .loop-arrow{font-size:14px;padding:0 3px}
 
 /* 左-中-右三列 */
-body.cockpit-mode .lcr{flex:1;min-height:0;display:grid;grid-template-columns:minmax(238px,.9fr) minmax(0,1.75fr) minmax(250px,1.02fr);gap:9px}
+body.cockpit-mode .lcr{flex:none;height:max(780px,calc(100dvh - 340px));display:grid;grid-template-columns:minmax(238px,.9fr) minmax(0,1.75fr) minmax(250px,1.02fr);gap:9px}
 body.cockpit-mode .lcr-col{display:flex;flex-direction:column;gap:9px;min-height:0;min-width:0}
 body.cockpit-mode .lcr-card{margin:0;padding:10px 13px;display:flex;flex-direction:column;min-height:0;overflow:hidden;background:#fff;border:1px solid var(--line);border-radius:12px}
 body.cockpit-mode .lcr-card h3.sec-title{margin-bottom:7px;font-size:13.5px;line-height:1.4;padding-left:9px;border-left:3px solid #cbd8ea;color:#20385d;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
@@ -281,7 +281,7 @@ body.cockpit-mode .grow1{flex:1 1 auto}.cockpit-mode .grow2{flex:1.25 1 auto}
 body.cockpit-mode .lcr-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;padding-right:3px}
 
 /* 中柱：芯心态势图 */
-body.cockpit-mode .lcr-hero{flex:1.5 1 auto;display:flex;flex-direction:column;padding:12px 15px!important}
+body.cockpit-mode .lcr-hero{flex:1;min-height:0;margin:0;display:flex;flex-direction:column;padding:12px 15px!important}
 body.cockpit-mode .ck-panel-head{margin-bottom:8px}.cockpit-mode .ck-panel-head h3.sec-title{padding-left:9px;border-left:3px solid #cbd8ea;font-size:14px;color:#20385d;margin-bottom:2px}
 body.cockpit-mode .lcr-mid-body{flex:1;min-height:0;display:flex;gap:14px}
 body.cockpit-mode .mid-stage-wrap{flex:1 1 auto;min-width:0;height:auto;border:1px solid #dbe6f2;border-radius:13px;background:radial-gradient(circle at 50% 49%,rgba(219,234,254,.7),rgba(248,251,255,.94) 40%,#f8fbff 74%)}
@@ -289,8 +289,8 @@ body.cockpit-mode .mid-stage-wrap canvas{position:relative;z-index:1;width:100%;
 body.cockpit-mode .ck-map-side{flex:none;width:256px;display:flex;flex-direction:column;min-height:0;padding:4px 0}
 
 /* 中柱：趋势图 */
-body.cockpit-mode .lcr-trend{flex:1 1 auto;display:flex;flex-direction:column;min-height:96px}
-body.cockpit-mode #ckRowsCv{width:100%;height:auto;min-height:84px;flex:1 1 auto;display:block}
+body.cockpit-mode .lcr-trend{flex:none;display:flex;flex-direction:column}
+body.cockpit-mode #ckRowsCv{width:100%;height:240px;flex:none;display:block}
 
 /* 左柱：数据源列表 */
 .lcr-src-row{display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid #edf1f6;font-size:12.3px;color:#47617f}
@@ -301,6 +301,7 @@ body.cockpit-mode #ckRowsCv{width:100%;height:auto;min-height:84px;flex:1 1 auto
 /* 忍具：狭屏 / 站下 */
 @media(max-width:1280px) and (min-width:901px){body.cockpit-mode .lcr{grid-template-columns:minmax(212px,.86fr) minmax(0,1.65fr) minmax(226px,1fr)}.cockpit-mode #ckRowsCv{min-height:74px}.cockpit-mode .kpi .s{display:none}}
 @media(max-width:900px){body.cockpit-mode,body.cockpit-mode main{height:auto;overflow:auto}body.cockpit-mode main{padding:16px 16px}body.cockpit-mode #tab-cockpit{height:auto}.cockpit-mode .lcr{grid-template-columns:1fr;display:flex;flex-direction:column}.cockpit-mode .lcr-col,.cockpit-mode .lcr-card{min-height:auto;height:auto}.cockpit-mode .mid-stage-wrap{height:360px}body.cockpit-mode #ckRowsCv{height:240px}.cockpit-mode .kpi .s{display:block}}
+@media(max-width:900px){body.cockpit-mode .lcr{height:auto;display:flex;flex-direction:column}body.cockpit-mode .lcr-hero{flex:none}body.cockpit-mode .mid-stage-wrap{height:360px}}
 </style>
 </head>
 <body>
