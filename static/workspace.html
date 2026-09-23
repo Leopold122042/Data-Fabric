@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>管理总览 · MedFabric</title>
+  <link rel="stylesheet" href="/static/workspace.css">
+  <script defer src="/static/vendor/d3-7.9.0.min.js"></script>
+  <script defer src="/static/cockpit-model.js"></script>
+  <script defer src="/static/cockpit.js"></script>
+</head>
+<body class="mf-app">
+  <div class="mf-shell">
+    <aside class="mf-sidebar" aria-label="主导航">
+      <a class="mf-brand" href="/static/workspace.html"><span class="mf-brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>MedFabric</a>
+      <p class="mf-nav-label">医院数据工作空间</p>
+      <nav class="mf-nav">
+        <a class="is-active" href="/static/workspace.html" aria-current="page"><span aria-hidden="true">▦</span>管理总览</a>
+        <a href="/#discovery"><span aria-hidden="true">▤</span>数据资源</a>
+        <a href="/#query"><span aria-hidden="true">▣</span>患者全景</a>
+        <a href="/#services"><span aria-hidden="true">▱</span>数据服务</a>
+        <a href="/#orch"><span aria-hidden="true">≋</span>运行与治理</a>
+        <a href="/#security"><span aria-hidden="true">◇</span>安全与审计</a>
+      </nav>
+      <p class="mf-nav-label">更多能力</p>
+      <nav class="mf-nav mf-nav-secondary">
+        <a href="/#graph">关联与映射</a>
+        <a href="/#dataflow">服务组合与流通</a>
+        <a href="/#arch">平台说明</a>
+      </nav>
+      <div class="mf-sidebar-foot"><b>医院数据中心</b><span>研究演示工作空间</span><small>其他模块沿用现有页面</small></div>
+    </aside>
+
+    <main class="mf-main">
+      <header class="mf-topbar">
+        <div class="mf-breadcrumb">工作空间 <span>/</span> <b>管理总览</b></div>
+        <div class="mf-top-actions"><span class="mf-badge is-muted">模拟数据</span><a class="mf-button" href="/#cockpit" id="classic-link">切换旧版</a></div>
+      </header>
+      <div class="mf-content">
+        <div class="mf-heading"><div><h1>管理总览</h1><p class="mf-subtitle">了解数据覆盖，定位需要核查的事项。</p></div><button class="mf-button" id="metric-help">指标说明</button></div>
+        <div class="mf-toolbar">
+          <div class="mf-toolbar-left"><span class="mf-badge is-muted" id="refresh-state">正在连接</span><span class="mf-small mf-muted" id="sync-time">等待首个数据快照</span></div>
+          <div class="mf-toolbar-right"><button class="mf-button" id="pause-refresh" aria-pressed="false">暂停更新</button><button class="mf-button" id="refresh-now">刷新</button></div>
+        </div>
+        <div class="mf-alert" id="load-alert" role="status" hidden></div>
+
+        <section class="mf-stats" aria-label="核心指标">
+          <button class="mf-stat" data-scroll="source-section"><span class="mf-stat-label">最近扫描成功来源</span><span class="mf-stat-value" id="metric-sources">—</span><span class="mf-stat-meta">查看五源状态与扫描时间 →</span></button>
+          <button class="mf-stat" data-metric="patients"><span class="mf-stat-label">纳管患者</span><span class="mf-stat-value" id="metric-patients">—</span><span class="mf-stat-meta">HIS 患者主表 · 当前快照</span></button>
+          <button class="mf-stat" data-metric="visits"><span class="mf-stat-label">就诊记录</span><span class="mf-stat-value" id="metric-visits">—</span><span class="mf-stat-meta">门诊与住院累计 · 非人次去重</span></button>
+          <a class="mf-stat" href="/#security"><span class="mf-stat-label">待核查风险</span><span class="mf-stat-value" id="metric-risks">—</span><span class="mf-stat-meta" id="risk-scope">当前风险留存窗口 · 最多200条</span></a>
+        </section>
+
+        <div class="mf-grid-two">
+          <section class="mf-panel" aria-labelledby="trend-heading">
+            <div class="mf-panel-head"><div><h2 id="trend-heading">数据量变化</h2><p class="mf-muted mf-small" id="trend-context">总记录数 · 条</p></div><div class="mf-segment" aria-label="趋势维度"><button data-trend="total" aria-pressed="true">总量</button><button data-trend="sources" aria-pressed="false">按来源</button></div></div>
+            <div class="mf-panel-body">
+              <div class="mf-chart-options"><label><input type="checkbox" id="simulated-history" checked>展示24h模拟历史</label><label id="scale-field">刻度 <select id="trend-scale" aria-label="趋势刻度"><option value="linear">线性</option><option value="log">对数</option></select></label></div>
+              <div class="mf-chart-legend" id="trend-legend"></div>
+              <div class="mf-chart-wrap"><svg class="mf-chart" id="trend-chart" role="img" aria-label="数据量趋势，正在加载"></svg><div class="mf-chart-tooltip" id="trend-tooltip" hidden></div></div>
+              <p class="mf-muted mf-small" id="trend-note">虚线为模拟历史，实线为运行采样；可关闭模拟历史。</p>
+              <details class="mf-disclosure"><summary>查看精确采样值</summary><div class="mf-filter"><label>采样时间 <select id="sample-select"></select></label></div><div id="sample-values" class="mf-selection-detail"></div></details>
+            </div>
+          </section>
+          <section class="mf-panel" aria-labelledby="dept-heading">
+            <div class="mf-panel-head"><div><h2 id="dept-heading">科室数据分布</h2><p class="mf-muted mf-small">按科室查看覆盖规模</p></div><div class="mf-segment" aria-label="科室统计维度"><button data-dept-mode="visits" aria-pressed="true">就诊</button><button data-dept-mode="patients" aria-pressed="false">患者</button></div></div>
+            <div class="mf-panel-body"><div class="mf-dept-bars" id="department-bars"><p class="mf-empty">正在加载科室分布…</p></div><div id="department-detail" class="mf-selection-detail"></div></div>
+            <div class="mf-panel-footer mf-small">患者在科室内去重，跨科室不可直接相加。检验与影像按科室患者关联，非科室绩效。</div>
+          </section>
+        </div>
+
+        <section class="mf-panel" id="source-section" aria-labelledby="source-heading">
+          <div class="mf-panel-head"><div><h2 id="source-heading">数据来源</h2><p class="mf-muted mf-small" id="source-sync">最近扫描状态，不代表持续连接健康</p></div><a class="mf-link" href="/#discovery">查看来源与变更 →</a></div>
+          <div class="mf-table-wrap"><table class="mf-table"><thead><tr><th scope="col">数据来源</th><th scope="col">记录数</th><th scope="col">逻辑表</th><th scope="col">最近扫描</th><th scope="col">扫描状态</th><th scope="col"><span class="mf-sr-only">操作</span></th></tr></thead><tbody id="source-rows"><tr><td colspan="6" class="mf-empty">正在读取来源…</td></tr></tbody></table></div>
+          <div class="mf-panel-footer" id="source-total">跨系统记录由不同粒度记录和文书组成，不等于患者数。</div>
+        </section>
+
+        <div class="mf-grid-two mf-grid-equal">
+          <section class="mf-panel"><div class="mf-panel-head"><div><h2>诊断分布</h2><p class="mf-muted mf-small">诊断 Top8 · 就诊次数</p></div><a class="mf-link" href="/#query">诊断检索 →</a></div><div class="mf-panel-body" id="diagnosis-bars"><p class="mf-empty">正在加载诊断分布…</p></div><div class="mf-panel-footer mf-small">HIS非空诊断记录，按就诊次数排序。点击诊断可进入检索。</div></section>
+          <section class="mf-panel"><div class="mf-panel-head"><div><h2>事件类型分布</h2><p class="mf-muted mf-small">后端当前留存窗口 · 最多800条</p></div><a class="mf-link" href="/#discovery">查看变更 →</a></div><div class="mf-panel-body" id="event-bars"><p class="mf-empty">正在加载事件分布…</p></div><div class="mf-panel-footer mf-small">体征阈值提示属于临床业务提示，不等同于数据质量错误。</div></section>
+        </div>
+
+        <div class="mf-section-heading"><div><h2>自动化运行</h2><p class="mf-muted mf-small">从元数据感知到任务反馈，查看当前执行情况。</p></div><a class="mf-link" href="/#orch">规则与任务 →</a></div>
+        <section class="mf-panel"><div class="mf-flow" id="execution-flow"></div><div class="mf-panel-footer mf-small">任务完成表示自动执行结束，不代表业务问题已整改；事件与反馈按留存窗口统计。</div></section>
+        <section class="mf-secondary-stats" aria-label="资源与运行明细指标" id="secondary-metrics"></section>
+
+        <section class="mf-panel"><div class="mf-panel-head"><div><h2>最近执行任务</h2><p class="mf-muted mf-small">驾驶舱最近6条 · 保留触发与结果线索</p></div><a class="mf-link" href="/#orch">全部任务 →</a></div><div class="mf-list" id="task-list"><p class="mf-empty">正在读取任务…</p></div></section>
+
+        <section class="mf-panel" aria-labelledby="event-heading">
+          <div class="mf-panel-head"><div><h2 id="event-heading">最新元数据事件</h2><p class="mf-muted mf-small" id="event-stream-status">正在连接事件流</p></div><div class="mf-filter"><label>类型 <select id="event-filter"><option value="all">全部类型</option></select></label></div></div>
+          <div class="mf-list" id="event-list"><p class="mf-empty">等待事件…</p></div>
+          <div class="mf-panel-footer"><span id="event-count">当前页面最多保留80条事件</span><button class="mf-link" id="event-more" hidden>显示更多</button></div>
+        </section>
+        <footer class="mf-page-footer">MedFabric · 医疗数据编织研究演示 <span>统计口径与能力边界见「指标说明」</span></footer>
+      </div>
+    </main>
+  </div>
+  <dialog class="mf-dialog" id="detail-dialog" aria-labelledby="detail-title"><div class="mf-dialog-head"><h2 id="detail-title">详情</h2><button class="mf-button mf-dialog-close" id="close-dialog" aria-label="关闭详情">关闭</button></div><div class="mf-dialog-body" id="detail-body"></div></dialog>
+</body>
+</html>
