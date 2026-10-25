@@ -15,20 +15,7 @@ import time
 CLASS_ORDER = {"L1": 1, "L2": 2, "L3": 3, "L4": 4}
 CLASS_LABEL = {"L1": "公开", "L2": "内部", "L3": "敏感", "L4": "高度敏感"}
 
-DATA_ASSETS = [
-    {"id": "clinical_patient", "name": "患者主索引", "source": "HIS", "class": "L4", "rows_key": "patients",
-     "fields": ["patient_id", "name", "gender", "birth_date", "id_card", "phone"], "masking": "身份字段掩码 + 患者ID伪名化", "scope": "院内"},
-    {"id": "clinical_visit", "name": "就诊与诊断", "source": "HIS", "class": "L3", "rows_key": "visits",
-     "fields": ["patient_id", "dept", "diagnosis_name", "diagnosis_code", "doctor"], "masking": "患者ID伪名化，医生字段按角色展示", "scope": "院内/科研"},
-    {"id": "lab_result", "name": "检验结果", "source": "LIS", "class": "L3", "rows_key": "lab_tests",
-     "fields": ["patient_id", "test_no", "item", "value", "unit", "flag"], "masking": "患者ID伪名化，结果值保留统计粒度", "scope": "院内/科研"},
-    {"id": "imaging_index", "name": "影像检查索引", "source": "PACS", "class": "L3", "rows_key": "studies",
-     "fields": ["patient_id", "study_uid", "modality", "body_part", "report"], "masking": "患者ID伪名化，DICOM UID保留审计映射", "scope": "院内/科研"},
-    {"id": "vitals_stream", "name": "生命体征流", "source": "IoT", "class": "L4", "rows_key": "vitals_points",
-     "fields": ["patient_id", "vital_time", "hr", "spo2", "temperature"], "masking": "身份字段掩码，明细仅限医疗角色", "scope": "院内"},
-    {"id": "emr_document", "name": "病历文书", "source": "EMR", "class": "L4", "rows_key": "emr_docs",
-     "fields": ["patient_id", "chief_complaint", "present_illness_history", "physical_exam", "treatment_plan"], "masking": "全文脱敏 + 最小必要字段", "scope": "院内"},
-]
+from management.catalog.assets import DATA_ASSETS
 
 POLICIES = [
     {"id": "POL-CLINICIAN", "name": "临床诊疗策略", "role": "clinician", "max_class": "L4", "purposes": ["care", "quality"], "cross_org": False, "default_mask": False},
@@ -37,23 +24,20 @@ POLICIES = [
     {"id": "POL-OPS", "name": "平台运维策略", "role": "operator", "max_class": "L2", "purposes": ["operations"], "cross_org": False, "default_mask": True},
 ]
 
-SERVICE_FLOWS = [
-    {"id": "FLOW-CARE-360", "name": "临床患者全景协同", "scene": "临床诊疗", "service_ids": ["SVC-PATIENT-360", "SVC-VITALS-TREND"], "mode": "院内实时", "status": "active", "description": "患者全景 + 生命体征趋势，服务于床旁诊疗"},
-    {"id": "FLOW-RESEARCH-COHORT", "name": "科研队列分析供给", "scene": "科研分析", "service_ids": ["SVC-FED-QUERY", "SVC-LAB-RESULT"], "mode": "脱敏共享", "status": "active", "description": "跨源队列统计与检验结果按需组合，输出脱敏分析结果"},
-    {"id": "FLOW-QUALITY-REVIEW", "name": "质量异常复核链", "scene": "质量治理", "service_ids": ["SVC-VITALS-TREND", "SVC-LAB-RESULT"], "mode": "规则触发", "status": "active", "description": "异常体征触发趋势与检验复核，结果回写治理事件"},
-]
+from execution.flows import SERVICE_FLOWS
 
 
 class GovernanceState:
-    def __init__(self):
+    def __init__(self, services=None):
         self.lock = threading.RLock()
         self.audit = deque(maxlen=800)
         self.risks = deque(maxlen=200)
         self.circulation = deque(maxlen=300)
-        self.services = {}
+        self.services = services if services is not None else {}
         self.service_stats = {}
         self.seq = 0
-        self._seed_services()
+        if services is None:
+            self._seed_services()
         self._seed_runtime_signals()
 
     def _seed_services(self):
@@ -156,10 +140,10 @@ class GovernanceState:
 
     def record_service(self, sid, *, latency_ms, success=True, actor="demo-analyst", flow_id=None, masked=False, decision="allow_masked"):
         with self.lock:
-            svc = self.services.setdefault(sid, {"id": sid, "name": sid, "class": "L3", "lifecycle": "published", "quality_score": 95, "reuse_score": 0, "scope": "院内/科研", "tags": []})
+            svc = self.services.get(sid, {"id": sid, "name": sid, "class": "L3", "lifecycle": "published", "quality_score": 95, "reuse_score": 0, "scope": "院内/科研", "tags": []})
             st = self.service_stats.setdefault(sid, {"calls": 0, "success": 0, "total_ms": 0.0, "value_points": 0})
             st["calls"] += 1; st["success"] += int(success); st["total_ms"] += float(latency_ms); st["value_points"] += max(1, int(100 - min(float(latency_ms), 99)))
-            svc["last_called"] = self._now(); svc["reuse_score"] = min(100, st["calls"] * 5 + (20 if flow_id else 0))
+            # Runtime facts never mutate A-owned definitions.
             rec = {"id": "FLOW-%05d" % (self.seq + 1), "ts": self._now(), "service_id": sid, "flow_id": flow_id,
                    "actor": actor, "latency_ms": round(float(latency_ms), 2), "status": "success" if success else "failed",
                    "decision": decision, "masked": bool(masked), "value_points": max(1, int(100 - min(float(latency_ms), 99)))}

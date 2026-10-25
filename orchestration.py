@@ -66,9 +66,15 @@ class Orchestrator:
         self.lock = threading.Lock()
         self.tid_seq = 0
         self.counters = {"total": 0, "done": 0, "failed": 0, "ms_sum": 0.0}
-        threading.Thread(target=self._worker_loop, daemon=True).start()
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self._thread.start()
 
     # ------------------------------------------------------------ 事件入口（感知→编排）
+    def stop(self):
+        self._stop_event.set()
+        self._thread.join(timeout=5)
+
     def handle_events(self, evs):
         created = []
         for ev in evs or []:
@@ -117,7 +123,7 @@ class Orchestrator:
     # ------------------------------------------------------------ 执行器（智能调度）
     def _worker_loop(self):
         rng = random.Random(7)
-        while True:
+        while not self._stop_event.is_set():
             task = None
             with self.lock:
                 if self.queue:

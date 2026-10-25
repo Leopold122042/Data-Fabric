@@ -1,2 +1,12 @@
 /data_backups/
 __pycache__/
+
+.venv-external/
+.env
+.env.*
+
+/private_catalog/
+
+/runtime/
+.venv/
+.pytest_cache/

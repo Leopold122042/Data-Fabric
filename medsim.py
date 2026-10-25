@@ -18,7 +18,7 @@ import sqlite3
 from datetime import datetime, timedelta
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
+DATA_DIR = os.path.abspath(os.environ.get("MEDFABRIC_DATA_DIR", os.path.join(BASE_DIR, "data")))
 NOW = datetime(2026, 9, 7, 14, 30)          # 演示基准时间（与课题申报书同期）
 
 SOURCE_DEFS = [

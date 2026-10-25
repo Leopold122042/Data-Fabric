@@ -1,0 +1,135 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>数据接入 · MedFabric</title><link rel="stylesheet" href="/static/workspace.css"><link rel="stylesheet" href="/static/management/module.css"><link rel="stylesheet" href="/static/shared/platform-shell.css"><link rel="stylesheet" href="/static/platform/platform.css"><script defer src="/static/shared/platform-shell.js"></script></head><body class="mf-app"><div class="mf-shell"><aside class="mf-sidebar" aria-label="平台导航"></aside><main class="mf-main"><header class="mf-topbar"><b>MedFabric / 数据接入</b><label>演示身份 <select id="role"><option value="platform">平台方</option><option value="provider">供给方</option><option value="requester">需求方</option><option value="auditor">审计方</option></select></label></header><div class="mf-content"><h1>数据接入</h1><p id="page-status" role="status"></p><p class="page-lead">连接云盘、扫描文件和工作表，更新保存的目录。将需要共享的结构纳入资源目录后，可继续建立映射、登记服务和提交需求。</p><div class="platform-journey"><a href="/static/platform/resources.html?origin=cloud">查看云盘资源与纳管状态</a><a href="/static/platform/query.html">进入查询中心</a><a href="/static/execution/index.html?tab=run">查看查询审计</a></div><section id="tab-external">
+
+  <div class="card external-hero"><span class="external-eyebrow">数据来源 / 连接与更新</span><h2>云盘与文件连接</h2>
+    <p>从已保存的目录出发，快速找到需要的数据。查询时按需连接，来源始终可追溯。</p>
+    <button id="extScanShortcut" type="button" class="act">更新目录与虚拟表</button>
+    <p id="extStatus" role="status" aria-live="polite">正在检查连接环境…</p>
+  </div>
+  <div class="card virtual-browser external-query-card" id="cloud-query"><label for="externalGrant">访问授权</label><select id="externalGrant"><option value="">请选择当前身份的有效读取授权</option></select><p id="externalGrantStatus" role="status"></p><h3>虚拟表查询</h3>
+    <p>选择已保存的虚拟表，输入关键词，在右侧查看数据。结果按来源分组，保留有值的字段。</p>
+    <p id="extCloudState" role="status">正在检查云盘会话…</p>
+    <button id="extCloudConnect" class="ghost" hidden>连接设置</button>
+    <button id="extCloudDisconnect" class="ghost" hidden>断开连接</button>
+    <label for="extQueryScope">查询范围</label><select id="extQueryScope"><option value="">正在加载新虚拟表…</option></select>
+    <p id="extQueryScopeHint"></p>
+    <div id="extCollectionEditor" hidden></div>
+    <div id="extLegacyQuery" class="external-query-layout" hidden>
+    <div class="external-query-controls">
+    <h4>CESAI 指标数据集</h4>
+    <button id="extVirtualCatalog" class="ghost">刷新指标目录</button>
+    <div id="extVirtualFields" hidden></div>
+    <div id="extVirtualDefinitions"><div class="virtual-empty">加载目录后，在这里查看虚拟表、字段和来源工作表。</div></div>
+    <div class="virtual-toolbar">
+      <label for="extVirtualEntity">搜索内容</label><input id="extVirtualEntity" placeholder="例如：北京（包含搜索）">
+      <select id="extVirtualMetric" hidden><option value="">全部指标</option></select>
+      <select id="extVirtualScope" hidden><option value="">全部口径</option></select>
+      <button id="extVirtualSearch" class="act">搜索</button>
+      <button id="extVirtualPreview" class="ghost">浏览前 200 行</button>
+    </div>
+    <label><input type="checkbox" id="extVirtualForce"> 本次强制刷新源文件（跳过缓存）</label>
+    <details class="virtual-details"><summary>高级查询 · SQL</summary>
+    <label for="extVirtualSql">查询虚拟表（执行时需要连接云盘）</label>
+    <textarea id="extVirtualSql" rows="5" style="width:100%;font-family:monospace">SELECT * FROM cesai_indicator_index WHERE "对象名称" = '北京市' ORDER BY "口径", "指标" LIMIT 100;</textarea>
+    <button id="extVirtualQuery" class="act">执行虚拟表查询</button>
+    <button id="extVirtualExample" class="ghost">填入北京市关联查询</button>
+    </details></div><section class="external-query-output" aria-label="指标查询结果"><h4>查询结果</h4><p id="extVirtualStatus" role="status">尚未查询。连接云盘后，可输入对象名称查看关联记录。</p>
+    <div id="extVirtualResult" class="virtual-grid" style="overflow:auto;max-height:520px"></div>
+    <div id="extVirtualSources"></div></section>
+    </div>
+  </div>
+  <details id="extDiscoveryPanel" class="card virtual-browser external-discovery" open><summary>目录管理与自动建表 <span>浏览云盘 · 扫描目录 · 移除与恢复来源</span></summary>
+    <p>永久保存表名、字段、来源位置和映射规则，刷新页面、断开连接或重启服务后仍保留。实际数据在查询时读取。选择云盘目录即可发现文件和工作表。自动识别指标区块；无法识别含义的字段原样保留并注明，成功解析后即可查询，无需确认。不会自动推断跨表业务关系。</p>
+    <div class="virtual-toolbar">
+      <label for="extScanRoot">扫描目录</label><input id="extScanRoot" value="2021CESAI报告数据汇总" style="min-width:280px">
+      <button id="extScanBrowse" class="ghost">浏览云盘目录</button>
+      <label><input id="extScanRecursive" type="checkbox" checked>包含子目录</label>
+      <label><input id="extScanArchives" type="checkbox" checked>包含压缩包</label>
+      <button id="extScanStart" class="act">扫描并建立虚拟表</button>
+      <button id="extScanPause" class="ghost">暂停</button><button id="extScanResume" class="ghost">继续扫描</button>
+      <button id="extScanRefresh" class="ghost">刷新目录</button>
+    </div>
+    <div id="extScanDirectoryPanel" class="virtual-details" hidden>
+      <h4>选择扫描目录</h4>
+      <p>先浏览文件夹，再选择扫描目录。浏览只读取目录列表，不读取文件内容或启动扫描。</p>
+      <div id="extScanBreadcrumb" class="virtual-toolbar"></div>
+      <div class="virtual-toolbar">
+        <button id="extScanDirRoot" class="ghost">云盘根目录</button>
+        <button id="extScanDirUp" class="ghost">上一级</button>
+        <button id="extScanDirReload" class="ghost">刷新文件夹</button>
+        <button id="extScanDirChoose" class="act" hidden>选为扫描目录</button>
+      </div>
+      <p id="extScanDirStatus" role="status"></p>
+      <div id="extScanDirectories" class="virtual-grid" style="max-height:320px;overflow:auto"></div>
+    </div>
+    <p>每次最多 100 个文件或包内条目、20 个目录、3 层子目录；文件解析沿用大小限制。扫描需要下载文件，暂停后可在当前会话继续。</p>
+    <p id="extScanStatus" role="status">已保存的自动发现目录加载中…</p>
+    <div id="extScanErrors"></div>
+    <h4>扫描生成的统一虚拟逻辑表</h4>
+    <p>每个扫描目录生成一张永久统一表，汇集本次成功发现的来源。扫描完成后只展示目录、文件和表名。选择表名进入查询区，主动查询后才读取和展示内容。同名字段按名称对齐，不代表业务含义已确认；缺失字段为空。</p>
+    <p>不需要的来源可点击“移除此表”，仅从当前统一虚拟表排除，不删除源文件；重新扫描仍保留排除设置，可随时恢复。</p>
+    <div id="extCollections"></div>
+    <details><summary>底层来源表 · 查看与调整映射</summary><div id="extScanTables" class="virtual-grid"></div></details>
+    <div id="extAutoEditor" hidden>
+      <h4 id="extAutoName"></h4>
+      <label for="extAutoHeader">表头为第几条非空行（Excel）</label><input id="extAutoHeader" type="number" min="1" max="50" value="1">
+      <button id="extAutoPreview" class="ghost">预览字段映射</button><button id="extAutoConfirm" class="ghost">保存表头调整</button>
+      <p>表头调整是可选操作；自动建表后可直接查询。需要修正时，可预览并保存新的表头行。</p>
+      <div id="extAutoFields" hidden></div>
+      <label for="extAutoSql">只读 SQL</label><textarea id="extAutoSql" rows="3" style="width:100%"></textarea>
+      <button id="extAutoQuery" class="act">查询所选虚拟表</button>
+      <p id="extAutoStatus" role="status"></p><div id="extAutoResult" class="virtual-grid"></div>
+    </div>
+  </details>
+  <div class="card" id="extArchivePanel" hidden style="margin-top:16px"><h3>RAR / ZIP 压缩包内容</h3>
+    <p id="extArchiveInfo"></p><p>点击支持的文件建立逻辑表，再到下方预览内容。仅列出其他格式；不执行文件、不递归解压，不支持加密或缺失分卷的压缩包。每次读取会替换同来源的旧逻辑表。</p>
+    <div id="extArchiveFiles" style="max-height:320px;overflow:auto"></div>
+  </div>
+  <details class="external-session card"><summary>会话工具 <span>已载入文件 · SQL 查询 · 刷新记录</span></summary>
+  <div class="card" style="margin-top:16px"><h3>当前会话已载入的表</h3><div id="extTables">尚未载入外部文件。</div>
+    <button id="extClear" class="ghost" style="margin-top:10px">释放当前会话数据</button><span> 空闲 30 分钟或重启服务器后需重新载入。</span>
+  </div>
+  <div class="card" style="margin-top:16px"><h3>只读 SQL 查询</h3>
+    <label for="extSql">查询语句</label><textarea id="extSql" rows="5" style="width:100%;font-family:monospace">SELECT * FROM passengers LIMIT 20;</textarea>
+    <button id="extQuery" class="act">执行查询</button><button id="extExample" class="ghost">填入舱位统计示例</button>
+    <p>支持对本会话已加载逻辑表进行 SELECT / WITH 查询，包括跨表查询；最多展示 200 行，超时 5 秒中断。Excel 文本列参与计算时请使用 TRY_CAST。</p>
+    <div id="extResult" style="overflow:auto;max-height:520px"></div>
+  </div>
+  <div class="card" style="margin-top:16px"><h3>本会话刷新记录</h3><div id="extEvents"></div></div>
+  </details>
+  <details class="card" style="margin-top:16px"><summary style="cursor:pointer">接入其他文件 · GitHub / 云盘</summary>
+  <div class="grid-arch" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+    <div class="card"><h3>GitHub 文件</h3>
+      <label for="extGithub">公开仓库文件地址</label><input id="extGithub" type="url" style="width:100%;margin:8px 0">
+      <label for="extModel">逻辑映射</label><select id="extModel"><option value="auto">自动识别格式与字段</option><option value="passengers">Titanic 乘客字段映射</option><option value="raw">CSV 保留原始字段</option></select>
+      <button id="extGithubLoad" class="act" style="margin-top:10px">读取或刷新文件</button>
+      <p>支持 GitHub 文件链接和 raw 链接。仅访问公开文件，最多 20 MB。</p>
+    </div>
+    <div class="card"><h3>南大云盘 WebDAV</h3>
+      <label for="extDir">目录路径（留空为根目录）</label><input id="extDir" style="width:100%;margin:8px 0">
+      <button id="extList" class="ghost">浏览目录</button><button id="extUp" class="ghost">上一级</button>
+      <div id="extFiles" style="max-height:180px;overflow:auto;margin:10px 0"></div>
+      <label for="extExcel">文件路径（按扩展名识别格式）</label><input id="extExcel" style="width:100%;margin:8px 0">
+      <button id="extBoxLoad" class="act">读取或刷新文件</button>
+      <p>连接后令牌仅在当前会话的服务器内存中保留，不写磁盘或浏览器存储；断开、会话过期或重启后需重新连接。远程使用请通过 HTTPS 和入口认证。Excel 每张工作表映射成表；JSON 对象映射为行，嵌套内容保留为 JSON 文本；TXT 按行读取。通用字段按文本保存，计算时可用 TRY_CAST。</p>
+    </div>
+  </div>
+  </details>
+  <dialog id="extLoginDialog" aria-labelledby="extLoginTitle">
+    <form id="extLoginForm">
+      <h3 id="extLoginTitle">连接云盘以查询数据</h3>
+      <p>虚拟表目录已保存。读取实际数据需要云盘授权，连接成功后会继续本次操作。</p>
+      <label for="extUser">WebDAV 用户名</label><input id="extUser" autocomplete="off" required style="width:100%;margin:8px 0">
+      <label for="extToken">WebDAV 令牌</label><input id="extToken" type="password" autocomplete="off" required style="width:100%;margin:8px 0">
+
+      <p id="extLoginError" role="status" aria-live="polite"></p>
+      <p style="font-size:12px">令牌仅在当前会话内存中保留；断开连接、会话过期或重启后清除。</p>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button id="extLoginCancel" type="button" class="ghost">取消</button>
+        <button id="extLoginSubmit" type="submit" class="act">连接并继续</button>
+      </div>
+    </form>
+  </dialog>
+
+</section>
+
+</div></main></div><script type="module" src="/static/platform/common.js"></script><script src="/static/virtual-fields.js"></script><script src="/static/external.js"></script><script type="module" src="/static/platform/governance.js"></script></body></html>

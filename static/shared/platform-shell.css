@@ -1,0 +1,21 @@
+/* Unified application shell, including the existing cloud workspace. */
+.platform-sidebar {box-sizing:border-box;background:#fff;color:#273849;font:14px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;padding:22px 14px!important;border-right:1px solid #e3e9ef;position:sticky!important;top:0;height:100vh;overflow-y:auto;align-self:start;}
+.platform-sidebar .platform-brand{display:block;font-size:23px;font-weight:700;color:#246aab;text-decoration:none;padding:0 10px}
+.platform-caption{font-size:12px;color:#637486;padding:6px 10px 18px;margin:0}
+.platform-sidebar details{margin:0 0 12px;border:0;background:none;padding:0}
+.platform-sidebar summary{font-size:12px;color:#637486;padding:6px 10px;cursor:pointer}
+.platform-sidebar nav.platform-nav{display:flex;flex-direction:column;position:static;padding:0;gap:2px;background:none;border:0;box-shadow:none;overflow:visible}
+.platform-sidebar .platform-nav a{display:block;padding:8px 12px;color:#43566a;text-decoration:none;border-radius:7px;font-size:13px;line-height:1.5;white-space:normal}
+.platform-sidebar .platform-nav a:hover,.platform-sidebar .platform-nav a.is-active{background:#eaf3fc;color:#246aab}
+.platform-journey{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 22px;padding:0}
+.platform-journey a{color:#246aab;background:#fff;border:1px solid #e3e9ef;border-radius:8px;padding:8px 12px;text-decoration:none;font-size:13px}
+#subtabs button[aria-pressed=true]{background:#eaf3fc;color:#246aab;border-color:#509ee3}
+@media(max-width:760px){
+ .platform-sidebar{position:relative!important;height:auto;max-height:260px;border-bottom:1px solid #e3e9ef}
+ .platform-sidebar details{display:inline-block;vertical-align:top;width:48%;margin:0 0 6px}
+ .platform-sidebar .platform-brand{font-size:20px}.platform-caption{padding-bottom:8px}
+ .platform-journey{gap:5px}.platform-journey a{padding:6px;font-size:12px}
+}
+.platform-overview-items{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;padding:18px}
+.platform-overview-items a{display:flex;flex-direction:column;gap:9px;text-decoration:none;border:1px solid #e3e9ef;border-radius:8px;padding:14px;color:#246aab;background:#f8fafc}
+.platform-overview-items span{font-size:12px;color:#637486}

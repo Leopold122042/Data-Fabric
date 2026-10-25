@@ -1,0 +1,51 @@
+/* Scoped workspace styling: other medical dashboards keep their existing theme. */
+#tab-external{--bg:#f4f7fb;--panel:#fff;--panel2:#f8fafc;--line:#dce5ef;--tx:#22344d;--dim:#63758c;--border:#dce5ef;color:var(--tx);background:var(--bg);padding:24px;border-radius:20px;line-height:1.65}
+#tab-external [hidden]{display:none!important}
+#tab-external .card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:24px;box-shadow:0 4px 20px #162c4810}
+#tab-external .external-hero{background:linear-gradient(115deg,#edf6ff,#fff 70%);box-shadow:none;margin-bottom:20px}
+#tab-external h2{font-size:28px;letter-spacing:-.6px;margin:5px 0 8px;color:#172e4b}
+#tab-external h3{font-size:19px;color:#172e4b;margin-bottom:8px}
+#tab-external h4{color:#233c5b;font-size:16px;margin:8px 0 12px}
+#tab-external p{color:var(--dim);font-size:13px;margin:8px 0 14px;overflow-wrap:anywhere}
+#tab-external .external-eyebrow{font-size:10px;letter-spacing:1.8px;color:#387594;font-weight:700}
+#tab-external #extStatus{margin:12px 0 0;font-size:12px}
+#tab-external button{border:1px solid #d5e1ec;background:#f8fafc;color:#385470;border-radius:9px;padding:8px 12px;font:inherit;font-size:12px;cursor:pointer;transition:background .15s,box-shadow .15s;white-space:normal}
+#tab-external button:hover{background:#eaf2fa;box-shadow:0 2px 6px #17365412}
+#tab-external button.act{background:#176d8b;border-color:#176d8b;color:white;font-weight:600}
+#tab-external button.act:hover{background:#125a73}
+#tab-external button:disabled{opacity:.5;cursor:wait}
+#tab-external :is(input,select,textarea){background:#fff;color:#22344d;border:1px solid #cbd8e6;border-radius:8px;padding:10px 12px;font:inherit;font-size:13px;max-width:100%}
+#tab-external :is(button,input,select,textarea,summary):focus-visible{outline:3px solid #78b8df;outline-offset:3px}
+#tab-external input[type=checkbox]{min-width:0;width:16px;height:16px;accent-color:#176d8b;vertical-align:middle}
+#tab-external #extQueryScope{width:min(100%,580px);margin:8px 12px}
+#tab-external #extCloudState{display:inline-block;font-size:12px;background:#f0f7f8;color:#386878;border-radius:20px;padding:5px 12px}
+#tab-external #extQueryScopeHint{font-size:12px}
+#tab-external .external-query-layout{display:grid;grid-template-columns:minmax(280px,340px) minmax(0,1fr);gap:24px;margin-top:20px;align-items:start}
+#tab-external .external-query-controls{padding:20px;background:#f7f9fc;border:1px solid var(--line);border-radius:12px;min-width:0}
+#tab-external .external-query-output{min-width:0;min-height:390px;padding:4px 0}
+#tab-external .external-search-form{display:grid;gap:12px;margin:18px 0;padding:0;background:none}
+#tab-external .external-search-form input,#tab-external .external-search-form button{width:100%;min-width:0}
+#tab-external .external-search-form label{font-size:12px;font-weight:600}
+#tab-external .external-result-empty{min-height:240px;display:flex;align-items:center;justify-content:center;text-align:center;color:#7d8da1;background:#f8fafc;border:1px dashed #d4dfeb;border-radius:12px;padding:24px;font-size:13px}
+#tab-external .external-result-status{padding-bottom:12px;border-bottom:1px solid #e8eef5}
+#tab-external .virtual-result-group{border:1px solid var(--line)!important;border-radius:12px!important;padding:16px!important;background:#fff;min-width:0}
+#tab-external .virtual-result-group h4{font-size:14px;overflow-wrap:anywhere;margin-top:0}
+#tab-external .virtual-result-group summary{font-size:12px;color:#587b96}
+#tab-external .tbl{font-size:12px;width:100%;border-collapse:collapse}
+#tab-external .tbl th{background:#eff4f9;color:#435b76;padding:12px;white-space:nowrap}
+#tab-external .tbl td{padding:12px;border-bottom:1px solid #e8eef5;max-width:360px;overflow-wrap:anywhere}
+#tab-external .virtual-grid{max-width:100%;border-color:#e1e9f2}
+#tab-external summary{cursor:pointer;font-weight:600;overflow-wrap:anywhere}
+#tab-external summary span{font-size:12px;font-weight:400;color:#7a8ca1;margin-left:12px}
+#tab-external .external-discovery,#tab-external .external-session{margin-top:18px}
+#tab-external .external-discovery>summary,#tab-external .external-session>summary{font-size:15px}
+#tab-external .external-discovery[open]>summary,#tab-external .external-session[open]>summary{margin-bottom:20px}
+#tab-external #extCollections>section{border:1px solid var(--line);border-radius:12px;padding:18px;margin:16px 0}
+#tab-external .virtual-source-tree{padding:12px;background:#f8fafc;border-radius:10px;margin-top:12px;max-height:420px;overflow:auto}
+#tab-external .virtual-source-tree button{padding:4px 8px;margin:3px}
+#tab-external .virtual-toolbar{background:#f4f7fb}
+#tab-external .external-search-form{background:none}
+#tab-external #extLoginDialog{background:#fff;color:#22344d;border:1px solid #dce5ef;box-shadow:0 24px 80px #10203944;border-radius:18px;padding:28px;max-width:min(480px,92vw)}
+#tab-external #extLoginDialog::backdrop{background:#12253d77;backdrop-filter:blur(3px)}
+@media(max-width:1000px){#tab-external{padding:14px}#tab-external .external-query-layout{grid-template-columns:1fr}#tab-external .external-query-controls{position:static}#tab-external .card{padding:18px}#tab-external #extQueryScope{margin:8px 0;width:100%}#tab-external .grid-arch{grid-template-columns:minmax(0,1fr)!important}#tab-external summary span{display:block;margin:4px 0}nav{overflow-x:auto}nav button{flex-shrink:0}}
+@media(prefers-reduced-motion:reduce){#tab-external *{scroll-behavior:auto!important;transition:none!important}}

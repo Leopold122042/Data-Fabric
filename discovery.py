@@ -65,10 +65,13 @@ class _SqliteAdapterBase:
         con = self._con()
         names = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
         for t in sorted(names):
-            cols = [r[1] for r in con.execute('PRAGMA table_info("%s")' % t)]
-            rows = con.execute('SELECT COUNT(*) FROM "%s"' % t).fetchone()[0]
-            h = hashlib.md5(("%s|%s" % (t, ",".join(cols))).encode("utf-8")).hexdigest()[:12]
-            tables[t] = {"columns": cols, "rows": rows, "hash": h}
+            safe = t.replace('"', '""')
+            schema = list(con.execute('PRAGMA table_info("%s")' % safe))
+            cols = [r[1] for r in schema]
+            details = [{"name": r[1], "type": r[2], "nullable": not bool(r[3]), "default": r[4], "primary_key": bool(r[5])} for r in schema]
+            rows = con.execute('SELECT COUNT(*) FROM "%s"' % safe).fetchone()[0]
+            h = hashlib.md5(json.dumps([t, details], sort_keys=True).encode("utf-8")).hexdigest()[:12]
+            tables[t] = {"columns": cols, "column_details": details, "foreign_keys": [dict(zip(["id","seq","table","from","to","on_update","on_delete","match"],r)) for r in con.execute('PRAGMA foreign_key_list("%s")' % safe)], "rows": rows, "hash": h}
         con.close()
         return {"tables": tables}
 
@@ -165,7 +168,8 @@ class EmrAdapter:
         sample_n = 0
         for fn in sorted(files)[-40:]:   # 抽样推断文档模式（大目录时不全量读）
             try:
-                doc = json.load(open(os.path.join(self.dir, fn), encoding="utf-8"))
+                with open(os.path.join(self.dir, fn), encoding="utf-8") as handle:
+                    doc = json.load(handle)
             except Exception:
                 continue
             sample_n += 1

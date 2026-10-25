@@ -1,0 +1,3 @@
+CIRC_ACTORS = [{'id': 'researcher-b01', 'role': 'researcher', 'org': 'B院 · 联合科研中心'}, {'id': 'analyst-a02', 'role': 'analyst', 'org': 'A院 · 临床数据中心'}, {'id': 'clinician-c03', 'role': 'clinician', 'org': '院内急诊科'}]
+CIRC_SVC_PARAMS = [('SVC-FED-QUERY', {'group_by': 'dept', 'top_n': 6}), ('SVC-PATIENT-360', {'patient_id': 'P0042'}), ('SVC-LAB-RESULT', {'patient_id': 'P0042', 'limit_tests': 2})]
+SERVICE_ASSET = {'SVC-PATIENT-360': 'clinical_patient', 'SVC-LAB-RESULT': 'lab_result', 'SVC-IMG-SEARCH': 'imaging_index', 'SVC-VITALS-TREND': 'vitals_stream', 'SVC-META-CATALOG': 'clinical_visit', 'SVC-FED-QUERY': 'clinical_visit'}
