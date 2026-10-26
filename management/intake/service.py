@@ -31,6 +31,8 @@ class Intake:
             if not s or s.get('lifecycle')!='published':result['services'].append(sid+'未发布或已退出')
         if not d.get('authorization_evidence'):result['authorization'].append('尚无外部授权证据；受理确认不等于执行授权')
         if not d.get('quality'):result['quality'].append('未明确质量要求')
+        if not d.get('execution_constraints'):
+            result['fields'].append('execution_constraints')
         return result
 
     def confirm(self,oid,body,actor):
@@ -43,9 +45,13 @@ class Intake:
             confirmations=body.get('confirmations',{})
             if not all(confirmations.get(k) is True for k in ('content','attachments','gaps')):raise DomainError('需逐项确认内容、附件及缺口')
             if not body.get('note'):raise DomainError('需填写确认及修改说明')
+            from contracts.execution.constraints import normalize
+            normalize(d)
+            if confirmations.get('execution_constraints') is not True:
+                raise DomainError('需核对并确认范围筛选、时间字段和交付执行条件')
             spec_id='SPEC-'+oid;previous=self.store.get('spec',spec_id)
             spec=self.store.save('spec',spec_id,{'demand_id':oid,'demand_version':d['version'],
-                'specification':{k:d.get(k) for k in (*REQUIRED,'service_ids','cost','attachments')},
+                'specification':{k:d.get(k) for k in (*REQUIRED,'service_ids','cost','attachments','execution_constraints')},
                 'gaps':gaps,'confirmed_by':actor,'confirmation_note':body['note'],
                 'confirmed':True,'execution_authorized':False},previous['version'] if previous else 0,actor,'人工确认任务规格')
             self.store.save('demand',oid,{**d,'state':'confirmed','spec_id':spec_id,'spec_version':spec['version']},d['version'],actor,'人工受理完成')

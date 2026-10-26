@@ -23,8 +23,10 @@ class ExecutionTest(unittest.TestCase):
         return self.e.security.grant({'subject':'demo-platform','purpose':p['purpose'],'plan_id':p['id'],'plan_version':p['version'],'expires_at':expiry(),**extra},'demo-platform')
     def execute(self,p,g):return self.e.run(self.e.submit(p['id'],p['version'],g['id'],'demo-platform'))
     def spec(self):
-        d=self.m.intake.save({'title':'需求','object_scope':'local','time_start':'2026-01-01','time_end':'2026-12-01','purpose':'research','quality':'完整','deadline':'2026-12-02','delivery':'统计'},'demo-platform')
-        return self.m.intake.confirm(d['id'],{'expected_version':d['version'],'confirmations':{'content':True,'attachments':True,'gaps':True},'note':'已核对'},'demo-platform')
+        today=datetime.now(timezone.utc)
+        d=self.m.intake.save({'title':'需求','object_scope':'当前本地元数据','time_start':(today-timedelta(days=1)).isoformat(),'time_end':(today+timedelta(days=2)).isoformat(),'purpose':'research','quality':'完整','deadline':(today+timedelta(days=2)).isoformat(),'delivery':'对象级',
+            'execution_constraints':{'scope':{'kind':'metadata'},'output_mode':'object','circulation_modes':['controlled_compute'],'quality_min_complete':1}},'demo-platform')
+        return self.m.intake.confirm(d['id'],{'expected_version':d['version'],'confirmations':{'content':True,'attachments':True,'gaps':True,'execution_constraints':True},'note':'已核对'},'demo-platform')
     def service_plan(self,**extras):
         spec=self.spec()
         return self.e.plan({'spec_id':spec['id'],'spec_version':spec['version'],'nodes':[
@@ -61,11 +63,12 @@ class ExecutionTest(unittest.TestCase):
         self.e.delivery.destroy(oid,'demo-platform')
         self.assertTrue(all(x.get('result') is None for x in self.e.store.history('delivery',oid)))
     def test_six_independent_delivery_gates(self):
-        p=self.medical();g=self.grant(p);result={'columns':['category','count'],'rows':[['A',5]]}
+        from execution.medical import aggregate
+        p=self.medical();g=self.grant(p);result=aggregate()
         cases=[('format',{'columns':['count'],'rows':[['x',5]]},p,g,True),
                ('quality',result,p,g,False),('authorization',result,p,{**g,'status':'revoked'},True),
                ('sensitive_information',{'columns':['patient_id','count'],'rows':[['secret',5]]},p,g,True),
-               ('granularity',{'columns':['category','count'],'rows':[['A',3]]},p,g,True),
+               ('granularity',{**result,'rows':[['40—49岁','类别甲',3]]},p,g,True),
                ('subsequent_purpose',result,{**p,'purpose':'other'},g,True)]
         for key,r,plan,grant,quality in cases:
             with self.subTest(key=key):self.assertFalse(self.e.delivery.checks(r,plan,grant,quality)[key])
@@ -85,11 +88,11 @@ class ExecutionTest(unittest.TestCase):
         self.e.consume_events();self.assertEqual(self.e.store.require('plan_state',p['id'])['status'],'invalidated')
     def test_dag_retry_inputs_and_blocked_downstream(self):
         p=self.service_plan();self.e.confirm(p['id'],p['version'],'demo-platform');g=self.grant(p)
-        result={'columns':['group','count'],'rows':[['x',6]]}
+        result={'sources':[{'id':'test','name':'演示目录','tables':2}]}
         with patch.object(self.e.runtime,'_dispatch',side_effect=[RuntimeError('temporary'),result,result]) as handler:
             job=self.execute(p,g)
         self.assertEqual(job['state'],'success',job);self.assertEqual(handler.call_count,3)
-        self.assertEqual(handler.call_args.args[1]['previous'],result)
+        self.assertEqual(handler.call_args.args[1]['previous'],{'columns':['source','source_name','table_count'],'rows':[['test','演示目录',2]]})
         with patch.object(self.e.runtime,'_dispatch',side_effect=RuntimeError('permanent')) as handler:
             failed=self.execute(p,g)
         self.assertEqual(handler.call_count,2);self.assertEqual(failed['nodes']['two']['status'],'blocked')

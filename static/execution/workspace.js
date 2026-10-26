@@ -40,11 +40,14 @@ function actions(){
   button('新建医疗汇总方案',async()=>{const p=await api('/plans',{scenario:'medical',name:'医疗小样本汇总（新建虚构数据）'});await load();show(p);message('已生成草案；请确认后授权执行。');});
   button('从需求规格生成方案',async()=>{
    const specs=await api('/items/spec',undefined,'/api/management');if(!specs.items.length)throw Error('请先在 需求受理页人工确认规格');
+   const choice=await form('选择已确认的任务规格',[['spec_id','任务规格','select',specs.items.map(s=>[s.id,s.id+' · v'+s.version])]],{spec_id:new URLSearchParams(location.search).get('spec')||specs.items[0].id});if(!choice)return;
+   const selected=specs.items.find(s=>s.id===choice.spec_id),rules=selected?.specification?.execution_constraints;if(!rules)throw Error('该规格尚无执行条件，请回需求受理页补充并重新确认');
+   const modeLabels={controlled_compute:'受控查看',api:'授权API引用',download:'固定结果下载'};
    await submit('/plans','从确认规格生成方案',[
-    ['name','方案名称'],['spec_id','任务规格','select',specs.items.map(s=>[s.id,s.id+' · v'+s.version])],
-    ['output_mode','输出粒度','select',[['aggregate','汇总'],['object','对象级']]],['circulation_mode','交付方式','select',[['controlled_compute','受控计算结果'],['api','授权 API 引用'],['download','可下载固定结果']]],
+    ['name','方案名称'],['spec_id','任务规格','select',[[selected.id,selected.id+' · v'+selected.version]]],
+    ['output_mode','已确认的输出粒度','select',[[rules.output_mode,rules.output_mode==='aggregate'?'汇总':'对象级']]],['circulation_mode','允许的交付方式','select',rules.circulation_modes.map(m=>[m,modeLabels[m]])],
     ['nodes','节点定义（留空数组时从规格服务集合生成）','json'],['quality_min_complete','非空单元格比例下限','number',[],1]
-   ],{nodes:[],spec_id:new URLSearchParams(location.search).get('spec')||''});
+   ],{nodes:[],spec_id:selected.id,spec_version:selected.version,output_mode:rules.output_mode,circulation_mode:rules.circulation_modes[0],quality_min_complete:rules.quality_min_complete??1});
   });
   button('确认当前版本',async()=>{const p=need();show(await api('/plans/'+p.id+'/confirm',{version:p.version}));await load();});
   button('修改方案生成新版本',async()=>{const p=need();const value=await form('修改后需要重新确认和授权',[['name','名称'],['nodes','节点与依赖','json'],['output_mode','输出粒度','select',['aggregate','object']],['circulation_mode','交付方式','select',['controlled_compute','api','download']]],p);if(value){show(await api('/plans',{...p,...value,expected_version:p.version}));await load();}});

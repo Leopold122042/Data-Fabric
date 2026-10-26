@@ -31,10 +31,18 @@ class SQLiteSource:
             dtype=next(c['type'] for c in snap['tables'][table]['column_details'] if c['name']==column)
             from management.semantic.service import family
             count,nonnull=con.execute(f'SELECT COUNT(*),COUNT({sql_identifier(column)}) FROM {sql_identifier(table)}').fetchone()
-            result={'row_count':count,'non_null_count':nonnull,'null_ratio':(count-nonnull)/count if count else None,'type':dtype}
+            null_rate=(count-nonnull)/count if count else None
+            result={'count':count,'non_null':nonnull,'null_rate':null_rate,'type':dtype,
+                    'evidence_source':'sqlite-profile','contains_raw_values':False,
+                    # Keep aliases readable by existing catalog consumers.
+                    'row_count':count,'non_null_count':nonnull,'null_ratio':null_rate}
             if family(dtype)=='number':
-                low,high=con.execute(f'SELECT MIN({sql_identifier(column)}),MAX({sql_identifier(column)}) FROM {sql_identifier(table)}').fetchone()
-                result.update(min=low,max=high)
+                numeric,low,high=con.execute(f'SELECT COUNT(*),MIN({sql_identifier(column)}),MAX({sql_identifier(column)}) FROM {sql_identifier(table)} '
+                                             f"WHERE typeof({sql_identifier(column)}) IN ('integer','real')").fetchone()
+                result.update(min=low,max=high,numeric_ratio=numeric/nonnull if nonnull else None)
+            elif family(dtype)=='text':
+                low,high=con.execute(f'SELECT MIN(LENGTH({sql_identifier(column)})),MAX(LENGTH({sql_identifier(column)})) FROM {sql_identifier(table)}').fetchone()
+                result.update(min_length=low,max_length=high)
             return result
         finally:con.close()
 

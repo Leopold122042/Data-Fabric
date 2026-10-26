@@ -88,9 +88,10 @@ class DomainTests(unittest.TestCase):
 
     def test_manual_confirmation_and_new_demand_version(self):
         d=self.m.intake.save({'title':'研究','object_scope':'成人','time_start':'2026-01-01','time_end':'2026-02-01',
-            'purpose':'research','quality':'完整','deadline':'2026-11-01','delivery':'summary'},'demo-requester')
+            'purpose':'research','quality':'完整','deadline':'2026-11-01','delivery':'summary',
+            'execution_constraints':{'scope':{'kind':'rows','filters':[{'field':self.age['id'],'op':'>=','value':18}]},'time_field':'test-time-field','output_mode':'aggregate','circulation_modes':['controlled_compute']}},'demo-requester')
         with self.assertRaises(DomainError):self.m.intake.confirm(d['id'],{'expected_version':1},'platform')
-        spec=self.m.intake.confirm(d['id'],{'expected_version':1,'confirmations':{'content':True,'attachments':True,'gaps':True},'note':'已确认'},'platform')
+        spec=self.m.intake.confirm(d['id'],{'expected_version':1,'confirmations':{'content':True,'attachments':True,'gaps':True,'execution_constraints':True},'note':'已确认'},'platform')
         self.assertFalse(spec['execution_authorized']);self.assertTrue(spec['gaps']['authorization'])
         d=self.s.require('demand',d['id']);self.m.intake.save({**d,'purpose':'changed','expected_version':d['version']},'demo-requester')
         self.assertEqual(self.s.require('demand',d['id'])['state'],'draft')

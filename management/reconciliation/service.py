@@ -1,5 +1,6 @@
 from datetime import datetime,timedelta,timezone
 from statistics import mean
+import threading
 from management.store import DomainError,new_id
 
 
@@ -7,6 +8,9 @@ class Reconciliation:
     def __init__(self,store,evidence,catalog):
         self.store,self.evidence,self.catalog=store,evidence,catalog
         self.controller=None
+        # Serialize case writers without holding A's storage lock across B calls.
+        # B acquires its execution lock before A's storage lock during delivery.
+        self.case_lock=threading.RLock()
 
     def assess(self,run):
         kind,oid,version=run['object_kind'],run['object_id'],run['object_version']
@@ -39,6 +43,10 @@ class Reconciliation:
         return design,deviations
 
     def run(self):
+        with self.case_lock:
+            return self._run()
+
+    def _run(self):
         results=[]
         for run in self.evidence.list():
             key='PAIR-'+run['id'];existing=self.store.get('pair',key)
@@ -61,7 +69,13 @@ class Reconciliation:
         return results
 
     def action(self,oid,body,actor):
+        with self.case_lock:
+            return self._action(oid,body,actor)
+
+    def _action(self,oid,body,actor):
         case=self.store.require('case',oid)
+        if type(body.get('expected_version')) is not int or body['expected_version']!=case['version']:
+            raise DomainError('偏差工单版本已变化，请刷新后重试',409)
         action=body.get('action')
         if not body.get('note'):raise DomainError('处置说明必填')
         if action not in ('observe','local_fix','pause_review','design_change','close'):raise DomainError('未知处置动作')
@@ -82,7 +96,10 @@ class Reconciliation:
             data.update(status='closed',closed_at=now(),closure_evidence=evidence['id'])
         elif action in ('pause_review','local_fix'):
             if self.controller is None:raise DomainError('B侧执行控制接口未接入，不能宣称已暂停或修复',503)
-            result=self.controller({'command_id':new_id('CMD'),'case_id':oid,'action':action,'object_id':case['object_id']})
+            # Review is A's case workflow; B's control contract accepts pause.
+            command_action='pause' if action=='pause_review' else action
+            result=self.controller({'command_id':new_id('CMD'),'case_id':oid,'action':command_action,
+                                    'object_id':case['object_id'],'object_version':case['object_version']})
             data.update(status='pending_execution',command_result=result)
         elif action=='design_change':data['status']='design_review'
         else:data['status']='observing'

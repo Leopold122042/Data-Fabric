@@ -18,7 +18,7 @@ def _sync(catalog):
             continue
         path=discovery.DIRECTORY/(owner+'.json')
         with discovery.LOCK:
-            records=json.loads(path.read_text()) if path.exists() else {}
+            records=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
         tables={}
         for key in registration['table_ids']:
             row=records.get(key)

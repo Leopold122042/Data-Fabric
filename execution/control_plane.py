@@ -6,6 +6,9 @@ from execution.security.control import Security,timestamp
 from execution.delivery import Delivery
 from execution.query.engine import Queries
 from execution.medical import aggregate
+from contracts.execution.constraints import fingerprint,normalize
+from execution.constraints import compile_node,verify_plan_policy,metadata_result
+from execution.security.output_policy import medical_output_policy,metadata_output_policy,view_output_policy,sensitive_output_allowed
 
 
 class Execution:
@@ -14,6 +17,7 @@ class Execution:
         self.evidence=self.management.evidence;self.store=self.evidence.store
         self.security=Security(self.store);self.delivery=Delivery(self.store,self.security);self.queries=Queries(self.management,self.store)
         self.lock=threading.RLock();self.security.lock=self.lock;self.stop=threading.Event();self.workers=[]
+        self.security.plan_validator=self.current
     def start(self):
         for job in self.store.list('job'):
             if job['state']=='running':self.update('job',job,{'state':'interrupted','error':'进程重启，需人工重试'})
@@ -37,7 +41,10 @@ class Execution:
             demand=self.management.store.require('demand',spec['demand_id'])
             if actor!='demo-platform' and demand['created_by']!=actor:raise DomainError('无权使用他人的任务规格',403)
         elif body.get('scenario')!='medical':raise DomainError('需选择A侧已确认规格')
-        mode=body.get('output_mode','aggregate')
+        if sid and body.get('scenario')=='medical':raise DomainError('医疗快捷样例不能替代已确认规格的执行条件')
+        policy=normalize(spec['specification']) if spec else None
+        mode=body.get('output_mode',policy['output_mode'] if policy else 'aggregate')
+        if policy and mode!=policy['output_mode']:raise DomainError('方案输出粒度与确认规格不一致',403)
         if mode not in ('aggregate','object'):raise DomainError('输出粒度非法')
         nodes=body.get('nodes',[])
         if body.get('scenario')=='medical':
@@ -48,8 +55,9 @@ class Execution:
         if not isinstance(nodes,list) or not 1<=len(nodes)<=20:raise DomainError('方案需1至20个节点')
         ids=[n.get('id') for n in nodes]
         if any(not isinstance(i,str) or not i for i in ids) or len(set(ids))!=len(ids):raise DomainError('节点编号为空或重复')
-        services={};views={};compiled=[]
+        services={};views={};compiled=[];output_policies={}
         for n in nodes:
+            service=view=None
             op=n.get('operation')
             if op not in ('service','view','medical'):raise DomainError('未知节点操作')
             if op=='medical' and body.get('scenario')!='medical':raise DomainError('医疗示例只能使用独立虚构场景')
@@ -69,8 +77,13 @@ class Execution:
                 views[view['id']]=view['version']
             params=n.get('params',{})
             if not isinstance(params,dict):raise DomainError('节点参数需为对象')
-            compiled.append({'id':n['id'],'operation':op,'service_id':n.get('service_id'),'view_id':n.get('view_id'),
-                'depends_on':deps,'inputs':refs,'params':params,'retries':min(3,max(0,int(n.get('retries',0))))})
+            node={'id':n['id'],'operation':op,'service_id':n.get('service_id'),'view_id':n.get('view_id'),
+                'depends_on':deps,'inputs':refs,'params':params,'retries':min(3,max(0,int(n.get('retries',0))))}
+            if policy:node['query_constraints']=compile_node(policy,node,view,service)
+            if op=='view':output_policies[n['id']]=view_output_policy(view,{fid:self.management.store.require('object',fid,v) for fid,v in view['field_versions'].items()})
+            elif op=='medical':output_policies[n['id']]=medical_output_policy()
+            else:output_policies[n['id']]=metadata_output_policy()
+            compiled.append(node)
         ordered=[];pending=compiled.copy()
         while pending:
             ready=[n for n in pending if set(n['depends_on'])<=set(ordered)]
@@ -78,18 +91,30 @@ class Execution:
             for n in ready:ordered.append(n['id']);pending.remove(n)
         output=body.get('output_node',ordered[-1])
         if output not in ids:raise DomainError('交付节点不存在')
+        if not sensitive_output_allowed({'columns':list(output_policies[output]['columns']),'rows':[]},{'output_policy':output_policies[output]}):
+            raise DomainError('输出包含未确认或受限字段，请确认目录分类并改为允许的输出',403)
+        if spec and spec['specification'].get('service_ids') and not set(services)<=set(spec['specification']['service_ids']):
+            raise DomainError('方案调用了规格未选择的服务',403)
         oid=body.get('id') or new_id('PLAN');old=self.store.get('plan',oid)
         if old and old['created_by']!=actor and actor!='demo-platform':raise DomainError('不能修改他人方案',403)
         purpose=(spec or {}).get('specification',{}).get('purpose') or '统计研究'
+        if policy is None:
+            policy={'version':1,'scope':{'kind':'medical'},'window_kind':'fixture','deadline_at':'9999-01-01T00:00:00+00:00',
+                    'purpose':purpose,'output_mode':'aggregate','circulation_modes':['controlled_compute','api','download'],
+                    'quality_min_complete':1,'max_rows':200,'min_group_size':5}
         definition={'name':body.get('name') or '本地方案','created_by':(old or {}).get('created_by',actor),'scenario':body.get('scenario','custom'),
             'workflow_id':'WF-'+oid,'workflow_version':(old or {}).get('version',0)+1,
             'spec_id':sid,'spec_version':spec['version'] if spec else None,'purpose':purpose,'output_mode':mode,'nodes':compiled,'order':ordered,
             'output_node':output,'service_versions':services,'view_versions':views,'parameters':body.get('parameters') or {'output_mode':mode},
-            'quality_min_complete':min(1,max(0,float(body.get('quality_min_complete',1)))),
-            'circulation_mode':body.get('circulation_mode','controlled_compute'),'execution_location':'本机演示执行器',
+            'quality_min_complete':float(body.get('quality_min_complete',policy['quality_min_complete'])),
+            'circulation_mode':body.get('circulation_mode',policy['circulation_modes'][0]),'execution_location':'本机演示执行器',
+            'execution_policy':policy,'execution_policy_digest':fingerprint(policy),'output_policy':output_policies[output],
             'difference':{'added_nodes':sorted(set(ids)-{n['id'] for n in (old or {}).get('nodes',[])}),'removed_nodes':sorted({n['id'] for n in (old or {}).get('nodes',[])}-set(ids)),
                           'changed_nodes':[n['id'] for n in compiled if old and n not in old['nodes']]}}
         if definition['circulation_mode'] not in ('controlled_compute','api','download'):raise DomainError('流通模式非法')
+        from contracts.execution.constraints import number
+        number(definition['quality_min_complete'],'完整率',0,1)
+        verify_plan_policy(definition,spec['specification'] if spec else None)
         plan=self.store.save('plan',oid,definition,body.get('expected_version',0),actor,'生成待确认方案；不自动执行')
         flow=self.store.save('workflow',plan['workflow_id'],{'created_by':definition['created_by'],'plan_id':oid,'plan_version':plan['version'],'nodes':compiled,'order':ordered,'max_workers':2,'failure_strategy':'block_downstream'},(old or {}).get('version',0),actor,'编译固定版本执行DAG')
         self.snapshot('workflow',flow,list(services)+list(views))
@@ -98,10 +123,14 @@ class Execution:
         self.snapshot('plan',plan,list(services)+list(views)+([sid] if sid else []));return plan
     def current(self,plan):
         latest=self.store.require('plan',plan['id']);state=self.store.require('plan_state',plan['id'])
+        registered=self.store.require('plan',plan['id'],plan['version'])
+        if plan!=registered:raise DomainError('方案定义与登记版本不一致',409)
         if latest['version']!=plan['version'] or state['plan_version']!=plan['version'] or state['status']!='confirmed':raise DomainError('方案未确认、已暂停或版本已失效',409)
         if plan.get('spec_id'):
             spec=self.management.store.require('spec',plan['spec_id']);demand=self.management.store.require('demand',spec['demand_id'])
             if spec['version']!=plan['spec_version'] or demand['state']!='confirmed' or demand.get('spec_version')!=spec['version']:raise DomainError('需求或规格变化，需重新生成并确认方案',409)
+            verify_plan_policy(plan,spec['specification'])
+        else:verify_plan_policy(plan)
         for sid,version in plan['service_versions'].items():
             s=self.management.store.require('service',sid)
             if s['version']!=version or s['lifecycle']!='published':raise DomainError('服务版本已变化或退出',409)
@@ -154,12 +183,17 @@ class Execution:
                         try:
                             params={**node['params'],**{k:results[v] for k,v in node['inputs'].items()}}
                             if node['operation']=='medical':result=aggregate(grant['min_group_size']);trace={'fixture':'reconstructed-fictional','suppression':True}
-                            elif node['operation']=='view':result,trace=self.queries.execute(self.get_view(plan,node),plan['output_mode'],grant['min_group_size'])
+                            elif node['operation']=='view':
+                                view=self.get_view(plan,node)
+                                constraints=compile_node(plan['execution_policy'],node,view)
+                                if constraints!=node.get('query_constraints'):raise DomainError('节点执行范围与确认规格不一致',403)
+                                result,trace=self.queries.execute(view,plan['output_mode'],grant['min_group_size'],constraints)
                             else:
+                                service=self.management.store.require('service',node['service_id'])
+                                compile_node(plan['execution_policy'],node,service=service)
+                                if set(params)-{'previous'}:raise DomainError('运行输入试图覆盖受控参数',403)
                                 result=self.runtime._dispatch(node['service_id'],params)
-                                handler=self.management.store.require('service',node['service_id']).get('handler_id',node['service_id'])
-                                if handler=='SVC-FED-QUERY' and plan['output_mode']=='aggregate':
-                                    result={'columns':['group','count'],'rows':[[r['group'],r['patients']] for r in result['rows'] if r['patients']>=grant['min_group_size']],'notice':'部分分组可能未满足输出条件'}
+                                result=metadata_result(result)
                                 trace={'service_id':node['service_id'],'service_version':plan['service_versions'][node['service_id']]}
                             break
                         except DomainError:raise
@@ -185,6 +219,7 @@ class Execution:
             if node['id'] not in node_states:node_states[node['id']]={'status':'blocked','reason':error}
         timeline.append({'stage':state,'time':now()})
         evidence={'id':job['id'],'object_kind':'plan','object_id':plan['id'],'object_version':plan['version'],'plan_id':plan['id'],'plan_version':plan['version'],
+            'execution_policy_digest':plan.get('execution_policy_digest'),
             'environment':self.store.environment,'status':state,'task_scope':'plan:'+plan['id'],'actor':job['actor'],'latency_ms':round((time.perf_counter()-start)*1000,3),
             'authorization':'allowed' if delivery else 'not_delivered','delivered':delivery is not None,'quality_passed':True if delivery else None,
             'delivery_id':delivery['id'] if delivery else None,'error':error,'nodes':node_states}
@@ -214,11 +249,13 @@ class Execution:
                         except DomainError:self.update('plan_state',state,{'status':'invalidated','reason':'依赖版本或有效状态变化'})
                 self.store.save('cursor','management',{'after':events[-1]['seq']},cursor['version'] if cursor else 0,'execution','A事件消费游标')
     def control(self,command):
-        with self.lock:
+        with self.lock,self.store.atomic():
             existing=self.store.get('command',command['command_id'])
             if existing:return existing
             plan=self.store.get('plan',command['object_id'])
             if not plan:raise DomainError('本地控制仅支持已登记方案，请人工处理其他对象',409)
+            if command.get('case_id') and (type(command.get('object_version')) is not int or command['object_version']!=plan['version']):
+                raise DomainError('偏差工单关联的方案版本已变化，请重新核验后处置',409)
             if command['action']=='pause':
                 self.update('plan_state',self.store.require('plan_state',plan['id']),{'status':'paused'})
                 result={'status':'applied','reason':'后续节点及交付入口已阻断'}

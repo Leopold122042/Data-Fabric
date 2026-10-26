@@ -18,7 +18,7 @@ def owner(username):return hashlib.sha256(username.strip().encode()).hexdigest()
 def read_registry(username):
     path=DIRECTORY/(owner(username)+'.json')
     if not path.exists():return {}
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding='utf-8'))
 def save_registry(username,records):
     DIRECTORY.mkdir(parents=True,exist_ok=True,mode=0o700)
     path=DIRECTORY/(owner(username)+'.json');temp=path.with_suffix('.tmp')
@@ -32,7 +32,7 @@ def definitions(username=None):
             items=[]
             if DIRECTORY.exists():
                 for path in DIRECTORY.glob('*.json'):
-                    items.extend(json.loads(path.read_text()).values())
+                    items.extend(json.loads(path.read_text(encoding='utf-8')).values())
             items=[{k:v for k,v in item.items() if k not in ('path','member')} for item in items]
         return items
 
@@ -192,7 +192,7 @@ PROVENANCE=['来源目录','来源文件','包内文件','来源工作表','来�
 def collection_path(username):return DIRECTORY/'collections'/(owner(username)+'.json')
 def collection_records(username):
     p=collection_path(username)
-    return json.loads(p.read_text()) if p.exists() else {}
+    return json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
 def save_collections(username,groups):
     p=collection_path(username);p.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     tmp=p.with_suffix('.tmp')
@@ -251,8 +251,8 @@ def collections(username=None):
         result=[]
         for p in (DIRECTORY/'collections').glob('*.json'):
             registry=DIRECTORY/p.name
-            records=json.loads(registry.read_text()) if registry.exists() else {}
-            result.extend(describe_collection(g,records,True) for g in json.loads(p.read_text()).values())
+            records=json.loads(registry.read_text(encoding='utf-8')) if registry.exists() else {}
+            result.extend(describe_collection(g,records,True) for g in json.loads(p.read_text(encoding='utf-8')).values())
         return result
 
 def query_collection(view_id,username,token,source_ids,sql=None,keyword=None):

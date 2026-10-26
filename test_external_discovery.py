@@ -25,7 +25,7 @@ class DiscoveryTest(unittest.TestCase):
         self.assertEqual(job['registered'],2);self.assertEqual(len(job['errors']),1)
         records=d.definitions('alice');ids={r['id'] for r in records}
         self.assertEqual(len(ids),2);self.assertTrue(all(r['status']=='可查询' for r in records))
-        self.assertNotIn('secret',next(Path(self.tmp.name).glob('*.json')).read_text())
+        self.assertNotIn('secret',next(Path(self.tmp.name).glob('*.json')).read_text(encoding='utf-8'))
         self.assertTrue(all('path' not in r for r in d.definitions()))
         self.run_job(b'id,name\n1,A\n');self.assertEqual(ids,{r['id'] for r in d.definitions('alice')})
         self.run_job(b'id,new_field\n1,A\n')
@@ -89,7 +89,7 @@ class DiscoveryTest(unittest.TestCase):
             self.assertEqual(fetcher.call_count,1)
             with self.assertRaises(SourceError):d.query_collection(group['id'],'other','secret',ids)
             with self.assertRaises(SourceError):d.query_collection(group['id'],'alice','secret',['foreign'])
-        saved=(Path(self.tmp.name)/'collections'/(d.owner('alice')+'.json')).read_text()
+        saved=(Path(self.tmp.name)/'collections'/(d.owner('alice')+'.json')).read_text(encoding='utf-8')
         self.assertNotIn('secret',saved);self.assertNotIn('数据·name',saved)
         old_id=group['id'];self.run_job(b'id,name\n1,A\n')
         self.assertEqual(d.collections('alice')[0]['id'],old_id)
@@ -184,6 +184,6 @@ class DiscoveryTest(unittest.TestCase):
         with patch.object(d,'fetch') as fetched:d.step(job,'alice','secret');fetched.assert_not_called()
         self.assertTrue(job['done']);self.assertTrue(job['skipped'])
         job=self.run_job(b'id,name\n1,PRIVATE_VALUE\n')
-        self.assertNotIn('PRIVATE_VALUE',next(Path(self.tmp.name).glob('*.json')).read_text())
+        self.assertNotIn('PRIVATE_VALUE',next(Path(self.tmp.name).glob('*.json')).read_text(encoding='utf-8'))
 
 if __name__=='__main__':unittest.main()

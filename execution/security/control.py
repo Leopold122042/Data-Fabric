@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 import threading
 from platform_core.storage import DomainError, new_id, now
+from contracts.execution.constraints import fingerprint,instant,number
 
 
 def timestamp(value):
@@ -13,14 +14,25 @@ def timestamp(value):
 
 
 class Security:
-    def __init__(self,store):self.store=store;self.lock=threading.RLock()
+    def __init__(self,store):self.store=store;self.lock=threading.RLock();self.plan_validator=None
     def grant(self,body,actor):
         if self.store.environment!='demo':raise DomainError('真实授权适配器尚未接入，拒绝签发演示授权',503)
         if not all(body.get(k) for k in ('subject','purpose','plan_id','plan_version','expires_at')):raise DomainError('授权缺少主体、用途、方案版本或期限')
         timestamp(body['expires_at'])
-        if body.get('mode','aggregate') not in ('aggregate','object'):raise DomainError('输出粒度非法')
+        plan=self.store.require('plan',body['plan_id'],body['plan_version'])
+        if self.plan_validator:self.plan_validator(plan)
+        policy=plan.get('execution_policy')
+        if not policy:raise DomainError('方案缺少执行条件，请重新生成',409)
+        mode=body.get('mode',plan['output_mode'])
+        if mode not in ('aggregate','object'):raise DomainError('输出粒度非法')
+        if mode!=policy['output_mode'] or body['purpose']!=policy['purpose']:raise DomainError('授权不得放宽规格的用途或输出粒度',403)
+        if timestamp(body['expires_at'])>instant(policy['deadline_at']):raise DomainError('授权期限不得超过规格交付时限',403)
+        min_group=number(body.get('min_group_size',policy['min_group_size']),'最小分组记录数',5,100000,True)
+        max_rows=number(body.get('max_rows',policy['max_rows']),'最大交付行数',1,200,True)
+        if min_group<policy['min_group_size'] or max_rows>policy['max_rows']:raise DomainError('授权不得放宽规格的分组或行数限制',403)
         data={k:body[k] for k in ('subject','purpose','plan_id','plan_version','expires_at')}
-        data.update(mode=body.get('mode','aggregate'),status='active',scope='local-demo',min_group_size=max(5,int(body.get('min_group_size',5))),max_rows=min(200,max(1,int(body.get('max_rows',200)))))
+        data.update(mode=mode,status='active',scope='local-demo',min_group_size=min_group,max_rows=max_rows,
+                    execution_policy_digest=plan['execution_policy_digest'],plan_digest=fingerprint(plan))
         data['contract_id']=body.get('contract_id')
         if data['contract_id']:
             contract=self.store.require('contract',data['contract_id'])
@@ -38,6 +50,17 @@ class Security:
         elif grant['subject']!=actor or grant['purpose']!=purpose:reason='主体或用途超出授权范围'
         elif grant['plan_id']!=plan['id'] or grant['plan_version']!=plan['version']:reason='授权不适用当前方案版本'
         elif grant['mode']!=plan['output_mode']:reason='仅允许汇总查询' if grant['mode']=='aggregate' else '输出粒度不匹配'
+        if reason is None:
+            try:
+                registered=self.store.require('plan',plan['id'],plan['version'])
+                if plan!=registered or grant.get('plan_digest')!=fingerprint(registered):raise DomainError('授权绑定的方案定义已变化，请重新确认并授权',403)
+                if grant.get('execution_policy_digest')!=plan.get('execution_policy_digest'):raise DomainError('授权缺少匹配的执行条件，请重新授权',403)
+                if self.plan_validator:self.plan_validator(plan)
+                from execution.constraints import verify_plan_policy
+                policy=verify_plan_policy(plan)
+                if timestamp(grant['expires_at'])>instant(policy['deadline_at']) or grant['max_rows']>policy['max_rows'] or grant['min_group_size']<policy['min_group_size']:
+                    raise DomainError('授权放宽了规格的期限或输出限制',403)
+            except DomainError as exc:reason=str(exc)
         if grant and grant.get('contract_id') and reason is None:
             contract=self.store.require('contract',grant['contract_id'])
             if set(contract['accepted'])!=set(contract['parties']):reason='合约参与方尚未全部确认'

@@ -54,16 +54,22 @@ class Semantic:
         c=self.store.require('concept',cid);rows=[]
         if c.get('aggregate_only'):raise DomainError('请先选择业务对象下的具体属性概念，如客户编号、机构名称或指标值')
         objects=self.store.list('object');tables={o['id']:o for o in objects if o.get('kind')=='table'}
+        rules=self.reusable_rules(c,{o['id']:o for o in objects})
         for f in objects:
             if f.get('kind')!='field' or f.get('status')!='active':continue
             veto,unknown=self.evidence(c,[f])
             table=tables.get(f.get('parent_id'),{})
             peers=[o['name'] for o in objects if o.get('parent_id')==f.get('parent_id')]
             score,coverage,components=rank(c,f,table,peers,family)
+            matches=[] if veto else [r for r in rules if r['field_name'].casefold()==f['name'].casefold()
+                                    and family(r['type'])==family(f.get('structure',{}).get('type','unknown'))]
+            # Experience affects ordering, never hard vetoes or evidence coverage.
+            bonus=.1 if matches else 0
             if not components['values']['available']:unknown.append('缺少可比较的取值剖析；请运行字段剖析或外部元数据检测')
             if not components['context']['available']:unknown.append('缺少业务说明、业务域或上下文关键词')
             rows.append({'field_id':f['id'],'field_version':f['version'],'concept_version':c['version'],'name':f['name'],'source':f['source_id'],'table':f['table'],
-                         'score':0 if veto else score,'coverage':coverage,'components':components,
+                         'score':0 if veto else round(min(1,score+bonus),3),'base_score':score,'coverage':coverage,'components':components,
+                         'experience':{'bonus':bonus,'rules':matches},
                          'veto':veto,'uncertainty':unknown,'status':'rejected' if veto else 'needs_confirmation',
                          'score_note':'规则匹配分，不代表统计概率；所有映射需人工确认'})
         rows.sort(key=lambda x:(bool(x['veto']),-x['score'],x['field_id']))
@@ -75,6 +81,30 @@ class Semantic:
             if row['score']>=.8 and row['coverage']>=.8 and margin>=.1 and not row['uncertainty']:row['status']='suggested'
             elif margin<.1:row['uncertainty'].append('同表候选接近或存在更优候选，需人工辨别')
         return rows
+
+    def reusable_rules(self,concept,objects):
+        """Use only current, human-confirmed direct mappings as field-name hints."""
+        result=[]
+        for rule in self.store.list('mapping_rule'):
+            if rule.get('concept_id')!=concept['id']:continue
+            mapping=self.store.get('mapping',rule.get('mapping_id',''))
+            if not mapping or mapping.get('status')!='confirmed' or mapping.get('mapping_type')!='direct':continue
+            if mapping.get('concept_id')!=concept['id'] or mapping.get('concept_version')!=concept['version']:continue
+            if not mapping.get('confirmed_by') or not str(mapping.get('confirmation_note','')).strip():continue
+            if rule.get('mapping_version',mapping['version'])!=mapping['version']:continue
+            if rule.get('concept_version',concept['version'])!=concept['version']:continue
+            ids=mapping.get('fields',[])
+            if len(ids)!=1:continue
+            source=objects.get(ids[0]);versions=mapping.get('field_versions',{})
+            if not source or source.get('kind')!='field' or source.get('status')!='active' or source['version']!=versions.get(source['id']):continue
+            if source['name']!=rule.get('field_name'):continue
+            dtype=source.get('structure',{}).get('type','unknown')
+            if family(dtype)=='unknown' or family(dtype)!=family(rule.get('type','unknown')):continue
+            if self.evidence(concept,[source])[0]:continue
+            result.append({'rule_id':rule['id'],'mapping_id':mapping['id'],'mapping_version':mapping['version'],
+                           'concept_version':concept['version'],'source_field_id':source['id'],'source_field_version':source['version'],
+                           'confirmed_by':mapping['confirmed_by'],'field_name':source['name'],'type':dtype})
+        return result
 
     def mapping(self,body,actor):
         c=self.store.require('concept',body.get('concept_id',''))
@@ -123,7 +153,9 @@ class Semantic:
         if status=='confirmed':
             for f in fields:
                 rid=c['id']+':'+f['name'];old=self.store.get('mapping_rule',rid)
-                self.store.save('mapping_rule',rid,{'concept_id':c['id'],'field_name':f['name'],'type':f.get('structure',{}).get('type'),'mapping_id':item['id']},old['version'] if old else 0,actor,'复用已确认映射')
+                self.store.save('mapping_rule',rid,{'concept_id':c['id'],'concept_version':c['version'],
+                    'field_name':f['name'],'type':f.get('structure',{}).get('type'),'mapping_id':item['id'],
+                    'mapping_version':item['version'],'mapping_type':kind},old['version'] if old else 0,actor,'复用已确认映射')
         return item
 
     def resolve(self,cid):

@@ -4,6 +4,7 @@ from pathlib import Path
 import medsim
 from platform_core.storage import DomainError,new_id
 from execution.query.expressions import compile_expression,mapping_expression
+from execution.security.output_policy import field_type
 
 
 def quote(value):return '"'+str(value).replace('"','""')+'"'
@@ -76,13 +77,17 @@ class Queries:
             if not path.resolve().is_relative_to(root):raise DomainError('源不在允许的数据目录',403)
             sources.append((sid,table,path.resolve(),columns))
         return sources
-    def execute(self,view,mode,min_group=5):
+    def execute(self,view,mode,min_group=5,constraints=None):
         import duckdb
         if mode!=view['output_mode']:raise DomainError('视图输出粒度与授权不一致',403)
         sources=self.sources(view)
+        constraints=constraints or {}
+        required={c['field'] for c in constraints.get('filters',[])}|({constraints['time_field']} if constraints.get('time_field') else set())
+        if not required<=set(view['field_versions']):raise DomainError('查询缺少执行条件字段',403)
         if mode=='object' and any(f['name'].lower() in ('patient_id','record_id','name','phone','身份证','姓名') for _,_,_,fields in sources for f in fields):raise DomainError('对象级结果包含受限标识字段；请改为汇总输出',403)
         stamp=[(sid,table,str(path.stat().st_mtime_ns),[(f['id'],f['version']) for f in fields],Path(str(path)+'-wal').stat().st_mtime_ns if Path(str(path)+'-wal').exists() else 0) for sid,table,path,fields in sources]
-        key=hashlib.sha256(json.dumps([view['id'],view['version'],stamp,mode,min_group]).encode()).hexdigest()
+        # Exclude old materializations that serialized SQLite booleans as strings.
+        key=hashlib.sha256(json.dumps(['sqlite-types-v2',view['id'],view['version'],stamp,mode,min_group,constraints],sort_keys=True).encode()).hexdigest()
         cached=self.store.get('materialization',key)
         if cached and cached['expires_epoch']>time.time():return cached['result'],{'cache_hit':True,'materialization_id':key,'sources':cached['sources']}
         con=duckdb.connect(':memory:');deadline=time.monotonic()+5;locations={};trace=[]
@@ -90,9 +95,13 @@ class Queries:
             con.execute("SET enable_external_access=false");con.execute("SET memory_limit='128MB'");con.execute('SET threads=1')
             for index,(sid,table,path,fields) in enumerate(sources):
                 params=[];where=[];byid={f['id']:f for f in fields}
-                for condition in view['filters']:
+                for condition in view['filters']+constraints.get('filters',[]):
                     if condition['field'] in byid:
                         where.append(quote(byid[condition['field']]['name'])+' '+condition['op']+' ?');params.append(condition.get('value'))
+                if constraints.get('time_field') in byid:
+                    column=quote(byid[constraints['time_field']]['name'])
+                    where.extend(['julianday('+column+') >= julianday(?)','julianday('+column+') < julianday(?)'])
+                    params.extend([constraints['time_start'],constraints['time_end_exclusive']])
                 sql='SELECT '+','.join(quote(f['name']) for f in fields)+' FROM '+quote(table)+(' WHERE '+' AND '.join(where) if where else '')+' LIMIT 10001'
                 db=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)
                 try:
@@ -101,12 +110,22 @@ class Queries:
                 finally:db.close()
                 if len(rows)>10000:raise DomainError('源返回超过本地查询预算，请增加过滤条件')
                 alias='s'+str(index)
-                def sql_type(f):
-                    dtype=f['structure'].get('type','').lower()
-                    if 'int' in dtype:return ' BIGINT'
-                    if any(t in dtype for t in ('real','double','numeric','float','decimal')):return ' DOUBLE'
-                    return ' VARCHAR'
-                con.execute('CREATE TABLE '+alias+'('+','.join('c'+str(i)+sql_type(f) for i,f in enumerate(fields))+')')
+                types=[field_type(f) for f in fields]
+                boolean_columns=[i for i,dtype in enumerate(types) if dtype=='boolean']
+                if boolean_columns:
+                    converted=[]
+                    for row in rows:
+                        values=list(row)
+                        for i in boolean_columns:
+                            value=values[i]
+                            if value is not None:
+                                if type(value) not in (int,bool) or value not in (0,1):
+                                    raise DomainError('布尔字段只能包含0、1或NULL，拒绝隐式类型转换')
+                                values[i]=bool(value)
+                        converted.append(values)
+                    rows=converted
+                sql_types={'integer':' BIGINT','number':' DOUBLE','boolean':' BOOLEAN','string':' VARCHAR'}
+                con.execute('CREATE TABLE '+alias+'('+','.join('c'+str(i)+sql_types[dtype] for i,dtype in enumerate(types))+')')
                 if rows:con.executemany('INSERT INTO '+alias+' VALUES ('+','.join('?' for _ in fields)+')',rows)
                 for i,f in enumerate(fields):locations[f['id']]=alias+'.c'+str(i)
                 trace.append({'source_id':sid,'table':table,'rows_read':len(rows),'pushed_projection':[f['name'] for f in fields],'pushed_filters':len(where),'local_alias':alias})
@@ -131,6 +150,12 @@ class Queries:
             finally:timer.cancel()
             if len(rows)>200:raise DomainError('结果超过交付预算，请缩小查询范围')
             result={'columns':columns,'rows':[list(r) for r in rows],'notice':'部分分组可能未满足输出条件' if mode=='aggregate' else '本地对象级结果'}
+            if constraints:
+                from execution.security.output_policy import view_output_policy,sensitive_output_allowed
+                fields_by_id={f['id']:f for _,_,_,fields in sources for f in fields}
+                output_policy=view_output_policy(view,fields_by_id)
+                if not sensitive_output_allowed(result,{'output_policy':output_policy}):
+                    raise DomainError('查询输出未通过字段分类或敏感内容检查，未缓存结果',403)
             old=self.store.get('materialization',key)
             self.store.save('materialization',key,{'result':result,'sources':trace,'expires_epoch':time.time()+60,'view_id':view['id']},old['version'] if old else 0,'execution','按版本与源指纹缓存，命中仍需重新授权')
             return result,{'cache_hit':False,'materialization_id':key,'sources':trace,'optimizer':'DuckDB本地代价优化','physical_plan':physical_plan,'chosen_plan':'字段/过滤下推后本地等值连接','alternatives':[{'name':'全表拉取','selected':False,'reason':'传输与内存成本较高'}]}
