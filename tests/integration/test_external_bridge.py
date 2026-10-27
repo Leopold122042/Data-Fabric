@@ -63,9 +63,11 @@ class ExternalBridgeTest(unittest.TestCase):
                 self.assertIn('platform-shell.js',html)
                 self.assertNotIn('legacy-init.js',html)
             shell=c.get('/static/shared/platform-shell.js').text
-            self.assertIn('外部数据接入',shell)
-            self.assertIn('/static/platform/connections.html',shell)
-            self.assertIn('/static/platform/resources.html',shell)
+            self.assertIn('/static/shared/access-model.js',shell)
+            navigation=c.get('/static/shared/access-model.js').text
+            self.assertIn('外部数据接入',navigation)
+            self.assertIn('/static/platform/connections.html',navigation)
+            self.assertIn('/static/platform/resources.html',navigation)
             self.assertIn('已接入',c.get('/api/management/status').json()['capabilities']['external_sources'])
             with patch('external_virtual.catalog',side_effect=AssertionError('legacy catalog must not be needed')):
                 status=c.get('/api/external/platform/status',headers={'X-Medfabric-External':'1'})

@@ -37,7 +37,7 @@ class Security:
         if data['contract_id']:
             contract=self.store.require('contract',data['contract_id'])
             if (contract['plan_id'],contract['plan_version'])!=(data['plan_id'],data['plan_version']):raise DomainError('合约与方案版本不匹配')
-        return self.store.save('grant',new_id('GRANT'),data,0,actor,'本地演示授权；非课题四真实决定')
+        return self.store.save('grant',new_id('GRANT'),data,0,actor,'本地授权登记；跨机构授权适配器尚未接入')
     def revoke(self,oid,actor):
         with self.lock:
             g=self.store.require('grant',oid)
@@ -65,6 +65,6 @@ class Security:
             contract=self.store.require('contract',grant['contract_id'])
             if set(contract['accepted'])!=set(contract['parties']):reason='合约参与方尚未全部确认'
             elif timestamp(contract['expires_at'])<=datetime.now(timezone.utc):reason='合约已到期'
-        decision=self.store.save('decision',new_id('DEC'),{'grant_id':gid,'plan_id':plan['id'],'plan_version':plan['version'],'actor':actor,'purpose':purpose,'stage':stage,'allowed':reason is None,'reason':reason or '本地演示授权通过','scope':'local-demo'},0,actor,'执行点授权核验')
+        decision=self.store.save('decision',new_id('DEC'),{'grant_id':gid,'plan_id':plan['id'],'plan_version':plan['version'],'actor':actor,'purpose':purpose,'stage':stage,'allowed':reason is None,'reason':reason or '本地授权核验通过','scope':'local-demo'},0,actor,'执行点授权核验')
         if reason:raise DomainError(reason,403)
         return grant,decision

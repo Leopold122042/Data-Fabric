@@ -107,7 +107,7 @@ class Execution:
             'spec_id':sid,'spec_version':spec['version'] if spec else None,'purpose':purpose,'output_mode':mode,'nodes':compiled,'order':ordered,
             'output_node':output,'service_versions':services,'view_versions':views,'parameters':body.get('parameters') or {'output_mode':mode},
             'quality_min_complete':float(body.get('quality_min_complete',policy['quality_min_complete'])),
-            'circulation_mode':body.get('circulation_mode',policy['circulation_modes'][0]),'execution_location':'本机演示执行器',
+            'circulation_mode':body.get('circulation_mode',policy['circulation_modes'][0]),'execution_location':'本地执行器',
             'execution_policy':policy,'execution_policy_digest':fingerprint(policy),'output_policy':output_policies[output],
             'difference':{'added_nodes':sorted(set(ids)-{n['id'] for n in (old or {}).get('nodes',[])}),'removed_nodes':sorted({n['id'] for n in (old or {}).get('nodes',[])}-set(ids)),
                           'changed_nodes':[n['id'] for n in compiled if old and n not in old['nodes']]}}
@@ -116,7 +116,7 @@ class Execution:
         number(definition['quality_min_complete'],'完整率',0,1)
         verify_plan_policy(definition,spec['specification'] if spec else None)
         plan=self.store.save('plan',oid,definition,body.get('expected_version',0),actor,'生成待确认方案；不自动执行')
-        flow=self.store.save('workflow',plan['workflow_id'],{'created_by':definition['created_by'],'plan_id':oid,'plan_version':plan['version'],'nodes':compiled,'order':ordered,'max_workers':2,'failure_strategy':'block_downstream'},(old or {}).get('version',0),actor,'编译固定版本执行DAG')
+        flow=self.store.save('workflow',plan['workflow_id'],{'name':definition['name']+' · 执行流程','created_by':definition['created_by'],'plan_id':oid,'plan_version':plan['version'],'nodes':compiled,'order':ordered,'max_workers':2,'failure_strategy':'block_downstream'},(old or {}).get('version',0),actor,'编译固定版本执行DAG')
         self.snapshot('workflow',flow,list(services)+list(views))
         state=self.store.get('plan_state',oid)
         self.store.save('plan_state',oid,{'plan_version':plan['version'],'status':'draft'},state['version'] if state else 0,actor,'新版本需重新确认')

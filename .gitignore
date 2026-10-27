@@ -8,5 +8,7 @@ __pycache__/
 /private_catalog/
 
 /runtime/
+/data/demo_scenarios_v1/
+/data/healthcare_scenarios_v2/
 .venv/
 .pytest_cache/

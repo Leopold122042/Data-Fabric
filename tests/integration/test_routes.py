@@ -49,7 +49,7 @@ class RoutesTest(unittest.TestCase):
     def test_other_role_cannot_read_private_demand_history(self):
         d=self.client.post('/api/management/demands',json={'title':'private'},headers={'X-Demo-Role':'requester'}).json()
         r=self.client.get('/api/management/items/demand',headers={'X-Demo-Role':'provider'})
-        self.assertEqual(r.json()['items'],[])
+        self.assertEqual(r.status_code,403)
         self.assertEqual(self.client.get('/api/management/items/demand/'+d['id']+'/history',headers={'X-Demo-Role':'provider'}).status_code,403)
 
     def test_store_restart_retains_draft_and_history(self):
@@ -63,7 +63,19 @@ class StartupTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp,patch.object(medsim,'DATA_DIR',str(Path(tmp)/'data')):
             medsim.generate_base()
             app=create_app(Path(tmp)/'control',simulate=False)
-            with TestClient(app) as c:
+            from platform_core.healthcare_scenarios import seed_healthcare
+            from platform_core.scenario_replacement import replace_legacy_scenarios
+            def before_monitor(operation):
+                def checked(runtime):
+                    self.assertFalse(any(t.is_alive() for t in runtime.threads),
+                        'Catalog monitor must not recreate retired objects during replacement')
+                    return operation(runtime)
+                return checked
+            with patch('platform_core.healthcare_scenarios.seed_healthcare', side_effect=before_monitor(seed_healthcare)), \
+                 patch('platform_core.scenario_replacement.replace_legacy_scenarios', side_effect=before_monitor(replace_legacy_scenarios)), \
+                 TestClient(app) as c:
+                self.assertTrue(app.state.runtime.demo_scenarios['ready'])
+                self.assertTrue(any(t.is_alive() for t in app.state.runtime.threads))
                 for path in ['/api/overview','/api/catalog','/api/graph?patients=2','/api/patients?limit=1','/api/search?q=高血压','/api/cockpit','/api/orchestrator']:
                     r=c.get(path);self.assertEqual(r.status_code,200,(path,r.text[:300]))
                 items=c.get('/api/management/items/object').json()['items'];self.assertTrue(items)

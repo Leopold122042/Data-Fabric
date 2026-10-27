@@ -46,8 +46,8 @@ def validator(runtime):
         sample=result is not None and failure is None
         consistency=sample and check_schema(result,service['output_schema'])
         checks={'semantic':{'passed':semantic,'reason':'; '.join(reasons) or '目录引用与已确认映射核对'},
-                'schema':{'passed':schema,'reason':'输入模式检查'},'sample':{'passed':sample,'reason':failure or '样例实际执行成功'},
-                'permission':{'passed':allowed,'reason':'仅验证本地演示策略边界，未接入课题四'},
+                'schema':{'passed':schema,'reason':'输入模式检查'},'sample':{'passed':sample,'reason':failure or '验证请求执行成功'},
+                'permission':{'passed':allowed,'reason':'本地策略核验；跨机构信任尚未接入'},
                 'reachable':{'passed':reachable,'reason':'已注册本地handler'},'consistency':{'passed':consistency,'reason':'实际输出与声明模式比对'}}
         runtime.management.evidence.record({'object_kind':'service','object_id':service['id'],'object_version':service['version'],
             'environment':runtime.management.store.environment,'status':'success' if all(v['passed'] for v in checks.values()) else 'failed',

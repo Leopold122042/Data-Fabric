@@ -12,10 +12,17 @@
 #subtabs button[aria-pressed=true]{background:#eaf3fc;color:#246aab;border-color:#509ee3}
 @media(max-width:760px){
  .platform-sidebar{position:relative!important;height:auto;max-height:260px;border-bottom:1px solid #e3e9ef}
- .platform-sidebar details{display:inline-block;vertical-align:top;width:48%;margin:0 0 6px}
+ .platform-sidebar details{display:block;width:100%;margin:0 0 6px}
  .platform-sidebar .platform-brand{font-size:20px}.platform-caption{padding-bottom:8px}
  .platform-journey{gap:5px}.platform-journey a{padding:6px;font-size:12px}
 }
 .platform-overview-items{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;padding:18px}
 .platform-overview-items a{display:flex;flex-direction:column;gap:9px;text-decoration:none;border:1px solid #e3e9ef;border-radius:8px;padding:14px;color:#246aab;background:#f8fafc}
 .platform-overview-items span{font-size:12px;color:#637486}
+
+[hidden]{display:none!important}
+.access-read-badge{display:inline-block;margin-left:6px;padding:1px 4px;border:1px solid #d4dee8;border-radius:4px;color:#61788f;font-size:10px;vertical-align:middle;line-height:1.4;white-space:nowrap}
+.access-status{padding:9px 12px;border:1px solid #d8e7f3;border-radius:7px;background:#f4f9fd;color:#365874;font-size:13px;margin:0 0 14px}
+.access-status[data-access=read]{background:#f7f8fa;border-color:#dce1e7;color:#586777}
+.access-denied{padding:24px}.access-denied h1{font-size:24px}.access-denied p{color:#637486}
+.management-actions:empty::after{content:'当前目录无可用操作；可选择记录查看详情。';font-size:13px;color:#6b7f91}

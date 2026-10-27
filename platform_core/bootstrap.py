@@ -42,7 +42,13 @@ def create_app(control_root=None,start_runtime=True,simulate=None,identity=None)
     async def lifespan(app):
         try:
             if start_runtime:
-                runtime.startup()
+                runtime.startup(start_background=False)
+                if environment=='demo' and os.environ.get('MEDFABRIC_DEMO_SCENARIOS','1')!='0':
+                    from platform_core.healthcare_scenarios import seed_healthcare
+                    from platform_core.scenario_replacement import replace_legacy_scenarios
+                    runtime.demo_scenarios=seed_healthcare(runtime)
+                    runtime.scenario_replacement=replace_legacy_scenarios(runtime)
+                runtime.start_background()
                 runtime.execution.start()
                 runtime.external_governance.start()
             yield

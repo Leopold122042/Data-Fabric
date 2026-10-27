@@ -50,7 +50,7 @@ class Intake:
             if confirmations.get('execution_constraints') is not True:
                 raise DomainError('需核对并确认范围筛选、时间字段和交付执行条件')
             spec_id='SPEC-'+oid;previous=self.store.get('spec',spec_id)
-            spec=self.store.save('spec',spec_id,{'demand_id':oid,'demand_version':d['version'],
+            spec=self.store.save('spec',spec_id,{'name':d['title']+' · 任务规格','demand_id':oid,'demand_version':d['version'],
                 'specification':{k:d.get(k) for k in (*REQUIRED,'service_ids','cost','attachments','execution_constraints')},
                 'gaps':gaps,'confirmed_by':actor,'confirmation_note':body['note'],
                 'confirmed':True,'execution_authorized':False},previous['version'] if previous else 0,actor,'人工确认任务规格')

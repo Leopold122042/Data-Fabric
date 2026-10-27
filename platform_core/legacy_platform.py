@@ -88,7 +88,7 @@ class PlatformHandlers:
             except Exception as exc:
                 print('[circ] error:', exc, flush=True)
 
-    def startup(self):
+    def startup(self, start_background=True):
         t0 = time.time()
         self.SERVER_STARTED_AT = t0
         self.SERVER_STARTED_MONOTONIC = time.monotonic()
@@ -104,10 +104,15 @@ class PlatformHandlers:
         self.management.semantic.import_legacy()
         self._sample_metrics()
         print('[startup] ready in %.1fs, sources=%d' % (time.time() - t0, len(medsim.SOURCE_DEFS)), flush=True)
-        if True:
-            thread = threading.Thread(target=self._monitor_loop, daemon=True)
-            self.threads.append(thread)
-            thread.start()
+        if start_background:
+            self.start_background()
+
+    def start_background(self):
+        if self.stop_event.is_set() or any(thread.is_alive() for thread in self.threads):
+            return
+        thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self.threads.append(thread)
+        thread.start()
         if self.simulate:
             thread = threading.Thread(target=self._patrol_loop, daemon=True)
             self.threads.append(thread)

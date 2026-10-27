@@ -1,5 +1,6 @@
 import {api,action,list,need,show,form,edit,history,init,$} from './ui.js';
-await init('数据目录与血缘','扫描本地源及已纳入的外部表结构，登记结构、业务说明、责任人和限制；改名需人工确认，保留对象编号。');
+async function main(){
+if(!await init('数据目录与血缘','扫描本地源及已纳入的外部表结构，登记结构、业务说明、责任人和限制；改名需人工确认，保留对象编号。'))return;
 const load=()=>list('object');$('#refresh').onclick=()=>load().catch(e=>show(e.message));
 action('扫描目录变更',async()=>{show(await api('/catalog/scan',{}),'本次变化');await load();});
 action('编辑说明',()=>edit('object','/catalog/'+need().id+'/annotate','元数据说明',[
@@ -11,3 +12,6 @@ action('导出目录',async()=>{const d=await api('/catalog/export');const url=U
 action('接入本地文件',()=>edit('object','/sources','源文件应位于MEDFABRIC_DATA_DIR内',[['source_id','新数据源ID'],['name','名称'],['connector','连接器','select',['sqlite','csv','json']],['path','相对数据目录的文件路径']]));
 action('字段统计剖析',async()=>{show(await api('/catalog/'+need().id+'/profile',{}));await load();});
 action('登记加工血缘',()=>edit('object','/relations','上下游关系',[['source','上游对象ID'],['target','下游对象ID'],['type','关系类型','select',['transforms','uses','depends_on']]]));
+
+}
+main().catch(error=>{const host=document.querySelector('#status');if(host)host.textContent=error.message;});

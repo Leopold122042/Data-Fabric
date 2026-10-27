@@ -1,0 +1,833 @@
+{
+  "version": 1,
+  "levels": {
+    "write": "可查看、可操作",
+    "read": "仅可查看",
+    "none": "不可查看"
+  },
+  "resources": {
+    "demand": {
+      "platform": "write",
+      "provider": "none",
+      "requester": "write",
+      "auditor": "read"
+    },
+    "spec": {
+      "platform": "read",
+      "provider": "none",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "service": {
+      "platform": "write",
+      "provider": "write",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "object": {
+      "platform": "write",
+      "provider": "read",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "source": {
+      "platform": "write",
+      "provider": "read",
+      "requester": "none",
+      "auditor": "read"
+    },
+    "identifier": {
+      "platform": "write",
+      "provider": "none",
+      "requester": "none",
+      "auditor": "read"
+    },
+    "concept": {
+      "platform": "write",
+      "provider": "read",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "mapping": {
+      "platform": "write",
+      "provider": "read",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "relation": {
+      "platform": "write",
+      "provider": "none",
+      "requester": "none",
+      "auditor": "read"
+    },
+    "mapping_rule": {
+      "platform": "read",
+      "provider": "none",
+      "requester": "none",
+      "auditor": "read"
+    },
+    "validation": {
+      "platform": "read",
+      "provider": "read",
+      "requester": "none",
+      "auditor": "read"
+    },
+    "scan": {
+      "platform": "read",
+      "provider": "none",
+      "requester": "none",
+      "auditor": "read"
+    },
+    "notice": {
+      "platform": "read",
+      "provider": "read",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "external_design": {
+      "platform": "write",
+      "provider": "none",
+      "requester": "none",
+      "auditor": "read"
+    },
+    "case": {
+      "platform": "write",
+      "provider": "none",
+      "requester": "none",
+      "auditor": "read"
+    },
+    "pair": {
+      "platform": "read",
+      "provider": "none",
+      "requester": "none",
+      "auditor": "read"
+    },
+    "feedback": {
+      "platform": "write",
+      "provider": "read",
+      "requester": "write",
+      "auditor": "read"
+    },
+    "improvement": {
+      "platform": "write",
+      "provider": "read",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "metric_definition": {
+      "platform": "write",
+      "provider": "read",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "plan": {
+      "platform": "write",
+      "provider": "none",
+      "requester": "write",
+      "auditor": "read"
+    },
+    "workflow": {
+      "platform": "read",
+      "provider": "none",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "view": {
+      "platform": "write",
+      "provider": "write",
+      "requester": "write",
+      "auditor": "read"
+    },
+    "job": {
+      "platform": "write",
+      "provider": "none",
+      "requester": "write",
+      "auditor": "read"
+    },
+    "grant": {
+      "platform": "write",
+      "provider": "read",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "decision": {
+      "platform": "read",
+      "provider": "read",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "run": {
+      "platform": "read",
+      "provider": "read",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "delivery": {
+      "platform": "write",
+      "provider": "none",
+      "requester": "write",
+      "auditor": "read"
+    },
+    "trigger": {
+      "platform": "write",
+      "provider": "none",
+      "requester": "write",
+      "auditor": "read"
+    },
+    "contract": {
+      "platform": "write",
+      "provider": "write",
+      "requester": "write",
+      "auditor": "read"
+    },
+    "facility": {
+      "platform": "write",
+      "provider": "write",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "risk": {
+      "platform": "write",
+      "provider": "none",
+      "requester": "none",
+      "auditor": "read"
+    },
+    "rule": {
+      "platform": "write",
+      "provider": "none",
+      "requester": "none",
+      "auditor": "read"
+    },
+    "event": {
+      "platform": "read",
+      "provider": "none",
+      "requester": "none",
+      "auditor": "read"
+    },
+    "overview": {
+      "platform": "read",
+      "provider": "read",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "about": {
+      "platform": "read",
+      "provider": "read",
+      "requester": "read",
+      "auditor": "read"
+    },
+    "connection": {
+      "platform": "write",
+      "provider": "write",
+      "requester": "write",
+      "auditor": "write"
+    },
+    "patient": {
+      "platform": "read",
+      "provider": "none",
+      "requester": "none",
+      "auditor": "none"
+    }
+  },
+  "actions": {
+    "demand.read": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "demand.history": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "spec.read": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "spec.history": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "service.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "service.history": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "object.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "object.history": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "source.read": [
+      "platform",
+      "provider",
+      "auditor"
+    ],
+    "source.history": [
+      "platform",
+      "provider",
+      "auditor"
+    ],
+    "identifier.read": [
+      "platform",
+      "auditor"
+    ],
+    "identifier.history": [
+      "platform",
+      "auditor"
+    ],
+    "concept.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "concept.history": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "mapping.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "mapping.history": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "relation.read": [
+      "platform",
+      "auditor"
+    ],
+    "relation.history": [
+      "platform",
+      "auditor"
+    ],
+    "mapping_rule.read": [
+      "platform",
+      "auditor"
+    ],
+    "mapping_rule.history": [
+      "platform",
+      "auditor"
+    ],
+    "validation.read": [
+      "platform",
+      "provider",
+      "auditor"
+    ],
+    "validation.history": [
+      "platform",
+      "provider",
+      "auditor"
+    ],
+    "scan.read": [
+      "platform",
+      "auditor"
+    ],
+    "scan.history": [
+      "platform",
+      "auditor"
+    ],
+    "notice.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "notice.history": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "external_design.read": [
+      "platform",
+      "auditor"
+    ],
+    "external_design.history": [
+      "platform",
+      "auditor"
+    ],
+    "case.read": [
+      "platform",
+      "auditor"
+    ],
+    "case.history": [
+      "platform",
+      "auditor"
+    ],
+    "pair.read": [
+      "platform",
+      "auditor"
+    ],
+    "pair.history": [
+      "platform",
+      "auditor"
+    ],
+    "feedback.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "feedback.history": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "improvement.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "improvement.history": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "metric_definition.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "metric_definition.history": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "plan.read": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "plan.history": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "workflow.read": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "workflow.history": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "view.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "view.history": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "job.read": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "job.history": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "grant.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "grant.history": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "decision.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "decision.history": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "run.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "run.history": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "delivery.read": [
+      "platform",
+      "requester"
+    ],
+    "delivery.history": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "trigger.read": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "trigger.history": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "contract.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "contract.history": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "facility.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "facility.history": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "risk.read": [
+      "platform",
+      "auditor"
+    ],
+    "risk.history": [
+      "platform",
+      "auditor"
+    ],
+    "rule.read": [
+      "platform",
+      "auditor"
+    ],
+    "rule.history": [
+      "platform",
+      "auditor"
+    ],
+    "event.read": [
+      "platform",
+      "auditor"
+    ],
+    "event.history": [
+      "platform",
+      "auditor"
+    ],
+    "object.scan": [
+      "platform"
+    ],
+    "object.annotate": [
+      "platform"
+    ],
+    "object.rename": [
+      "platform"
+    ],
+    "object.profile": [
+      "platform"
+    ],
+    "source.create": [
+      "platform"
+    ],
+    "identifier.create": [
+      "platform"
+    ],
+    "relation.create": [
+      "platform"
+    ],
+    "concept.create": [
+      "platform"
+    ],
+    "concept.update": [
+      "platform"
+    ],
+    "concept.candidates": [
+      "platform"
+    ],
+    "concept.resolve": [
+      "platform"
+    ],
+    "concept.import": [
+      "platform"
+    ],
+    "concept.business": [
+      "platform"
+    ],
+    "mapping.create": [
+      "platform"
+    ],
+    "mapping.update": [
+      "platform"
+    ],
+    "demand.confirm": [
+      "platform"
+    ],
+    "service.transition": [
+      "platform"
+    ],
+    "improvement.create": [
+      "platform"
+    ],
+    "metric_definition.create": [
+      "platform"
+    ],
+    "metric_definition.update": [
+      "platform"
+    ],
+    "case.reconcile": [
+      "platform"
+    ],
+    "case.action": [
+      "platform"
+    ],
+    "case.experiment": [
+      "platform"
+    ],
+    "plan.pause": [
+      "platform"
+    ],
+    "plan.expiry_test": [
+      "platform"
+    ],
+    "grant.create": [
+      "platform"
+    ],
+    "grant.revoke": [
+      "platform"
+    ],
+    "risk.resolve": [
+      "platform"
+    ],
+    "rule.toggle": [
+      "platform"
+    ],
+    "rule.patrol": [
+      "platform"
+    ],
+    "object.impact": [
+      "platform",
+      "auditor"
+    ],
+    "object.export": [
+      "platform",
+      "auditor"
+    ],
+    "case.metrics": [
+      "platform",
+      "auditor"
+    ],
+    "service.create": [
+      "platform",
+      "provider"
+    ],
+    "service.update": [
+      "platform",
+      "provider"
+    ],
+    "service.validate": [
+      "platform",
+      "provider"
+    ],
+    "service.regularize": [
+      "platform",
+      "provider"
+    ],
+    "service.compose": [
+      "platform",
+      "provider"
+    ],
+    "demand.create": [
+      "platform",
+      "requester"
+    ],
+    "demand.update": [
+      "platform",
+      "requester"
+    ],
+    "demand.constraints": [
+      "platform",
+      "requester"
+    ],
+    "demand.understand": [
+      "platform",
+      "requester"
+    ],
+    "spec.plan": [
+      "platform",
+      "requester"
+    ],
+    "feedback.create": [
+      "platform",
+      "requester"
+    ],
+    "plan.create": [
+      "platform",
+      "requester"
+    ],
+    "plan.update": [
+      "platform",
+      "requester"
+    ],
+    "plan.confirm": [
+      "platform",
+      "requester"
+    ],
+    "plan.run": [
+      "platform",
+      "requester"
+    ],
+    "plan.detail_export": [
+      "platform",
+      "requester"
+    ],
+    "job.cancel": [
+      "platform",
+      "requester"
+    ],
+    "job.retry": [
+      "platform",
+      "requester"
+    ],
+    "delivery.reference": [
+      "platform",
+      "requester"
+    ],
+    "delivery.download": [
+      "platform",
+      "requester"
+    ],
+    "delivery.destroy": [
+      "platform",
+      "requester"
+    ],
+    "trigger.create": [
+      "platform",
+      "requester"
+    ],
+    "trigger.disable": [
+      "platform",
+      "requester"
+    ],
+    "contract.create": [
+      "platform",
+      "requester"
+    ],
+    "demand.gaps": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "view.create": [
+      "platform",
+      "provider",
+      "requester"
+    ],
+    "contract.accept": [
+      "platform",
+      "provider",
+      "requester"
+    ],
+    "facility.create": [
+      "platform",
+      "provider"
+    ],
+    "facility.heartbeat": [
+      "platform",
+      "provider"
+    ],
+    "delivery.verify": [
+      "platform",
+      "requester",
+      "auditor"
+    ],
+    "object.update": [
+      "platform"
+    ],
+    "concept.suggest": [
+      "platform"
+    ],
+    "mapping.import": [
+      "platform"
+    ],
+    "case.act": [
+      "platform"
+    ],
+    "overview.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "about.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "connection.read": [
+      "platform",
+      "provider",
+      "requester",
+      "auditor"
+    ],
+    "patient.read": [
+      "platform"
+    ],
+    "external_design.create": [
+      "platform"
+    ]
+  }
+}
