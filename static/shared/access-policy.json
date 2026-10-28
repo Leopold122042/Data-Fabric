@@ -1,11 +1,17 @@
 {
-  "version": 1,
+  "version": 2,
   "levels": {
     "write": "可查看、可操作",
     "read": "仅可查看",
     "none": "不可查看"
   },
   "resources": {
+    "work_order": {
+      "platform": "write",
+      "provider": "write",
+      "requester": "write",
+      "auditor": "read"
+    },
     "demand": {
       "platform": "write",
       "provider": "none",
@@ -230,6 +236,8 @@
     }
   },
   "actions": {
+    "work_order.read": ["platform", "provider", "requester", "auditor"],
+    "work_order.message": ["platform", "provider", "requester"],
     "demand.read": [
       "platform",
       "requester",

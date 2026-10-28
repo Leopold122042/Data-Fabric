@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>协作工单 · MedFabric</title>
+<link rel="stylesheet" href="/static/workspace.css"><link rel="stylesheet" href="/static/management/module.css"><link rel="stylesheet" href="/static/shared/platform-shell.css"><link rel="stylesheet" href="/static/platform/platform.css"><link rel="stylesheet" href="/static/management/work-orders.css"><script defer src="/static/shared/platform-shell.js"></script></head>
+<body class="mf-app"><div class="mf-shell"><aside class="mf-sidebar" aria-label="平台导航"></aside><main class="mf-main">
+<header class="mf-topbar"><span id="identity">本机身份 · 本地权限已启用</span><label>当前身份 <select id="role"><option value="platform">平台方</option><option value="provider">供给方</option><option value="requester">需求方</option><option value="auditor">审计方</option></select></label></header>
+<div class="mf-content"><div class="wo-heading"><div><p class="wo-eyebrow">需求与服务 / 业务协作</p><h1>协作工单</h1><p id="work-order-help" class="page-lead">一张需求单，串起申请、确认、执行、交付与异常处理。</p></div><div id="work-order-actions"></div></div>
+<p id="page-status" role="status" aria-live="polite">正在加载工单…</p><div id="work-order-stats" class="wo-stats"></div>
+<div class="management-toolbar wo-filters"><input id="order-search" type="search" placeholder="搜索需求、编号或申请部门" aria-label="搜索工单"><select id="order-filter" aria-label="筛选工单状态"><option value="all">全部状态</option><option value="active">办理中</option><option value="attention">需要关注</option><option value="delivered">已交付</option></select><button id="order-refresh" type="button" class="mf-button">刷新进度</button></div>
+<div id="service-filter" hidden></div><div class="wo-layout"><section class="mf-panel wo-list-panel" aria-label="工单列表"><div class="wo-list-heading"><h2>需求工单</h2><span id="order-count"></span></div><div id="order-list"></div></section><section id="order-detail" class="mf-panel wo-detail" aria-label="工单详情" aria-live="polite"><p class="wo-empty">选择工单查看办理进度。</p></section></div>
+</div></main></div><script type="module" src="/static/management/work-orders.js"></script></body></html>

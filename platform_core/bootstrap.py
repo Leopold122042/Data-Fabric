@@ -46,8 +46,10 @@ def create_app(control_root=None,start_runtime=True,simulate=None,identity=None)
                 if environment=='demo' and os.environ.get('MEDFABRIC_DEMO_SCENARIOS','1')!='0':
                     from platform_core.healthcare_scenarios import seed_healthcare
                     from platform_core.scenario_replacement import replace_legacy_scenarios
+                    from platform_core.work_order_scenarios import seed_work_orders
                     runtime.demo_scenarios=seed_healthcare(runtime)
                     runtime.scenario_replacement=replace_legacy_scenarios(runtime)
+                    runtime.work_order_scenarios=seed_work_orders(runtime)
                 runtime.start_background()
                 runtime.execution.start()
                 runtime.external_governance.start()

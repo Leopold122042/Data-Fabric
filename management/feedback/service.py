@@ -8,12 +8,36 @@ class Feedback:
     def evaluate(self,body,actor):
         run=self.evidence.get(body.get('run_id',''))
         if run['status'] not in ('success','failed','blocked'):raise DomainError('任务尚未结束')
+        scope={}
+        service_id=body.get('service_id')
+        if service_id is not None and not isinstance(service_id,str):raise DomainError('评价服务范围格式错误')
+        if service_id:
+            service_id=service_id.strip()
+            plan=self.evidence.store.get('plan',run.get('plan_id',''),run.get('plan_version'))
+            if not plan or not run.get('plan_version') or service_id not in plan.get('service_versions',{}):
+                raise DomainError('评价服务不属于本次运行的固定方案版本')
+            version=plan['service_versions'][service_id]
+            if not self.store.get('service',service_id,version):raise DomainError('本次运行的服务版本不存在')
+            job=self.evidence.store.get('job',run['id']) or {}
+            if (job.get('plan_id'),job.get('plan_version'))!=(plan['id'],plan['version']):job={}
+            invoked=False
+            for node in plan.get('nodes',[]):
+                if node.get('operation')!='service' or node.get('service_id')!=service_id:continue
+                node_id=node.get('id')
+                completed=any(source.get('nodes',{}).get(node_id,{}).get('status')=='success' for source in (run,job))
+                dispatched=any(item.get('stage')=='service_invoked' and item.get('node')==node_id
+                               and item.get('service_id')==service_id for item in job.get('timeline',[]))
+                invoked=invoked or completed or dispatched
+            if not invoked:raise DomainError('该服务在本次运行中尚未调用，不能提交服务评价')
+            # A scoped comment is deliberately addressed to this service. An
+            # unscoped task comment never acquires a service audience implicitly.
+            scope={'service_id':service_id,'service_version':version}
         ratings=body.get('ratings',{})
         if set(ratings)!={'usability','explainability','timeliness','satisfaction'} or any(type(v)!=int or not 1<=v<=5 for v in ratings.values()):
             raise DomainError('四项评价均须为1到5的整数')
         return self.store.save('feedback',new_id('FB'),{'run_id':run['id'],'object_id':run['object_id'],
             'object_version':run['object_version'],'plan_id':run.get('plan_id'),'ratings':ratings,'comment':body.get('comment',''),
-            'evaluated_by':actor},0,actor,'用户评价')
+            'evaluated_by':actor,**scope},0,actor,'用户评价')
 
     def compare(self,body,actor):
         before=[self.evidence.get(x) for x in body.get('before',[])]

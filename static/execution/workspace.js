@@ -1,5 +1,5 @@
 import {executionLabels as labels,executionActions as actionRules,visibleExecutionTabs} from '/static/shared/access-model.js';
-import {enterPage,headers,allowed,readable,currentAccess,showAccess,level} from '/static/shared/access.js';
+import {enterPage,headers,allowed,readable,currentAccess,showAccess} from '/static/shared/access.js';
 import {action,form,show as showJson,$,esc} from '/static/management/ui.js';
 import {record as renderRecord} from '/static/platform/common.js';
 async function main(){
@@ -33,18 +33,22 @@ function button(name,fn){const rule=actionRules[name];if(!rule)return;const b=do
 async function submit(path,title,fields,initial={}){const value=await form(title,fields,initial);if(!value)return;const result=await api(path,{...initial,...value});await load();show(result);message('已保存');return result;}
 async function load(){
  if(!readable(kind))throw Error('当前身份不能查看此目录');showAccess(kind);
- const data=await api('/items/'+kind);records=data.items;chosen=null;render();refreshButtons();message(`已加载 ${records.length} 条${labels[kind]}`);
+ const data=await api('/items/'+kind);records=data.items;
+ const selectedId=new URLSearchParams(location.search).get('selected');
+ chosen=selectedId?records.find(record=>record.id===selectedId)||null:null;
+ render();show(chosen||'选择记录查看详情。');refreshButtons();
+ message(`已加载 ${records.length} 条${labels[kind]}`+(selectedId&&!chosen?' · 未找到可查看的记录':''));
 }
 function render(){
  const q=$('#search').value.toLowerCase();const visible=records.filter(r=>JSON.stringify(r).toLowerCase().includes(q)).sort((a,b)=>b.updated_at.localeCompare(a.updated_at));
  $('#list').innerHTML='<thead><tr><th>名称 / 编号</th><th>状态</th><th>版本 / 时间</th></tr></thead><tbody>'+visible.map(r=>`<tr><td><button class="mf-button mf-link" data-id="${esc(r.id)}">${esc(r.name||r.id)}</button></td><td>${esc(statusNames[r.state?.status||r.state||r.status]||r.state?.status||r.state||r.status||'已登记')}</td><td>v${r.version}<br>${esc(new Date(r.updated_at).toLocaleString())}</td></tr>`).join('')+'</tbody>';
  $('#empty').hidden=visible.length>0;$('#empty').textContent='暂无记录。可从已确认的需求规格创建方案，完成授权后提交执行。';
- $('#list').querySelectorAll('button').forEach(b=>b.onclick=()=>{chosen=records.find(r=>r.id===b.dataset.id);show(chosen);refreshButtons();});
+ $('#list').querySelectorAll('button').forEach(b=>{b.closest('tr').classList.toggle('is-selected',b.dataset.id===chosen?.id);b.onclick=()=>{chosen=records.find(r=>r.id===b.dataset.id);const url=new URL(location.href);url.searchParams.set('selected',chosen.id);history.replaceState(null,'',url);render();show(chosen);refreshButtons();};});
 }
 
 if(!labels[kind])kind='plan';
-async function selectTab(key){if(!readable(key))return;kind=key;chosen=null;const u=new URL(location.href);u.searchParams.set('tab',kind);history.replaceState(null,'',u);$('#page-title').textContent=labels[kind];document.title=labels[kind]+' · MedFabric';$('#actions').replaceChildren();actions();document.querySelectorAll('#subtabs button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.kind===kind)));window.dispatchEvent(new Event('platform-navigation'));await load();}
-for(const [key,label] of visibleExecutionTabs(currentAccess())){const b=document.createElement('button');b.type='button';b.className='mf-button';b.textContent=label+(level(currentAccess(),key)==='read'?' · 只读':'');b.dataset.kind=key;b.onclick=()=>selectTab(key).catch(e=>message(e.message));$('#subtabs').append(b);}
+async function selectTab(key,preserveSelection=false){if(!readable(key))return;kind=key;chosen=null;const u=new URL(location.href);u.searchParams.set('tab',kind);if(!preserveSelection)u.searchParams.delete('selected');history.replaceState(null,'',u);$('#page-title').textContent=labels[kind];document.title=labels[kind]+' · MedFabric';$('#actions').replaceChildren();actions();document.querySelectorAll('#subtabs button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.kind===kind)));window.dispatchEvent(new Event('platform-navigation'));await load();}
+for(const [key,label] of visibleExecutionTabs(currentAccess())){const b=document.createElement('button');b.type='button';b.className='mf-button';b.textContent=label;b.dataset.kind=key;b.onclick=()=>selectTab(key).catch(e=>message(e.message));$('#subtabs').append(b);}
 
 function actions(){
  if(kind==='plan'){
@@ -101,6 +105,6 @@ function actions(){
   button('发送心跳',async()=>{show(await api('/facilities/'+need().id+'/heartbeat',{}));await load();});
  }
 }
-$('#refresh').onclick=()=>load().catch(e=>message(e.message));$('#search').oninput=render;await selectTab(kind);
+$('#refresh').onclick=()=>load().catch(e=>message(e.message));$('#search').oninput=render;await selectTab(kind,true);
 }
 main().catch(error=>{const host=document.querySelector('#status');if(host)host.textContent=error.message;});

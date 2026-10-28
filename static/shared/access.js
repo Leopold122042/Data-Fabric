@@ -13,9 +13,8 @@ export function readable(resource){return canRead(snapshot,resource);}
 export function bindRole(){const select=document.querySelector('#role');if(!select)return;select.value=role();for(const option of select.options)if(roleNames[option.value])option.textContent=roleNames[option.value];const label=select.closest('label');if(label)for(const child of label.childNodes)if(child.nodeType===Node.TEXT_NODE&&child.textContent.includes('身份'))child.textContent='当前身份 ';const identity=document.querySelector('#identity');if(identity)identity.textContent='本机身份 · 本地权限已启用';select.onchange=()=>{localStorage.setItem('mf-demo-role',select.value);location.reload();};}
 export function showAccess(resource){
  const content=document.querySelector('.mf-content');if(!content)return;
- let note=document.querySelector('#access-status');if(!note){note=document.createElement('p');note.id='access-status';note.className='access-status';content.prepend(note);}
- const mode=level(snapshot,resource);note.dataset.access=mode;
- note.textContent=(roleNames[snapshot.principal?.role]||'当前身份')+' · '+({write:'可查看、可操作（按记录归属与授权范围）',read:'只读 · 可查看，不可修改',none:'无查看权限'}[mode]);
+ content.dataset.access=level(snapshot,resource);
+ document.querySelector('#access-status')?.remove();
  const identity=document.querySelector('#identity');if(identity)identity.textContent='本机身份 · 本地权限已启用';
 }
 export function denyPage(message='当前身份不能查看此目录，请从左侧选择可访问的目录。'){

@@ -21,8 +21,5 @@
 .platform-overview-items span{font-size:12px;color:#637486}
 
 [hidden]{display:none!important}
-.access-read-badge{display:inline-block;margin-left:6px;padding:1px 4px;border:1px solid #d4dee8;border-radius:4px;color:#61788f;font-size:10px;vertical-align:middle;line-height:1.4;white-space:nowrap}
-.access-status{padding:9px 12px;border:1px solid #d8e7f3;border-radius:7px;background:#f4f9fd;color:#365874;font-size:13px;margin:0 0 14px}
-.access-status[data-access=read]{background:#f7f8fa;border-color:#dce1e7;color:#586777}
 .access-denied{padding:24px}.access-denied h1{font-size:24px}.access-denied p{color:#637486}
 .management-actions:empty::after{content:'当前目录无可用操作；可选择记录查看详情。';font-size:13px;color:#6b7f91}

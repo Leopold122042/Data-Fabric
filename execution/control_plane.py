@@ -192,6 +192,10 @@ class Execution:
                                 service=self.management.store.require('service',node['service_id'])
                                 compile_node(plan['execution_policy'],node,service=service)
                                 if set(params)-{'previous'}:raise DomainError('运行输入试图覆盖受控参数',403)
+                                # Entering a node is not evidence of a service call:
+                                # attempt authorization and parameter guards run first.
+                                timeline.append({'stage':'service_invoked','node':nid,'service_id':node['service_id'],
+                                                 'attempt':attempt+1,'time':now()})
                                 result=self.runtime._dispatch(node['service_id'],params)
                                 result=metadata_result(result)
                                 trace={'service_id':node['service_id'],'service_version':plan['service_versions'][node['service_id']]}

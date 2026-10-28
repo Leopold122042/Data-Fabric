@@ -12,7 +12,7 @@ action('候选字段',async()=>{
  host.append(table(['字段 / 来源','匹配分','证据分项','处理建议','依据','操作'],rows.map(r=>[
  r.name+' · '+r.source+' / '+r.table,r.score,
  Object.entries(r.components).map(([k,v])=>({name:'名称',structure:'结构',values:'取值',context:'上下文'}[k])+': '+(v.available?v.score:'缺证据')).join('；'),
- label[r.status],r.veto.concat(r.uncertainty,(r.experience?.rules||[]).map(rule=>'复用已确认映射 '+rule.mapping_id+' v'+rule.mapping_version+'（'+rule.confirmed_by+'）')).join('；')||'证据完整',r.veto.length?'不能建立':!allowed('mapping.create')?'只读':button('建立映射草稿',async()=>{const result=await api('/mappings',{concept_id:concept.id,fields:[r.field_id],mapping_type:'direct',status:'draft'});show(result,'映射草稿已建立，复核后再确认');})
+ label[r.status],r.veto.concat(r.uncertainty,(r.experience?.rules||[]).map(rule=>'复用已确认映射 '+rule.mapping_id+' v'+rule.mapping_version+'（'+rule.confirmed_by+'）')).join('；')||'证据完整',r.veto.length?'不能建立':!allowed('mapping.create')?'—':button('建立映射草稿',async()=>{const result=await api('/mappings',{concept_id:concept.id,fields:[r.field_id],mapping_type:'direct',status:'draft'});show(result,'映射草稿已建立，复核后再确认');})
  ])));
 });
 const maps=[['concept_id','概念ID'],['fields','字段ID（逗号分隔）','list'],['mapping_type','映射类型','select',[['direct','直接'],['conditional','条件'],['derived','派生'],['join','跨表']]],['expression','结构化表达式（复杂映射填写）','json'],['status','状态','select',[['draft','草稿'],['confirmed','人工确认'],['disabled','停用']]],['confirmation_note','确认依据','textarea']];

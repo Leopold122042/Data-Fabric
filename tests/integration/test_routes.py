@@ -65,6 +65,7 @@ class StartupTest(unittest.TestCase):
             app=create_app(Path(tmp)/'control',simulate=False)
             from platform_core.healthcare_scenarios import seed_healthcare
             from platform_core.scenario_replacement import replace_legacy_scenarios
+            from platform_core.work_order_scenarios import seed_work_orders
             def before_monitor(operation):
                 def checked(runtime):
                     self.assertFalse(any(t.is_alive() for t in runtime.threads),
@@ -73,8 +74,10 @@ class StartupTest(unittest.TestCase):
                 return checked
             with patch('platform_core.healthcare_scenarios.seed_healthcare', side_effect=before_monitor(seed_healthcare)), \
                  patch('platform_core.scenario_replacement.replace_legacy_scenarios', side_effect=before_monitor(replace_legacy_scenarios)), \
+                 patch('platform_core.work_order_scenarios.seed_work_orders', side_effect=before_monitor(seed_work_orders)), \
                  TestClient(app) as c:
                 self.assertTrue(app.state.runtime.demo_scenarios['ready'])
+                self.assertTrue(app.state.runtime.work_order_scenarios['ready'])
                 self.assertTrue(any(t.is_alive() for t in app.state.runtime.threads))
                 for path in ['/api/overview','/api/catalog','/api/graph?patients=2','/api/patients?limit=1','/api/search?q=高血压','/api/cockpit','/api/orchestrator']:
                     r=c.get(path);self.assertEqual(r.status_code,200,(path,r.text[:300]))

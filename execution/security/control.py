@@ -42,7 +42,8 @@ class Security:
         with self.lock:
             g=self.store.require('grant',oid)
             return self.store.save('grant',oid,{**g,'status':'revoked','revoked_at':now()},g['version'],actor,'撤销授权')
-    def check(self,gid,plan,actor,purpose,stage):
+    def assess(self,gid,plan,actor,purpose):
+        """Evaluate the same execution boundary without writing a decision record."""
         grant=self.store.get('grant',gid);reason=None
         if not grant:reason='缺少授权'
         elif grant['status']!='active':reason='授权已撤销'
@@ -65,6 +66,9 @@ class Security:
             contract=self.store.require('contract',grant['contract_id'])
             if set(contract['accepted'])!=set(contract['parties']):reason='合约参与方尚未全部确认'
             elif timestamp(contract['expires_at'])<=datetime.now(timezone.utc):reason='合约已到期'
+        return grant,reason
+    def check(self,gid,plan,actor,purpose,stage):
+        grant,reason=self.assess(gid,plan,actor,purpose)
         decision=self.store.save('decision',new_id('DEC'),{'grant_id':gid,'plan_id':plan['id'],'plan_version':plan['version'],'actor':actor,'purpose':purpose,'stage':stage,'allowed':reason is None,'reason':reason or '本地授权核验通过','scope':'local-demo'},0,actor,'执行点授权核验')
         if reason:raise DomainError(reason,403)
         return grant,decision

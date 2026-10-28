@@ -28,6 +28,21 @@ def create_router(runtime,identity):
         if not can_read(kind,obj,user):raise DomainError('无权访问该对象',403)
         return obj
 
+    from management.work_orders import WorkOrders
+    work_orders=WorkOrders(runtime)
+
+    @router.get('/work-orders')
+    def work_order_list(request:Request,q:str='',status:str=''):
+        return JSONResponse(work_orders.list(who(request),q,status),headers={'Cache-Control':'no-store'})
+
+    @router.get('/work-orders/{oid}')
+    def work_order_detail(oid:str,request:Request):
+        return JSONResponse(work_orders.get(oid,who(request)),headers={'Cache-Control':'no-store'})
+
+    @router.post('/work-orders/{oid}/messages')
+    async def work_order_message(oid:str,request:Request):
+        return JSONResponse(work_orders.message(oid,await request.json(),who(request)),headers={'Cache-Control':'no-store'})
+
     @router.post('/semantic/business-concepts')
     def business_concepts(request:Request):
         user=who(request,action='concept.business')
