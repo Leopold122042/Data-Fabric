@@ -12,9 +12,11 @@
 新入院患者会依次出现在 IoT → HIS → LIS → PACS/EMR 中，供主动元数据引擎“边跑边发现”。
 """
 import json
+import logging
 import os
 import random
 import sqlite3
+from contextlib import ExitStack, closing
 from datetime import datetime, timedelta
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -99,40 +101,47 @@ WARD_BY_DEPT = {"心内科":"心血管病区一区","内分泌科":"内分泌病
                 "神经内科":"神经内外科病区","消化内科":"消化病区","骨科":"骨关节病区"}
 
 
-def _conn(dbname):
-    path = os.path.join(DATA_DIR, dbname)
+def _conn(dbname, data_dir=None):
+    path = os.path.join(DATA_DIR if data_dir is None else data_dir, dbname)
     con = sqlite3.connect(path)
     con.execute("PRAGMA journal_mode=WAL")
     return con
 
 
 # ---------------------------------------------------------------- 基础数据生成
-def generate_base(seed=42):
-    if os.path.isdir(DATA_DIR):
-        import shutil
-        shutil.rmtree(DATA_DIR)
-    os.makedirs(os.path.join(DATA_DIR, "emr"), exist_ok=True)
+def generate_base(seed=42, data_dir=None):
+    """Generate into an empty directory only; never reset an existing dataset."""
+    data_dir = os.path.abspath(DATA_DIR if data_dir is None else data_dir)
+    if os.path.lexists(data_dir) and (not os.path.isdir(data_dir) or os.listdir(data_dir)):
+        raise ValueError("Data directory is not empty; existing data was preserved. "
+                         "Use initialize_data.py or choose a new empty directory.")
+    os.makedirs(os.path.join(data_dir, "emr"), exist_ok=True)
+    with ExitStack() as connections:
+        return _generate_base(seed, data_dir, connections)
+
+
+def _generate_base(seed, data_dir, connections):
     rng = random.Random(seed)
 
-    his = _conn("his.db")
+    his = connections.enter_context(closing(_conn("his.db", data_dir)))
     his.executescript("""
       CREATE TABLE patient(patient_id TEXT PRIMARY KEY, name TEXT, gender TEXT, birth_date TEXT, id_card TEXT, insurance_type TEXT);
       CREATE TABLE visit(visit_id INTEGER PRIMARY KEY AUTOINCREMENT, patient_id TEXT, vtype TEXT, dept TEXT, doctor TEXT, admission_time TEXT, diagnosis_code TEXT, diagnosis_name TEXT, chief_complaint TEXT);
       CREATE TABLE orders(order_id INTEGER PRIMARY KEY AUTOINCREMENT, visit_id INTEGER, otype TEXT, item_name TEXT, status TEXT);
     """)
 
-    lis = _conn("lis.db")
+    lis = connections.enter_context(closing(_conn("lis.db", data_dir)))
     lis.executescript("""
       CREATE TABLE test_order(test_no TEXT PRIMARY KEY, patient_id TEXT, visit_id INTEGER, sample_type TEXT, collect_time TEXT, report_time TEXT, status TEXT);
       CREATE TABLE result(result_id INTEGER PRIMARY KEY AUTOINCREMENT, test_no TEXT, item_code TEXT, item_name TEXT, value_num REAL, unit TEXT, ref_range TEXT, flag TEXT);
     """)
 
-    pacs = _conn("pacs.db")
+    pacs = connections.enter_context(closing(_conn("pacs.db", data_dir)))
     pacs.executescript("""
       CREATE TABLE study(study_uid TEXT PRIMARY KEY, patient_id TEXT, modality TEXT, body_part TEXT, exam_date TEXT, accession_no TEXT, files INTEGER, size_mb REAL, report_summary TEXT);
     """)
 
-    iot = _conn("iot.db")
+    iot = connections.enter_context(closing(_conn("iot.db", data_dir)))
     iot.executescript("""
       CREATE TABLE devices(device_id TEXT PRIMARY KEY, device_type TEXT, ward TEXT);
       CREATE TABLE vitals(vital_id INTEGER PRIMARY KEY AUTOINCREMENT, patient_id TEXT, ts TEXT, heart_rate REAL, spo2 REAL, temp REAL);
@@ -234,7 +243,7 @@ def generate_base(seed=42):
             "preliminary_diagnosis": extra_dx,
             "treatment_plan": "予以%s等治疗；完善相关检查，密切观察病情变化，嘱低盐低脂饮食、规律作息。" % rng.choice(["抗血小板聚集","降糖、调脂","抗感染、对症支持","解痉止痛","活血化瘀"]),
         }
-        with open(os.path.join(DATA_DIR, "emr", "%s.json" % pid), "w", encoding="utf-8") as fh:
+        with open(os.path.join(data_dir, "emr", "%s.json" % pid), "w", encoding="utf-8") as fh:
             json.dump(dossier, fh, ensure_ascii=False, indent=1)
 
     # 保证近两周有足够数量的住院患者（供IoT监护与实时发现演示）
@@ -265,44 +274,70 @@ def generate_base(seed=42):
             ts += timedelta(minutes=30)
     iot.commit()
 
-    for con in (his, lis, pacs, iot):
-        con.close()
     return {"patients": n_patients}
 
 
 # ---------------------------------------------------------------- 实时业务流模拟
 class StreamingSim:
-    """每个 tick（默认约4秒）推进一次：体征持续写入；新患者跨系统逐步出现。"""
+    """按容量上限推进业务流；达到上限暂停新增，保留已有记录。"""
 
     STAGES = ["iot", "his", "lis", "pacs_emr"]   # stage N -> 已写入前 N+1 个系统
 
-    def __init__(self, rng=None):
+    def __init__(self, rng=None, max_patients=None, max_vitals=None):
         self.rng = rng or random.Random()
+        self.max_patients = self._limit(max_patients, "MEDFABRIC_MAX_PATIENTS", 2000)
+        self.max_vitals = self._limit(max_vitals, "MEDFABRIC_MAX_VITALS", 100000)
+        self.limit_reasons = set()
         self.tick_n = 0
         self.pending = []          # {pid,name,...,stage,next_at}
-        con = _conn("his.db")
-        mx = list(con.execute("SELECT MAX(CAST(SUBSTR(patient_id,2) AS INTEGER)) FROM patient"))[0][0] or 180
+        with closing(_conn("his.db")) as con:
+            mx = con.execute("SELECT MAX(CAST(SUBSTR(patient_id,2) AS INTEGER)) FROM patient").fetchone()[0] or 180
         self.next_pid = int(mx) + 1
-        con.close()
+
+    @staticmethod
+    def _limit(value, name, default):
+        value = os.environ.get(name, str(default)) if value is None else value
+        try:
+            if isinstance(value, bool) or not isinstance(value, (int, str)):
+                raise ValueError
+            result = int(value)
+            if result <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError("%s must be a positive integer, got %r" % (name, value)) from None
+        return result
+
+    def _set_limit(self, reason, reached):
+        if reached:
+            if reason not in self.limit_reasons:
+                logging.getLogger(__name__).warning(
+                    "Streaming paused at %s capacity; existing records are retained.", reason)
+            self.limit_reasons.add(reason)
+        else:
+            self.limit_reasons.discard(reason)
 
     def tick(self):
         self.tick_n += 1
         now = NOW + timedelta(seconds=self.tick_n * 4)
-        iot_con = _conn("iot.db")
-        pids = [r[0] for r in iot_con.execute("SELECT DISTINCT patient_id FROM vitals ORDER BY ts DESC LIMIT 60")]
-        self._tick_vitals(iot_con, now, pids)
+        with closing(_conn("iot.db")) as iot_con:
+            pids = [r[0] for r in iot_con.execute("SELECT DISTINCT patient_id FROM vitals ORDER BY ts DESC LIMIT 60")]
+            self._tick_vitals(iot_con, now, pids)
 
         if self.tick_n % 5 == 0 and sum(1 for p in self.pending if p["stage"] < len(self.STAGES)) < 3:
             self._start_arrival(now)
         for arr in list(self.pending):
             if now >= arr.get("next_at", NOW):
                 self._advance(arr, now)
+        self.pending = [arr for arr in self.pending if arr["stage"] < len(self.STAGES)]
 
     # ---- vitals -------------------------------------------------------
     def _tick_vitals(self, con, now, pids):
+        con.execute("BEGIN IMMEDIATE")
+        remaining = max(0, self.max_vitals - con.execute("SELECT COUNT(*) FROM vitals").fetchone()[0])
+        self._set_limit("vitals", remaining == 0)
         spike = (self.tick_n % 45 == 0 and len(pids) > 3)   # 周期性心律失常事件，供质量异常发现演示
         sample = self.rng.sample(pids, k=min(len(pids), max(6, len(pids) // 2)))
-        for idx, pid in enumerate(sample):
+        for idx, pid in enumerate(sample[:remaining]):
             if spike and idx < 3:
                 hr = round(self.rng.uniform(128, 158), 1)
                 spo2 = round(self.rng.uniform(90.5, 94.5), 1)
@@ -317,28 +352,46 @@ class StreamingSim:
 
     # ---- new patient arrival pipeline ---------------------------------
     def _start_arrival(self, now):
+        with closing(_conn("his.db")) as con:
+            count = con.execute("SELECT COUNT(*) FROM patient").fetchone()[0]
+        reserved = sum(arr["stage"] == 0 for arr in self.pending)
+        patient_limit = count + reserved >= self.max_patients
+        self._set_limit("patients", patient_limit)
+        if patient_limit:
+            return False
         pid = "P%04d" % self.next_pid
-        self.next_pid += 1
         code, dname, dept = DIAGNOSES[self.rng.randrange(len(DIAGNOSES))]
         arr = {"pid": pid, "stage": 0,
                "name": self.rng.choice(SURNAMES) + self.rng.choice(GIVEN1),
                "gender": "男" if self.rng.random() < 0.5 else "女",
                "birth_y": self.rng.randint(1942, 2008),
                "dept": dept, "code": code, "dname": dname}
-        iot_con = _conn("iot.db")   # stage 0：IoT 先行（急诊监护接入）
-        for m in (3, 2, 1):
-            ts_ = now - timedelta(minutes=m)
-            iot_con.execute("INSERT INTO vitals(patient_id,ts,heart_rate,spo2,temp) VALUES (?,?,?,?,?)",
-                            (pid, ts_.strftime("%Y-%m-%d %H:%M"), round(self.rng.uniform(96, 138), 1), round(self.rng.uniform(93.5, 97.5), 1), round(self.rng.uniform(36.4, 38.2), 1)))
-        iot_con.commit()
+        with closing(_conn("iot.db")) as iot_con:  # stage 0：IoT 先行（急诊监护接入）
+            iot_con.execute("BEGIN IMMEDIATE")
+            remaining = self.max_vitals - iot_con.execute("SELECT COUNT(*) FROM vitals").fetchone()[0]
+            if remaining < 3:
+                self._set_limit("vitals", True)
+                return False
+            for m in (3, 2, 1):
+                ts_ = now - timedelta(minutes=m)
+                iot_con.execute("INSERT INTO vitals(patient_id,ts,heart_rate,spo2,temp) VALUES (?,?,?,?,?)",
+                                (pid, ts_.strftime("%Y-%m-%d %H:%M"), round(self.rng.uniform(96, 138), 1), round(self.rng.uniform(93.5, 97.5), 1), round(self.rng.uniform(36.4, 38.2), 1)))
+            iot_con.commit()
+        self.next_pid += 1
         arr["next_at"] = now + timedelta(seconds=self._delay())
         self.pending.append(arr)
+        return True
 
     def _advance(self, arr, now):
+        with ExitStack() as connections:
+            connect = lambda name: connections.enter_context(closing(_conn(name)))
+            self._advance_stage(arr, now, connect)
+
+    def _advance_stage(self, arr, now, connect):
         stage = arr["stage"]
         pid = arr["pid"]
         if stage == 0:   # IoT -> HIS：建档 + 就诊登记
-            con = _conn("his.db")
+            con = connect("his.db")
             region = "320105"
             id_card = "%s%d%02d%02d********%c" % (region, arr["birth_y"], self.rng.randint(1, 12), self.rng.randint(1, 28), self.rng.choice("0123456789X"))
             con.execute("INSERT OR IGNORE INTO patient VALUES (?,?,?,?,?,?)",
@@ -346,12 +399,12 @@ class StreamingSim:
             vtype = self.rng.choices(["急诊", "住院"], weights=[0.5, 0.5])[0]
             con.execute("INSERT INTO visit(patient_id,vtype,dept,doctor,admission_time,diagnosis_code,diagnosis_name,chief_complaint) VALUES (?,?,?,?,?,?,?,?)",
                         (pid, vtype, arr["dept"], DEPT_DOCTORS.get(arr["dept"], ["韩冰"])[0], now.strftime("%Y-%m-%d %H:%M"), arr["code"], arr["dname"], COMPLAINTS[self.rng.randrange(len(COMPLAINTS))]))
-            con.commit(); con.close()
+            con.commit()
         elif stage == 1:   # HIS -> LIS：检验申请 + 结果回报
-            his_con = _conn("his.db")
+            his_con = connect("his.db")
             vid = list(his_con.execute("SELECT MAX(visit_id) FROM visit WHERE patient_id=?", (pid,)))[0][0] or 0
             his_con.close()
-            lis_c = _conn("lis.db")
+            lis_c = connect("lis.db")
             tno = "T%d" % self.rng.randint(10**7, 9*10**7)
             collect = now - timedelta(minutes=self.rng.randrange(5, 30))
             report = now - timedelta(minutes=2)
@@ -362,9 +415,10 @@ class StreamingSim:
                 flag = "H" if val > hi else ("L" if val < lo else "")
                 lis_c.execute("INSERT INTO result(test_no,item_code,item_name,value_num,unit,ref_range,flag) VALUES (?,?,?,?,?,?,?)",
                               (tno, code_, nm, val, unit, "%s-%s" % (lo, hi), flag))
-            lis_c.commit(); lis_c.close()
+            lis_c.commit()
         elif stage == 2:   # LIS -> PACS（70%）+ EMR 文书落库
-            pacs_c = _conn("pacs.db")
+            import tempfile
+            pacs_c = connect("pacs.db")
             modality_pair = MODALITY_BY_DEPT.get(arr["dept"], [("DR", "胸部")])
             if self.rng.random() < 0.7:
                 modality, body = modality_pair[0]
@@ -372,7 +426,6 @@ class StreamingSim:
                                ("1.2.156.%d" % self.rng.randint(10**7, 9*10**7), pid, modality, body, now.strftime("%Y-%m-%d"),
                                 "A%s" % pid[-4:], self.rng.randint(8, 300), round(self.rng.uniform(3, 600), 1),
                                 IMAGING_REPORTS[modality][self.rng.randrange(len(IMAGING_REPORTS[modality]))]))
-            pacs_c.commit(); pacs_c.close()
             dossier = {
                 "patient_id": pid, "dept": arr["dept"],
                 "chief_complaint": COMPLAINTS[self.rng.randrange(len(COMPLAINTS))],
@@ -381,8 +434,23 @@ class StreamingSim:
                 "preliminary_diagnosis": [arr["dname"]],
                 "treatment_plan": "完善检验与影像学检查，对症支持治疗，密切监护生命体征变化。",
             }
-            with open(os.path.join(DATA_DIR, "emr", "%s.json" % pid), "w", encoding="utf-8") as fh:
-                json.dump(dossier, fh, ensure_ascii=False, indent=1)
+            emr_dir = os.path.join(DATA_DIR, "emr")
+            target = os.path.join(emr_dir, "%s.json" % pid)
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=emr_dir,
+                                                 prefix=".%s-" % pid, suffix=".tmp", delete=False) as fh:
+                    temporary = fh.name
+                    json.dump(dossier, fh, ensure_ascii=False, indent=1)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                os.replace(temporary, target)
+                temporary = None
+                # Retry must not accumulate studies when a document cannot be published.
+                pacs_c.commit()
+            finally:
+                if temporary is not None:
+                    os.unlink(temporary)
         arr["stage"] = stage + 1
         if arr["stage"] < len(self.STAGES):
             arr["next_at"] = now + timedelta(seconds=self._delay())
@@ -392,5 +460,5 @@ class StreamingSim:
 
 
 if __name__ == "__main__":
-    generate_base()
-    print("base data generated at", DATA_DIR)
+    from initialize_data import main
+    main()

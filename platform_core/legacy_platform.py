@@ -93,8 +93,12 @@ class PlatformHandlers:
         self.SERVER_STARTED_AT = t0
         self.SERVER_STARTED_MONOTONIC = time.monotonic()
         self.HISTORY_ORIGIN = None
-        if not os.path.exists(os.path.join(medsim.DATA_DIR, 'his.db')):
-            raise RuntimeError('Data directory is empty. Generate fixtures explicitly before starting.')
+        from initialize_data import validate_data
+        try:
+            validate_data(medsim.DATA_DIR)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            raise RuntimeError('Local sources are missing or incomplete. Run python initialize_data.py '
+                               'with the same MEDFABRIC_DATA_DIR before starting; existing data is preserved.') from exc
         self.engine = DiscoveryEngine()
         self.vlayer = VirtualLayer(self.engine)
         self.sim = medsim.StreamingSim() if self.simulate else None

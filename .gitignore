@@ -12,3 +12,24 @@ __pycache__/
 /data/healthcare_scenarios_v2/
 .venv/
 .pytest_cache/
+
+# Local medical sources are initialized from code; never snapshot live databases.
+/data/his.db
+/data/his.db-wal
+/data/his.db-shm
+/data/lis.db
+/data/lis.db-wal
+/data/lis.db-shm
+/data/pacs.db
+/data/pacs.db-wal
+/data/pacs.db-shm
+/data/iot.db
+/data/iot.db-wal
+/data/iot.db-shm
+/data/emr/
+/_live/
+/_server*.log
+/_srv*.log
+*.py[cod]
+/.data.initialize.lock
+/.data-init-*/

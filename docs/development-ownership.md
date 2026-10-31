@@ -22,13 +22,15 @@
 ```sh
 python -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python initialize_data.py
 .venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8321
 ```
 
 Windows可继续使用原启动脚本（其原有虚拟环境需安装requirements.txt）。Python建议3.12。
 
 - 默认不启用自动写入医疗源的模拟增长，也不启动自动流通和定时巡检。显式设置`MEDFABRIC_SIMULATE=1`恢复这些演示动作。
-- `MEDFABRIC_DATA_DIR`指定源数据目录；默认仍为项目`data/`。数据缺失时提示先准备数据，不自动生成覆盖。
+- `MEDFABRIC_DATA_DIR`指定源数据目录；默认仍为项目`data/`。先执行`initialize_data.py`，仅为空目录生成数据，已有完整数据保留，非空不完整目录拒绝覆盖。Windows启动脚本已接入该步骤。
+- 源数据库、病历JSON、缓存和日志不再跟踪；生成器、业务场景源码及测试夹具继续跟踪。增长上限、备份轮转与已有克隆迁移步骤见[README](../README.md)。
 - `MEDFABRIC_CONTROL_DIR`指定控制面目录，默认项目`runtime/`。A写`management/control.db`，B写`execution/control.db`，均已忽略进Git。
 - 两个人应使用不同数据与控制目录。测试从临时目录生成虚构数据，不使用仓库现有数据库。
 - 当前服务器按单进程本地演示使用。旧执行队列和SSE仍在内存中，不支持多worker共享；真实身份、跨机构部署由B后续接入。

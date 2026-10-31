@@ -9,6 +9,7 @@
 ```sh
 python3 -m venv .venv-external
 .venv-external/bin/python -m pip install -r requirements-external.txt
+.venv-external/bin/python initialize_data.py
 .venv-external/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8321
 ```
 

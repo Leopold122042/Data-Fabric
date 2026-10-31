@@ -5,6 +5,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from platform_core.bootstrap import create_app
 import medsim
+from initialize_data import initialize
 
 class RoutesTest(unittest.TestCase):
     def setUp(self):
@@ -61,7 +62,7 @@ class RoutesTest(unittest.TestCase):
 class StartupTest(unittest.TestCase):
     def test_all_legacy_pages_and_handler_validation_on_isolated_sources(self):
         with tempfile.TemporaryDirectory() as tmp,patch.object(medsim,'DATA_DIR',str(Path(tmp)/'data')):
-            medsim.generate_base()
+            self.assertEqual(initialize(medsim.DATA_DIR)['status'], 'initialized')
             app=create_app(Path(tmp)/'control',simulate=False)
             from platform_core.healthcare_scenarios import seed_healthcare
             from platform_core.scenario_replacement import replace_legacy_scenarios

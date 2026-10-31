@@ -1,6 +1,12 @@
-$ErrorActionPreference = 'Continue'
-Set-Location -LiteralPath 'E:\数据编织\medfabric'
-$env:PYTHONPATH = 'E:\数据编织\_pylibs'
-$env:MEDFABRIC_DATA_DIR = (Join-Path $PWD '_live')
-python -m uvicorn app:app --host 127.0.0.1 --port 8321 *>&1 | Out-File -FilePath (Join-Path $PWD '_server.log') -Encoding utf8
-# probe
+param([int]$Port = 8321)
+$ErrorActionPreference = 'Stop'
+Set-Location -LiteralPath $PSScriptRoot
+$pythonExecutable = 'python'
+$localPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
+if (Test-Path -LiteralPath $localPython) { $pythonExecutable = $localPython }
+& $pythonExecutable -c 'import fastapi,uvicorn,duckdb,sqlglot,pyarrow,requests,openpyxl,xlrd'
+if ($LASTEXITCODE -ne 0) { throw "Install project dependencies first: $pythonExecutable -m pip install -r requirements.txt" }
+& $pythonExecutable initialize_data.py
+if ($LASTEXITCODE -ne 0) { throw 'Data initialization failed; server was not started.' }
+& $pythonExecutable -m uvicorn app:app --host 127.0.0.1 --port $Port
+exit $LASTEXITCODE

@@ -57,6 +57,7 @@ A公共接线：`platform_core/bootstrap.py`注入接口和生命周期；`exter
 
 ```sh
 cd /Users/chenjiale/Desktop/medfabric/Data-Fabric
+.venv-external/bin/python initialize_data.py
 .venv-external/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8321
 ```
 
