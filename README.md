@@ -1,6 +1,8 @@
 # Data Fabric
 For presentation and exploration only
 
+首页按平台、供给、需求和审计身份展示不同的资源、业务与治理摘要。设计、统计口径和共用动效见 [角色首页说明](docs/role-dashboard.md)，界面中的“平台说明”也提供独立章节。
+
 ## 双人开发与 A 管理工作台
 
 代码已按管理域 A、执行域 B 拆分。文件所有权和对接接口见

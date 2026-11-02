@@ -1,0 +1,14 @@
+/* Shared interaction rhythm: feedback 120ms, content 180ms, disclosure 200ms. */
+:root{--mf-motion-fast:120ms;--mf-motion-enter:180ms;--mf-motion-expand:200ms;--mf-motion-ease:cubic-bezier(.2,.8,.2,1)}
+.mf-app :is(.mf-button,.mf-link,.platform-nav a,.platform-journey a,.dashboard-metric,.dashboard-source,summary){transition:background-color var(--mf-motion-fast),border-color var(--mf-motion-fast),box-shadow var(--mf-motion-fast),transform var(--mf-motion-fast) var(--mf-motion-ease)}
+.mf-app :is(button,a):not(:disabled):active{transform:translateY(1px)}
+.mf-app :is(.dashboard-metric,.platform-cards>a):hover{box-shadow:0 3px 12px #183e6410;border-color:#b6cfe5;text-decoration:none}
+.mf-app .mf-content{animation:mf-content-in var(--mf-motion-enter) var(--mf-motion-ease)}
+.mf-app summary{list-style:none;display:flex;align-items:center;gap:7px}.mf-app summary::-webkit-details-marker{display:none}
+.mf-app summary::before{content:'›';display:inline-block;font-size:16px;line-height:1;transition:transform var(--mf-motion-expand) var(--mf-motion-ease)}
+.mf-app details[open]>summary::before{transform:rotate(90deg)}
+.mf-app dialog{opacity:0;transform:translateY(6px) scale(.99);transition:opacity var(--mf-motion-enter) var(--mf-motion-ease),transform var(--mf-motion-enter) var(--mf-motion-ease),display var(--mf-motion-enter) allow-discrete,overlay var(--mf-motion-enter) allow-discrete}
+.mf-app dialog[open]{opacity:1;transform:none}.mf-app dialog::backdrop{background:#17324d00;transition:background-color var(--mf-motion-enter),display var(--mf-motion-enter) allow-discrete,overlay var(--mf-motion-enter) allow-discrete}.mf-app dialog[open]::backdrop{background:#17324d55}
+@starting-style{.mf-app dialog[open]{opacity:0;transform:translateY(6px) scale(.99)}.mf-app dialog[open]::backdrop{background:#17324d00}}
+@keyframes mf-content-in{from{opacity:.45;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.mf-app *,.mf-app *::before,.mf-app *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.mf-app :is(button,a):active{transform:none}}

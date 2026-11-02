@@ -86,7 +86,8 @@ class WorkOrders:
             return demand.get('created_by') == user['id']
         return user['role'] == 'provider' and any(s.get('provider') == user['id'] for s in services.values())
 
-    def list(self, user, q='', status=''):
+    def projections(self, user):
+        """Build authorized projections once for list and dashboard consumers."""
         require_resource(user, 'work_order')
         context = self._context()
         items = []
@@ -95,7 +96,12 @@ class WorkOrders:
             services = self._services(demand, plans, user)
             if not self._visible(demand, services, user):
                 continue
-            detail = self._project(demand, specs, plans, services, context, user)
+            items.append(self._project(demand, specs, plans, services, context, user))
+        return sorted(items, key=lambda x: x['updated_at'], reverse=True)
+
+    def list(self, user, q='', status=''):
+        items = []
+        for detail in self.projections(user):
             summary = {k: detail[k] for k in ('id', 'title', 'purpose', 'requester', 'requester_name', 'status', 'status_label', 'next_action', 'updated_at', 'counts')}
             summary['service_ids'] = [s['id'] for s in detail['services']]
             if (not q or q.lower() in str(summary).lower()) and (not status or status == summary['status']):

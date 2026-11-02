@@ -1,6 +1,7 @@
 import {enterPage,allowed,readable} from '/static/shared/access.js';
 import {$,api,element,link,button,table,record,status} from './common.js';
 import {permissionRoles,roleGuidance,permissionSections} from '/static/shared/permission-guide.js';
+import {dashboardRoles,dashboardPrinciples,dashboardVisualRules} from '/static/shared/dashboard-guide.js?v=20261102';
 async function main(){
 if(!await enterPage())return;
 const name=location.pathname.split('/').pop().split('.')[0],body=$('#page-body'),actions=$('#page-actions');
@@ -13,6 +14,12 @@ async function events(){const p=panel('最近元数据事件');async function re
 async function graph(){actions.append(link('建立概念映射','/static/management/semantic.html'),link('维护加工血缘','/static/management/catalog.html'),link('浏览资源','/static/platform/resources.html'));const [o,m,c,r,s,cloud]=await Promise.all([api('/api/management/items/object'),api('/api/management/items/mapping'),api('/api/management/items/concept'),readable('relation')?api('/api/management/items/relation'):Promise.resolve({items:[]}),api('/api/management/items/service'),api('/api/external/discovery/catalog')]);const names=new Map([...o.items,...c.items,...s.items,...cloud.tables,...cloud.collections].map(x=>[x.id,x.meaning||x.name||x.id]));const edges=[];for(const mapping of m.items)for(const field of mapping.fields||[])edges.push([field,mapping.concept_id,'概念映射 · '+mapping.status]);for(const rel of r.items)edges.push([rel.source,rel.target,rel.type]);for(const svc of s.items)for(const id of svc.source_objects||[])edges.push([id,svc.id,'服务来源']);for(const collection of cloud.collections)for(const source of collection.sources||collection.source_ids||[])edges.push([typeof source==='string'?source:source.id,collection.id,'云盘目录组合']);
 const host=panel('资源 → 概念 → 服务 / 虚拟表');host.append(element('p','仅展示已登记的关系。云盘目录组合不代表业务语义相同。'));const search=element('input');search.placeholder='筛选对象或关系';search.setAttribute('aria-label','筛选关系');actions.append(search);const list=element('div');host.append(list);function render(){list.replaceChildren();const shown=edges.filter(e=>e.map(x=>names.get(x)||x).join(' ').includes(search.value)).slice(0,100);for(const [from,to,type] of shown){const row=element('div','','lineage-row');row.append(element('b',names.get(from)||from),element('span','→ '+type+' →'),element('b',names.get(to)||to));list.append(row);}if(!shown.length)list.append(element('p','暂无匹配关系。可从资源目录选择表并建立映射或登记服务。'));status('共 '+edges.length+' 条登记关系，当前显示 '+shown.length+' 条。');}search.oninput=render;render();}
 async function about(){
+ const dashboard=panel('角色首页与信息分区');dashboard.id='dashboard-design';
+ dashboard.append(element('p','总览采用统一框架，按身份组织内容。下列比例为主要内容区的设计权重，小屏幕按阅读顺序自然展开。'),table(['身份首页','统计范围','信息重点','分区权重'],dashboardRoles.map(r=>[r.title,r.scope,r.focus,r.layout])));
+ for(const text of dashboardPrinciples)dashboard.append(element('p',text));
+ dashboard.append(element('h3','图表、图标与交互规范'),table(['组件','呈现方式'],dashboardVisualRules));
+ dashboard.append(link('打开我的首页','/static/workspace.html'));
+ if(location.hash==='#dashboard-design')requestAnimationFrame(()=>dashboard.scrollIntoView({block:'start'}));
  panel('平台业务流程').append(element('p','连接数据源 → 统一资源目录 → 概念映射与服务登记 → 需求确认 → 方案授权执行 → 结果交付 → 治理复测。'));
  const roles=panel('身份与业务范围');
  roles.append(element('p','在右上角切换当前身份后，目录与操作入口会随权限调整。各身份可查看的记录范围及办理职责如下。'),table(['身份','记录范围','办理职责'],roleGuidance.map(item=>[item.name,item.scope,item.operations])));

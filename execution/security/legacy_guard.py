@@ -11,6 +11,8 @@ def install(app):
         if path.startswith('/api/') and not path.startswith(('/api/external/','/api/management/','/api/execution/')):
             try:
                 user=app.state.identity.principal(request);request.state.principal=user
+                if path in ('/api/overview', '/api/cockpit') and user['role'] not in ('platform', 'auditor'):
+                    raise DomainError('全平台统计仅对平台方及审计方开放',403)
                 # Auditing metadata is distinct from patient/query access and
                 # from operations that mutate rules or risk dispositions.
                 read_resource = ({'/api/security/overview':'risk','/api/security/audit':'risk',
