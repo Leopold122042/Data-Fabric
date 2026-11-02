@@ -91,6 +91,11 @@ class Execution:
             for n in ready:ordered.append(n['id']);pending.remove(n)
         output=body.get('output_node',ordered[-1])
         if output not in ids:raise DomainError('交付节点不存在')
+        if policy and policy.get('identifier_output')=='pseudonymized':
+            output_columns=output_policies[output].get('columns',{})
+            if (set(output_columns)!={'patient_token'}
+                    or output_columns['patient_token'].get('transform')!='hmac_sha256_v1'):
+                raise DomainError('已确认规格要求只输出经HMAC处理的患者伪名ID',403)
         if not sensitive_output_allowed({'columns':list(output_policies[output]['columns']),'rows':[]},{'output_policy':output_policies[output]}):
             raise DomainError('输出包含未确认或受限字段，请确认目录分类并改为允许的输出',403)
         if spec and spec['specification'].get('service_ids') and not set(services)<=set(spec['specification']['service_ids']):
@@ -187,7 +192,7 @@ class Execution:
                                 view=self.get_view(plan,node)
                                 constraints=compile_node(plan['execution_policy'],node,view)
                                 if constraints!=node.get('query_constraints'):raise DomainError('节点执行范围与确认规格不一致',403)
-                                result,trace=self.queries.execute(view,plan['output_mode'],grant['min_group_size'],constraints)
+                                result,trace=self.queries.execute(view,plan['output_mode'],grant['min_group_size'],constraints,grant['max_rows'])
                             else:
                                 service=self.management.store.require('service',node['service_id'])
                                 compile_node(plan['execution_policy'],node,service=service)

@@ -42,14 +42,14 @@ def normalize(specification):
     if not isinstance(raw, dict) or not raw:
         raise DomainError('规格缺少已确认的执行条件，请在需求受理页补充范围、时间字段和交付规则后重新确认', 409)
     allowed = {'scope', 'time_field', 'output_mode', 'circulation_modes',
-               'quality_min_complete', 'max_rows', 'min_group_size'}
+               'quality_min_complete', 'max_rows', 'min_group_size', 'identifier_output'}
     if set(raw) - allowed:
         raise DomainError('存在尚不支持的执行条件，不能忽略后继续执行')
     scope = raw.get('scope')
     if not isinstance(scope, dict) or set(scope) - {'kind', 'filters', 'all_rows'}:
         raise DomainError('对象范围需明确选择数据行范围或当前元数据快照')
     kind = scope.get('kind')
-    if kind not in ('rows', 'metadata'):
+    if kind not in ('rows', 'lookup', 'metadata'):
         raise DomainError('对象范围类型不支持')
     filters = scope.get('filters', [])
     if not isinstance(filters, list) or len(filters) > 20:
@@ -71,6 +71,13 @@ def normalize(specification):
             raise DomainError('数据范围不能为空；全部对象也必须明确确认')
         if not isinstance(raw.get('time_field'), str) or not raw['time_field']:
             raise DomainError('数据行查询必须绑定时间字段')
+    elif kind == 'lookup':
+        if (not checked or scope.get('all_rows') is True
+                or any(condition['op'] != '=' or type(condition['value']) is not str
+                       or not condition['value'].strip() for condition in checked)):
+            raise DomainError('精确查询必须使用一个或多个非空等值筛选，且不能查询全部对象')
+        if raw.get('time_field'):
+            raise DomainError('精确查询不使用出生日期或其他事件时间筛选')
     elif checked or raw.get('time_field') or scope.get('all_rows'):
         raise DomainError('元数据快照不接受患者范围条件；请使用数据行查询')
     mode = raw.get('output_mode')
@@ -80,11 +87,19 @@ def normalize(specification):
               'summary': 'aggregate', 'aggregate': 'aggregate', '对象级': 'object', 'object': 'object'}
     if labels.get(str(specification.get('delivery', '')).strip().lower()) != mode:
         raise DomainError('交付形态说明与执行规则不一致或尚不支持，请明确选择汇总/对象级')
+    if kind == 'lookup' and mode != 'object':
+        raise DomainError('精确查询必须使用对象级受控输出')
+    if kind == 'lookup' and raw.get('identifier_output') != 'pseudonymized':
+        raise DomainError('患者精确查询必须明确声明伪名ID输出')
+    if kind != 'lookup' and raw.get('identifier_output') is not None:
+        raise DomainError('患者伪名输出声明只能用于精确查询')
     if kind == 'metadata' and mode != 'object':
         raise DomainError('元数据快照返回目录对象，请选择对象级交付；不查询业务明细')
     modes = raw.get('circulation_modes')
     if not isinstance(modes, list) or not modes or any(m not in ('controlled_compute', 'api', 'download') for m in modes):
         raise DomainError('需明确允许的交付方式')
+    if kind == 'lookup' and set(modes) != {'controlled_compute'}:
+        raise DomainError('患者精确查询的伪名结果只允许受控计算查看')
     quality = number(raw.get('quality_min_complete', 1), '完整率', 0, 1)
     quality_label = str(specification.get('quality', '')).strip().lower()
     if quality_label not in ('完整', '无缺失', 'complete', 'no missing values', '完整率', 'completeness'):
@@ -98,7 +113,7 @@ def normalize(specification):
     if start >= end:
         raise DomainError('执行时间窗必须非空且起点早于终点')
     deadline = instant(specification.get('deadline'), end_of_date=True)
-    if kind == 'metadata':
+    if kind in ('metadata', 'lookup'):
         deadline = min(deadline, end)
     policy = {'version': 1, 'scope': {'kind': kind, 'filters': checked,
               'all_rows': scope.get('all_rows', False)},
@@ -110,4 +125,6 @@ def normalize(specification):
               'max_rows': number(raw.get('max_rows', 200), '最大交付行数', 1, 200, True),
               'min_group_size': number(raw.get('min_group_size', 5), '最小分组记录数', 5, 100000, True),
               'source_specification_digest': fingerprint(specification)}
+    if raw.get('identifier_output') is not None:
+        policy['identifier_output'] = raw['identifier_output']
     return policy

@@ -41,7 +41,7 @@ export function actionAllowed(snapshot,key,record=null){
 }
 const rule=(key,tabs=null,selected=false)=>({key,tabs,selected});
 export const managementActions={
- '跟踪此需求':rule('work_order.read',['demand'],true), '查看服务使用':rule('work_order.read',['service'],true),
+ '跟踪此需求':rule('work_order.read',['demand'],true), '查看服务使用':rule('work_order.read',['service'],true), '自然语言抽取草案':rule('demand.understand',['demand'],true),
  '新建需求':rule('demand.create',['demand']), '编辑需求':rule('demand.update',['demand'],true), '设置执行条件':rule('demand.constraints',['demand'],true), '查看缺口':rule('demand.gaps',['demand'],true), '人工确认规格':rule('demand.confirm',['demand'],true), '生成执行方案':rule('spec.plan',['spec'],true),
  '新建服务':rule('service.create',['service']), '编辑服务':rule('service.update',['service'],true), '执行发布验证':rule('service.validate',['service'],true), '变更状态':rule('service.transition',['service'],true), '定制转常态':rule('service.regularize',['service'],true), '登记稳定组合':rule('service.compose',['service']),
  '扫描目录变更':rule('object.scan'), '编辑说明':rule('object.annotate',null,true), '影响范围':rule('object.impact',null,true), '确认源字段改名':rule('object.rename',null,true), '登记全局标识':rule('identifier.create'), '导出目录':rule('object.export'), '接入本地文件':rule('source.create'), '字段统计剖析':rule('object.profile',null,true), '登记加工血缘':rule('relation.create'),

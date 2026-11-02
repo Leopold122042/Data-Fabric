@@ -4,7 +4,7 @@ from pathlib import Path
 import medsim
 from platform_core.storage import DomainError,new_id
 from execution.query.expressions import compile_expression,mapping_expression
-from execution.security.output_policy import field_type
+from execution.security.output_policy import field_type,field_classification
 
 
 def quote(value):return '"'+str(value).replace('"','""')+'"'
@@ -47,9 +47,26 @@ class Queries:
         oid=body.get('id') or new_id('VIEW');old=self.store.get('view',oid)
 
         if old and old.get('created_by')!=actor and actor!='demo-platform':raise DomainError('不能修改他人视图',403)
+        requested_output_fields=body.get('output_fields',body.get('fields',[]))
+        if not isinstance(requested_output_fields,list):raise DomainError('视图输出字段需为字段编号列表')
+        output_fields=list(dict.fromkeys(requested_output_fields+list(projections)))
+        if any(field_id not in selected and field_id not in projections for field_id in output_fields):raise DomainError('输出字段必须包含在逻辑视图字段或已确认映射中')
+        pseudonymize_fields=body.get('pseudonymize_fields',[])
+        if (not isinstance(pseudonymize_fields,list) or len(pseudonymize_fields)>1
+                or any(field_id not in output_fields for field_id in pseudonymize_fields)):
+            raise DomainError('当前只支持将一个已选择的输出字段映射为患者伪名ID')
         data={'created_by':(old or {}).get('created_by',actor),'name':body.get('name') or oid,'fields':selected,'field_versions':{f['id']:f['version'] for f in fields},'mapping_versions':mapping_versions,
-              'projections':projections,'output_fields':list(dict.fromkeys(body.get('fields',[])+list(projections))),'joins':joins,'filters':body.get('filters',[]),'group_by':body.get('group_by',[]),'output_mode':body.get('output_mode','aggregate')}
+              'projections':projections,'output_fields':output_fields,'pseudonymize_fields':list(dict.fromkeys(pseudonymize_fields)),'joins':joins,'filters':body.get('filters',[]),'group_by':body.get('group_by',[]),'output_mode':body.get('output_mode','aggregate')}
         if data['output_mode'] not in ('aggregate','object'):raise DomainError('输出粒度非法')
+        if pseudonymize_fields:
+            if data['output_mode']!='object':raise DomainError('患者伪名ID只允许对象级受控输出')
+            by_id={f['id']:f for f in fields}
+            if pseudonymize_fields[0] not in by_id:raise DomainError('伪名字段必须是目录中的直接字段，不能使用未审查映射')
+            field=by_id[pseudonymize_fields[0]]
+            if field_classification(field)!='identifier' or field_type(field) not in ('integer','string'):
+                raise DomainError('只有已识别的患者标识字段可以生成患者伪名ID')
+            if str(field.get('name','')).casefold() not in ('patient_id','person_id','medical_record_no','mrn'):
+                raise DomainError('患者伪名ID转换仅支持患者ID类目录字段')
         result=self.store.save('view',oid,data,body.get('expected_version',0),actor,'逻辑视图定义')
         self.management.register_design({'object_kind':'view','object_id':oid,'object_version':result['version'],'environment':self.store.environment,'definition':result,'dependencies':selected})
         return result
@@ -77,17 +94,21 @@ class Queries:
             if not path.resolve().is_relative_to(root):raise DomainError('源不在允许的数据目录',403)
             sources.append((sid,table,path.resolve(),columns))
         return sources
-    def execute(self,view,mode,min_group=5,constraints=None):
+    def execute(self,view,mode,min_group=5,constraints=None,max_rows=200):
         import duckdb
         if mode!=view['output_mode']:raise DomainError('视图输出粒度与授权不一致',403)
         sources=self.sources(view)
         constraints=constraints or {}
         required={c['field'] for c in constraints.get('filters',[])}|({constraints['time_field']} if constraints.get('time_field') else set())
         if not required<=set(view['field_versions']):raise DomainError('查询缺少执行条件字段',403)
-        if mode=='object' and any(f['name'].lower() in ('patient_id','record_id','name','phone','身份证','姓名') for _,_,_,fields in sources for f in fields):raise DomainError('对象级结果包含受限标识字段；请改为汇总输出',403)
+        pseudonymizer=None
+        if view.get('pseudonymize_fields'):
+            from execution.security.pseudonym import PatientPseudonymizer
+            pseudonymizer=PatientPseudonymizer(self.store)
         stamp=[(sid,table,str(path.stat().st_mtime_ns),[(f['id'],f['version']) for f in fields],Path(str(path)+'-wal').stat().st_mtime_ns if Path(str(path)+'-wal').exists() else 0) for sid,table,path,fields in sources]
         # Exclude old materializations that serialized SQLite booleans as strings.
-        key=hashlib.sha256(json.dumps(['sqlite-types-v2',view['id'],view['version'],stamp,mode,min_group,constraints],sort_keys=True).encode()).hexdigest()
+        pseudonym_key_id=hashlib.sha256(pseudonymizer.key).hexdigest() if pseudonymizer else None
+        key=hashlib.sha256(json.dumps(['sqlite-types-v3',view['id'],view['version'],stamp,mode,min_group,max_rows,constraints,pseudonym_key_id],sort_keys=True).encode()).hexdigest()
         cached=self.store.get('materialization',key)
         if cached and cached['expires_epoch']>time.time():return cached['result'],{'cache_hit':True,'materialization_id':key,'sources':cached['sources']}
         con=duckdb.connect(':memory:');deadline=time.monotonic()+5;locations={};trace=[]
@@ -102,13 +123,14 @@ class Queries:
                     column=quote(byid[constraints['time_field']]['name'])
                     where.extend(['julianday('+column+') >= julianday(?)','julianday('+column+') < julianday(?)'])
                     params.extend([constraints['time_start'],constraints['time_end_exclusive']])
-                sql='SELECT '+','.join(quote(f['name']) for f in fields)+' FROM '+quote(table)+(' WHERE '+' AND '.join(where) if where else '')+' LIMIT 10001'
+                source_budget=min(10000,max_rows) if mode=='object' and len(sources)==1 else 10000
+                sql='SELECT '+','.join(quote(f['name']) for f in fields)+' FROM '+quote(table)+(' WHERE '+' AND '.join(where) if where else '')+' LIMIT '+str(source_budget+1)
                 db=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)
                 try:
                     db.set_progress_handler(lambda:int(time.monotonic()>deadline),1000)
                     rows=db.execute(sql,params).fetchall()
                 finally:db.close()
-                if len(rows)>10000:raise DomainError('源返回超过本地查询预算，请增加过滤条件')
+                if len(rows)>source_budget:raise DomainError('源返回超过本次授权行数或本地查询预算，请增加筛选条件')
                 alias='s'+str(index)
                 types=[field_type(f) for f in fields]
                 boolean_columns=[i for i,dtype in enumerate(types) if dtype=='boolean']
@@ -133,7 +155,9 @@ class Queries:
             tables=','.join('s'+str(i) for i in range(len(sources)))
             selected=view['group_by'] if mode=='aggregate' else view.get('output_fields',view['fields'])
             projections=view.get('projections',{})
-            names=[projections[oid]['name'] if oid in projections else self.management.store.require('object',oid)['name'] for oid in selected]
+            pseudonymize_fields=set(view.get('pseudonymize_fields',[]))
+            names=['patient_token' if oid in pseudonymize_fields else
+                   projections[oid]['name'] if oid in projections else self.management.store.require('object',oid)['name'] for oid in selected]
             # Stable deduplication avoids ambiguous response columns.
             names=[name if names.count(name)==1 else name+'_'+str(i) for i,name in enumerate(names)]
             if mode=='aggregate':names=['count_group' if name=='count' else name for name in names]
@@ -148,8 +172,14 @@ class Queries:
             timer=threading.Timer(max(.01,deadline-time.monotonic()),con.interrupt);timer.start()
             try:cursor=con.execute(sql,bound);rows=cursor.fetchall();columns=[x[0] for x in cursor.description]
             finally:timer.cancel()
-            if len(rows)>200:raise DomainError('结果超过交付预算，请缩小查询范围')
-            result={'columns':columns,'rows':[list(r) for r in rows],'notice':'部分分组可能未满足输出条件' if mode=='aggregate' else '本地对象级结果'}
+            if len(rows)>min(200,max_rows):raise DomainError('结果超过本次授权行数或交付预算，请缩小查询范围')
+            output_rows=[list(r) for r in rows]
+            if pseudonymize_fields:
+                for field_id in pseudonymize_fields:
+                    if field_id not in selected:raise DomainError('伪名字段没有进入输出，拒绝执行',403)
+                    index=selected.index(field_id)
+                    output_rows=[row[:index]+[pseudonymizer.token(row[index])]+row[index+1:] for row in output_rows]
+            result={'columns':columns,'rows':output_rows,'notice':'部分分组可能未满足输出条件' if mode=='aggregate' else '本地对象级结果'}
             if constraints:
                 from execution.security.output_policy import view_output_policy,sensitive_output_allowed
                 fields_by_id={f['id']:f for _,_,_,fields in sources for f in fields}

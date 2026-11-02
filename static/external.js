@@ -477,7 +477,7 @@
         result.skipped.forEach(e=>text(details,'p',e));
       }
       await loadDiscovered();
-      if(result.done){scanning=false;status('扫描完成，目录已保存。选择表名后可到查询区查询。');}
+      if(result.done){scanning=false;status('扫描完成，目录已保存。选择表名后可到查询区查询。');if(window.parent!==window)window.parent.postMessage({type:'medfabric-catalog-scan-complete'},location.origin);}
     }catch(error){scanning=false;if(error.status===401)cloudConnected=false;el('extScanStatus').textContent=error.message+'；会话有效时可继续，过期后需重新开始。';}
     finally{scanInFlight=false;if(scanning)setTimeout(scanLoop,300);}
   }
@@ -520,5 +520,5 @@
   el('extAutoConfirm').onclick=()=>action(()=>autoQuery('confirm'));
   el('extAutoQuery').onclick=()=>action(()=>autoQuery('query'));
   document.querySelector('[data-tab="external"]')?.addEventListener('click',()=>{if(!ready)action(initialize);});
-  if(document.getElementById('tab-external')){action(initialize);loadGrants();}
+  if(document.getElementById('tab-external')){const autoConnect=new URLSearchParams(location.search).get('connect')==='1';action(async()=>{await initialize();if(autoConnect&&!cloudConnected)openCloudLogin();});loadGrants();}
 })();

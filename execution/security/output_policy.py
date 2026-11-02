@@ -25,6 +25,7 @@ CLASSIFICATIONS = {
     'public': 'public', '公开': 'public', '公开数据': 'public', 'l1': 'public',
     'internal': 'internal', '内部': 'internal', '内部数据': 'internal', 'l2': 'internal',
     'aggregate': 'aggregate', '汇总': 'aggregate',
+    'pseudonymized': 'pseudonymized',
     'identifier': 'identifier', '个人标识': 'identifier', '个人信息': 'identifier',
     'health': 'health', '健康信息': 'health', '医疗健康信息': 'health',
     'sensitive': 'sensitive', '敏感': 'sensitive', '敏感数据': 'sensitive',
@@ -119,7 +120,10 @@ def view_output_policy(view, fields_by_id):
     """
     projections = view.get('projections', {})
     selected = view.get('group_by', []) if view['output_mode'] == 'aggregate' else view.get('output_fields', view['fields'])
-    names = [projections[fid]['name'] if fid in projections else fields_by_id[fid]['name'] for fid in selected]
+    pseudonymize = set(view.get('pseudonymize_fields', []))
+    names = ['patient_token' if fid in pseudonymize else
+             projections[fid]['name'] if fid in projections else fields_by_id[fid]['name']
+             for fid in selected]
     names = [name if names.count(name) == 1 else name + '_' + str(i) for i, name in enumerate(names)]
     if view['output_mode'] == 'aggregate':
         names = ['count_group' if name == 'count' else name for name in names]
@@ -129,6 +133,13 @@ def view_output_policy(view, fields_by_id):
         sources = [fields_by_id[oid] for oid in sorted(source_ids)]
         classifications = {field_classification(f) for f in sources}
         classification = next((c for c in ('identifier', 'health', 'sensitive', 'unknown', 'internal', 'public') if c in classifications), 'unknown')
+        if fid in pseudonymize:
+            columns[name] = {
+                'type': 'string', 'classification': 'pseudonymized',
+                'transform': 'hmac_sha256_v1',
+                'source_fields': [{'id': f['id'], 'name': f['name'], 'classification': field_classification(f)} for f in sources],
+            }
+            continue
         columns[name] = {
             'type': field_type(sources[0]) if len(sources) == 1 and fid not in projections else 'scalar',
             'classification': classification,
@@ -162,6 +173,12 @@ def _safe_column(name, rule, origin):
     sources = rule.get('source_fields')
     if not isinstance(sources, list) or any(not isinstance(source, dict) for source in sources):
         return False
+    if classification == 'pseudonymized':
+        return (origin == 'catalog' and name == 'patient_token'
+                and rule.get('type') == 'string'
+                and rule.get('transform') == 'hmac_sha256_v1'
+                and len(sources) == 1
+                and field_classification(sources[0]) == 'identifier')
     if classification == 'aggregate':
         transform = rule.get('transform')
         if transform == 'count':
@@ -209,6 +226,8 @@ def sensitive_output_allowed(result, plan):
                      or dtype == 'number' and type(value) in (int, float)
                      or dtype == 'boolean' and type(value) is bool
                      or dtype == 'scalar' and type(value) in (str, int, float, bool))
+            if rule.get('classification') == 'pseudonymized':
+                valid = dtype == 'string' and isinstance(value, str) and re.fullmatch(r'pt_[0-9a-f]{64}', value) is not None
             if not valid or not _safe_content(value):
                 return False
             if 'allowed_values' in rule and value not in rule['allowed_values']:

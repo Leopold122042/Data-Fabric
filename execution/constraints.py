@@ -13,15 +13,17 @@ def check_window(policy, stage):
 
 
 def compile_node(policy, node, view=None, service=None):
-    if policy['scope']['kind'] == 'rows':
+    if policy['scope']['kind'] in ('rows', 'lookup'):
         if node['operation'] != 'view':
             raise DomainError('该服务尚不能落实对象范围和时间窗，请使用绑定字段的逻辑视图', 409)
         if node['params'] or node['inputs']:
             raise DomainError('受控视图不接受覆盖范围的节点参数或上游输入')
-        required = {c['field'] for c in policy['scope']['filters']} | {policy['time_field']}
+        required = {c['field'] for c in policy['scope']['filters']}
+        if policy.get('time_field'):
+            required.add(policy['time_field'])
         if not required <= set(view['field_versions']):
             raise DomainError('视图缺少规格要求的范围字段或时间字段，不能执行', 409)
-        return {'filters': policy['scope']['filters'], 'time_field': policy['time_field'],
+        return {'filters': policy['scope']['filters'], 'time_field': policy.get('time_field'),
                 'time_start': policy['time_start'], 'time_end_exclusive': policy['time_end_exclusive']}
     if node['operation'] != 'service' or (service or {}).get('handler_id', node.get('service_id')) != 'SVC-META-CATALOG':
         raise DomainError('当前元数据快照规则只能调用目录服务，不能替代业务数据查询', 409)

@@ -35,6 +35,20 @@ class Intake:
             result['fields'].append('execution_constraints')
         return result
 
+    def apply_draft(self,oid,body,actor):
+        """Attach an extracted proposal to a demand; this never confirms or creates a spec."""
+        with self.store.atomic():
+            d=self.store.require('demand',oid)
+            if d['version']!=body.get('expected_version'):raise DomainError('需求版本已变化',409)
+            proposal=body.get('proposal')
+            if not isinstance(proposal,dict):raise DomainError('缺少结构化草案')
+            allowed=set(REQUIRED)|{'service_ids','cost','attachments','execution_constraints','entry'}
+            changes={k:v for k,v in proposal.items() if k in allowed and v is not None}
+            # Preserve the human's original description and record the model output as a proposal.
+            updated=self.store.save('demand',oid,{**d,**changes,'llm_draft':proposal,'llm_draft_model':body.get('model'),
+                'state':'draft'},d['version'],actor,'记录LLM结构化草案，待规则校验及人工确认')
+            return {'demand':updated,'gaps':self.gaps(oid),'draft':proposal}
+
     def confirm(self,oid,body,actor):
         with self.store.atomic():
             d=self.store.require('demand',oid)
@@ -51,8 +65,10 @@ class Intake:
                 raise DomainError('需核对并确认范围筛选、时间字段和交付执行条件')
             spec_id='SPEC-'+oid;previous=self.store.get('spec',spec_id)
             spec=self.store.save('spec',spec_id,{'name':d['title']+' · 任务规格','demand_id':oid,'demand_version':d['version'],
-                'specification':{k:d.get(k) for k in (*REQUIRED,'service_ids','cost','attachments','execution_constraints')},
+                'specification':{**{k:d.get(k) for k in (*REQUIRED,'service_ids','cost','attachments','execution_constraints')},
+                    'query_draft':body.get('query_draft')},
                 'gaps':gaps,'confirmed_by':actor,'confirmation_note':body['note'],
+                'query_draft_confirmed':body.get('query_sql_confirmed') is True,
                 'confirmed':True,'execution_authorized':False},previous['version'] if previous else 0,actor,'人工确认任务规格')
             self.store.save('demand',oid,{**d,'state':'confirmed','spec_id':spec_id,'spec_version':spec['version']},d['version'],actor,'人工受理完成')
             return spec
