@@ -76,7 +76,8 @@ class Catalog:
 
     def annotate(self, oid, body, actor):
         old=self.store.require('object',oid)
-        allowed={'meaning','domain','owner','update_period','classification','constraints','semantic_baseline'}
+        allowed={'meaning','domain','owner','update_period','classification','constraints','semantic_baseline',
+                 'classification_basis'}
         return self.store.save('object',oid,{**old,**{k:v for k,v in body.items() if k in allowed}},body.get('expected_version'),actor,'元数据说明更新')
 
     def confirm_rename(self, oid, name, expected, actor):
@@ -148,4 +149,24 @@ class Catalog:
 
     def link(self,body,actor):
         if not body.get('source') or not body.get('target') or body['source']==body['target']:raise DomainError('需指定不同的上游和下游ID')
+        if body.get('type')=='same_patient_id':
+            source=self.store.require('object',body['source'])
+            target=self.store.require('object',body['target'])
+            if any(item.get('kind')!='field' or item.get('status')!='active'
+                    or str(item.get('name','')).casefold()!='patient_id' for item in (source,target)):
+                raise DomainError('患者身份关联仅支持两个已登记的 active patient_id 字段',409)
+            if (source.get('source_id'),source.get('table'))==(target.get('source_id'),target.get('table')):
+                raise DomainError('患者身份关联必须连接不同来源表',409)
+            from management.semantic.service import family
+            types={family(item.get('structure',{}).get('type','unknown')) for item in (source,target)}-{'unknown'}
+            if len(types)>1:raise DomainError('patient_id 字段类型不兼容，不能确认跨来源身份关系',409)
+            note=str(body.get('confirmation_note') or '').strip()
+            if not note:raise DomainError('登记患者身份关系需要记录人工确认依据')
+            existing=next((item for item in self.store.list('relation')
+                if item.get('type')=='same_patient_id' and item.get('status')=='confirmed'
+                and {item.get('source'),item.get('target')}=={source['id'],target['id']}),None)
+            if existing:return existing
+            body={**body,'status':'confirmed','confirmed_by':actor,'confirmation_note':note,
+                'field_versions':{source['id']:source['version'],target['id']:target['version']},
+                'source_systems':[source.get('source_id'),target.get('source_id')]}
         return self.store.save('relation',body.get('id') or new_id('REL'),body,body.get('expected_version',0),actor,'登记跨对象依赖')

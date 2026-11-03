@@ -39,10 +39,15 @@ class Execution:
             spec=self.management.store.require('spec',sid,body.get('spec_version'))
             if not spec['confirmed']:raise DomainError('规格未人工确认')
             demand=self.management.store.require('demand',spec['demand_id'])
-            if actor!='demo-platform' and demand['created_by']!=actor:raise DomainError('无权使用他人的任务规格',403)
+            requester_owner=demand.get('requester_id') or ('demo-requester' if demand.get('created_by')=='demo-platform' else None)
+            if actor not in (demand.get('created_by'),requester_owner,'demo-platform'):
+                raise DomainError('无权使用他人的任务规格',403)
         elif body.get('scenario')!='medical':raise DomainError('需选择A侧已确认规格')
         if sid and body.get('scenario')=='medical':raise DomainError('医疗快捷样例不能替代已确认规格的执行条件')
         policy=normalize(spec['specification']) if spec else None
+        if (policy and policy.get('quality_verification')=='unverified'
+                and not (spec.get('quality_review') or {}).get('acknowledged')):
+            raise DomainError('任务规格尚未记录对未自动验证质量要求的确认，需重新确认规格',409)
         mode=body.get('output_mode',policy['output_mode'] if policy else 'aggregate')
         if policy and mode!=policy['output_mode']:raise DomainError('方案输出粒度与确认规格不一致',403)
         if mode not in ('aggregate','object'):raise DomainError('输出粒度非法')
@@ -96,7 +101,29 @@ class Execution:
             if (set(output_columns)!={'patient_token'}
                     or output_columns['patient_token'].get('transform')!='hmac_sha256_v1'):
                 raise DomainError('已确认规格要求只输出经HMAC处理的患者伪名ID',403)
-        if not sensitive_output_allowed({'columns':list(output_policies[output]['columns']),'rows':[]},{'output_policy':output_policies[output]}):
+        if policy and policy.get('field_output'):
+            output_columns=output_policies[output].get('columns',{})
+            if len(output_columns)!=1:
+                raise DomainError('普通字段精确查询必须只输出一个字段',403)
+            output_rule=next(iter(output_columns.values()))
+            sources=output_rule.get('source_fields') or []
+            if (len(sources)!=1 or sources[0].get('id')!=policy['field_output']
+                    or output_rule.get('transform')):
+                raise DomainError('方案输出字段与确认规格不一致',403)
+        if policy and policy.get('field_outputs'):
+            output_columns=output_policies[output].get('columns',{})
+            output_sources=[]
+            for output_name,output_rule in output_columns.items():
+                sources=output_rule.get('source_fields') or []
+                if (len(sources)!=1 or output_rule.get('transform')
+                        or output_name!=sources[0].get('name')):
+                    raise DomainError('多字段方案仅允许直接输出已登记目录字段',403)
+                output_sources.append(sources[0].get('id'))
+            if (len(output_columns)!=len(policy['field_outputs'])
+                    or set(output_sources)!=set(policy['field_outputs'])):
+                raise DomainError('方案输出字段与已确认规格不一致',403)
+        if not sensitive_output_allowed({'columns':list(output_policies[output]['columns']),'rows':[]},
+                {'output_policy':output_policies[output]},allow_health_plan=True):
             raise DomainError('输出包含未确认或受限字段，请确认目录分类并改为允许的输出',403)
         if spec and spec['specification'].get('service_ids') and not set(services)<=set(spec['specification']['service_ids']):
             raise DomainError('方案调用了规格未选择的服务',403)
@@ -146,7 +173,15 @@ class Execution:
     def confirm(self,oid,version,actor):
         plan=self.store.require('plan',oid)
         if plan['version']!=version:raise DomainError('方案版本变化',409)
-        if plan['created_by']!=actor and actor!='demo-platform':raise DomainError('仅创建者或平台方可确认',403)
+        allowed_actor=plan['created_by']=='demo-platform' and actor=='demo-requester'
+        if plan['spec_id'] and actor not in (plan['created_by'],'demo-platform'):
+            spec=self.management.store.get('spec',plan['spec_id'],plan.get('spec_version'))
+            demand=self.management.store.get('demand',(spec or {}).get('demand_id',''))
+            requester_owner=(demand or {}).get('requester_id') or (
+                'demo-requester' if (demand or {}).get('created_by')=='demo-platform' else None)
+            allowed_actor=actor==requester_owner
+        if plan['created_by']!=actor and actor!='demo-platform' and not allowed_actor:
+            raise DomainError('仅方案创建者、关联需求方或平台方可确认',403)
         state=self.store.require('plan_state',oid)
         return self.update('plan_state',state,{'status':'confirmed','confirmed_by':actor,'confirmed_at':now()},actor)
     def submit(self,oid,version,grant_id,actor,retry_of=None,priority=0):
@@ -192,7 +227,10 @@ class Execution:
                                 view=self.get_view(plan,node)
                                 constraints=compile_node(plan['execution_policy'],node,view)
                                 if constraints!=node.get('query_constraints'):raise DomainError('节点执行范围与确认规格不一致',403)
-                                result,trace=self.queries.execute(view,plan['output_mode'],grant['min_group_size'],constraints,grant['max_rows'])
+                                authorized_health_fields=(grant.get('health_output_authorization') or {}).get('field_ids',[])
+                                authorized_identifier_fields=(grant.get('identifier_output_authorization') or {}).get('field_ids',[])
+                                result,trace=self.queries.execute(view,plan['output_mode'],grant['min_group_size'],constraints,
+                                    grant['max_rows'],authorized_health_fields,authorized_identifier_fields)
                             else:
                                 service=self.management.store.require('service',node['service_id'])
                                 compile_node(plan['execution_policy'],node,service=service)

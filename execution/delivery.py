@@ -30,7 +30,10 @@ class Delivery:
             if isinstance(value,dict):return all(finite(x) for x in value.values())
             return True
         shape=shape and finite(rows)
-        sensitive=sensitive_output_allowed(result,plan)
+        authorized_health_fields=(grant.get('health_output_authorization') or {}).get('field_ids',[])
+        authorized_identifier_fields=(grant.get('identifier_output_authorization') or {}).get('field_ids',[])
+        sensitive=sensitive_output_allowed(result,plan,authorized_health_fields,
+            authorized_identifier_fields=authorized_identifier_fields)
         cells=[v for row in rows for v in row] if shape else []
         measured_quality=shape and (not cells or sum(v is not None for v in cells)/len(cells)>=plan.get('quality_min_complete',1))
         quality=measured_quality and (quality is None or quality is True)
@@ -44,11 +47,17 @@ class Delivery:
         if not all(checks.values()):raise DomainError('交付复核未通过：'+', '.join(k for k,v in checks.items() if not v),403)
         if len(result['rows'])>grant['max_rows']:raise DomainError('交付行数超出授权',403)
         oid=new_id('DEL')
+        quality_policy=plan.get('execution_policy') or {}
+        quality_unverified=quality_policy.get('quality_verification')=='unverified'
         receipt={'schema':'local-demo-receipt-v1','delivery_id':oid,'run_id':run_id,'plan_id':plan['id'],'plan_version':plan['version'],
                  'spec_id':plan.get('spec_id'),'spec_version':plan.get('spec_version'),'service_versions':plan.get('service_versions',{}),
                  'grant_id':grant_id,'decision_id':decision['id'],'actor':actor,'issued_at':now(),'expires_at':grant['expires_at'],
                  'result_digest':digest(result),'output_policy_digest':digest(policy_for(plan)),
-                 'execution_policy_digest':plan.get('execution_policy_digest'),'checks':checks,'assurance':'本地HMAC校验；非第三方存证或可信时间戳'}
+                 'execution_policy_digest':plan.get('execution_policy_digest'),'checks':checks,
+                 'quality_assurance':{'requirement':quality_policy.get('quality_requirement','完整率'),
+                    'automated_check':'完整率阈值 '+str(quality_policy.get('quality_min_complete',plan.get('quality_min_complete',1))),
+                    'other_requirements_verified':not quality_unverified},
+                 'assurance':'本地HMAC校验；非第三方存证或可信时间戳'}
         signature=hmac.new(self.key,canonical(receipt),hashlib.sha256).hexdigest()
         return self.store.save('delivery',oid,{'actor':actor,'plan_id':plan['id'],'plan_version':plan['version'],'grant_id':grant_id,
             'state':'available','result':result,'receipt':receipt,'signature':signature},0,actor,'六项复核通过，生成本地凭证')

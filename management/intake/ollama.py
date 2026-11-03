@@ -1,6 +1,7 @@
 """Small Ollama client used only for untrusted intake extraction proposals."""
 import json
 import os
+import re
 import socket
 import urllib.error
 import urllib.request
@@ -10,6 +11,19 @@ from management.store import DomainError
 FIELDS = ('title', 'entry', 'object_scope', 'time_start', 'time_end', 'purpose', 'quality',
           'deadline', 'delivery', 'service_ids', 'cost', 'attachments', 'execution_constraints')
 CAPABILITIES = ('catalog_search', 'connected_source_discovery', 'data_query', 'trend_analysis')
+COST_MENTION = re.compile(
+    r'预算(?=.{0,8}(?:上限|约束|控制|不超过|不能超过|不得超过|不高于|以内|最多|封顶|(?:为|是)?\s*\d))|'
+    r'经费预算|成本(?:预算|约束|上限|控制)|费用(?:预算|约束|上限|限制)|'
+    r'花费(?:上限|不超过|不能超过|不得超过|不高于)|最高(?:成本|费用|花费)|'
+    r'(?:成本|费用|经费|花费)\s*(?:(?:不超过|不能超过|不得超过|不高于|以内|封顶|上限|最多|最高|控制在|为|是)|<=|≤|<)?\s*\d+(?:\.\d+)?|'
+    r'(?:成本|费用|预算|经费).{0,8}(?:不超过|不能超过|不得超过|不高于|以内|封顶|上限|限制|控制)|免费|零成本|'
+    r'(?:\d+(?:\.\d+)?\s*)(?:元|块|万元|人民币|美元|美金|usd|cny|rmb)|'
+    r'[$¥￥]\s*\d+(?:\.\d+)?|'
+    r'\b(?:budget\s+(?:limit|cap|under|below)|spending cap|cost limit|cost cap|fee limit|price cap|cost under)\b', re.I)
+
+
+def explicitly_mentions_cost(text):
+    return bool(COST_MENTION.search(str(text or '')))
 
 
 class OllamaIntake:
@@ -40,11 +54,15 @@ class OllamaIntake:
         catalog_text=json.dumps(catalog_rows,ensure_ascii=False)
         prompt=('你是需求分析器。只能输出字段抽取和 capability_steps 能力链路建议；不可编造平台服务/逻辑表ID，'
                 '可以为 data_query 或 trend_analysis 提出只读 SELECT 查询草案，但不可生成规格、授权或调用服务；'
-                'SQL中的逻辑表名和字段必须来自给定目录元数据，缺少信息时 query_draft 填 null。'
+                'SQL中的逻辑表名和字段必须来自给定目录元数据，缺少信息时 query_draft 填 null；meta_catalog 是平台内部目录，不是可查询的业务数据表，禁止把它写进SQL。'
                 '步骤能力只能选 catalog_search（平台已有目录检索）、'
                 'connected_source_discovery（已连接数据源的结构发现）、data_query（数据查询）、trend_analysis（指标趋势分析）。'
-                '只根据原文选择必要步骤，不确定的字段填null并列入uncertain_fields。resource_recommendations只能从提供的目录元数据中选择ID，'
-                '可按表名、字段和业务说明判断相关性；不得推断未列出的数据源。这里只提供结构元数据，不含数据行。'
+                '简短表达也可能是查询，例如“唐军的性别”“李明年龄”；识别姓名和目标属性，即使没有“查询/查找”等动词也要提出 catalog_search、'
+                'connected_source_discovery、data_query 三步。必须在给定目录中按字段名、业务含义和语义基线匹配目标字段，'
+                '将目标表、目标字段和仅用于精确姓名筛选的姓名字段列入 resource_recommendations；推荐理由要说明“原文目标属性→目录字段”的匹配依据。'
+                '只有目录元数据明确支持需求主题时才能推荐该资源；不要把生命体征表当作无关指标的数据源。如果目录中没有匹配项或有多个同等候选，不要猜字段，query_draft 填 null 并把缺口或歧义写入 uncertain_fields。'
+                'resource_recommendations只能从提供的目录元数据中选择ID，不得推断未列出的数据源。这里只提供结构元数据，不含数据行。'
+                '成本字段只在原文明确提出预算、费用或金额约束时填写；原文没有明确提及则必须为null，禁止猜测或补默认值。'
                 '链路只是建议，之后由规则校验和人工确认。输出一个JSON对象，并严格遵循此结构约定：'
                 +json.dumps(schema,ensure_ascii=False)+'\n目录元数据：'+catalog_text+'\n原文：'+text)
         # Ollama JSON-schema constrained decoding fails to load the vocabulary for
@@ -75,6 +93,11 @@ class OllamaIntake:
         nullable_strings=('title','object_scope','time_start','time_end','purpose','quality','deadline','delivery')
         if any(proposal[k] is not None and not isinstance(proposal[k],str) for k in nullable_strings):
             raise DomainError('模型草案文本字段类型无效',502)
+        for key in nullable_strings:
+            value=proposal.get(key)
+            if isinstance(value,str) and value.strip().casefold() in {
+                    '', 'null', 'none', 'nil', 'undefined', 'n/a', 'na'}:
+                proposal[key]=None
         if proposal['entry'] not in ('goal','service',None):raise DomainError('模型需求入口无效',502)
         if proposal['service_ids'] is not None and (not isinstance(proposal['service_ids'],list) or any(not isinstance(x,str) for x in proposal['service_ids'])):
             raise DomainError('模型服务列表格式无效',502)
@@ -82,6 +105,19 @@ class OllamaIntake:
             raise DomainError('模型附件列表格式无效',502)
         if proposal['cost'] is not None and (type(proposal['cost']) not in (str,int,float)):
             raise DomainError('模型成本字段类型无效',502)
+        # Model output is untrusted: never let a guessed number become an execution
+        # constraint when the requester did not ask for a cost limit.
+        cost_was_explicit=explicitly_mentions_cost(text)
+        if not cost_was_explicit:
+            proposal['cost']=None
+        elif isinstance(proposal['cost'],str) and proposal['cost'].strip().casefold() in {
+                '', 'null', 'none', 'nil', 'undefined', 'n/a', 'na'}:
+            proposal['cost']=None
+        if cost_was_explicit and proposal['cost'] is None:
+            # Preserve the fact that a cost condition was requested even when the
+            # model failed to extract its amount. This remains a hard blocker until
+            # the requester fills in the condition or a budget adapter is available.
+            proposal['cost']='原文提到预算/成本约束，但模型未能确定具体条件；请人工补充金额和单位'
         if proposal['execution_constraints'] is not None and not isinstance(proposal['execution_constraints'],dict):
             raise DomainError('模型执行条件格式无效',502)
         if not isinstance(proposal['uncertain_fields'],list) or any(not isinstance(x,str) for x in proposal['uncertain_fields']):

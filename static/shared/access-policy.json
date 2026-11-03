@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "levels": {
     "write": "可查看、可操作",
     "read": "仅可查看",
@@ -621,6 +621,12 @@
       "platform"
     ],
     "demand.confirm": [
+      "platform"
+    ],
+    "demand.health_request": [
+      "requester"
+    ],
+    "demand.health_approve": [
       "platform"
     ],
     "service.transition": [

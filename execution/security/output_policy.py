@@ -62,6 +62,38 @@ def field_classification(field):
         normalized(field.get('classification', '')), 'unknown')
 
 
+def infer_catalog_classification(field):
+    """Infer only classifications supported by a clear name or clinical context."""
+    named=name_classification(field.get('name',''))
+    if named:
+        return named, '字段名规则：'+str(field.get('name',''))
+    name=normalized(field.get('name',''))
+    meaning=' '.join(str(field.get(key,'') or '') for key in ('meaning','semantic_baseline')).casefold()
+    manual_basis=str(field.get('classification_basis') or '').startswith('人工确认')
+    if name in {'dept','department','科室','科室名称'}:
+        if manual_basis:
+            existing=CLASSIFICATIONS.get(normalized(field.get('classification','')),'unknown')
+            if existing!='unknown':return existing,'沿用人工确认的字段分类'
+        table_context=normalized(field.get('table',''))
+        if any(token in meaning or token in table_context for token in
+                ('病历','文书','dossier','就诊','诊疗','住院','病区','临床','clinical visit','visit')):
+            return 'health','字段名为科室，所属表明确指向病历或就诊记录'
+        if any(token in meaning for token in ('就诊','诊疗','住院','病区','临床','clinical visit')):
+            return 'health','字段含义明确指向患者就诊科室'
+        return 'unknown',None
+    existing=CLASSIFICATIONS.get(normalized(field.get('classification','')), 'unknown')
+    if existing!='unknown':
+        return existing, '沿用目录中已登记的字段分类'
+    context=' '.join(str(field.get(key,'') or '') for key in
+        ('name','meaning','domain','table')).casefold()
+    clinical_source=str(field.get('source_id','')).casefold() in {'his','lis','pacs','emr','iot','src-clinical-operations'}
+    if clinical_source or any(token in context for token in (
+            '诊断','病历','病史','疾病','检验','治疗','手术','体征','影像',
+            'diagnos','medical','health','vital','patient','visit')):
+        return 'health', '字段名称/含义或所属医疗数据源表明其为健康信息'
+    return 'unknown', None
+
+
 def expression_fields(expression):
     """Keep all source fields, including branches, when following a mapping."""
     if not isinstance(expression, dict):
@@ -166,13 +198,74 @@ def _safe_content(value):
     return not any(pattern.search(value) for pattern in CONTENT_PATTERNS)
 
 
-def _safe_column(name, rule, origin):
-    if not isinstance(rule, dict) or name_classification(name):
+def output_authorization_requirements(plan):
+    """Return exact health and raw patient-ID fields requiring platform approval."""
+    policy = policy_for(plan)
+    if not isinstance(policy, dict) or policy.get('origin') != 'catalog':
+        return {'health':{},'identifier':{}}
+    columns = policy.get('columns')
+    if not isinstance(columns, dict):
+        return None
+    health={};identifiers={}
+    for output_name, rule in columns.items():
+        if not isinstance(rule, dict):
+            return None
+        classification = CLASSIFICATIONS.get(normalized(rule.get('classification', '')), 'unknown')
+        if classification in ('public','internal','aggregate','pseudonymized'):
+            continue
+        sources = rule.get('source_fields')
+        if (not isinstance(sources, list) or len(sources) != 1
+                or not isinstance(sources[0], dict) or rule.get('transform')
+                or output_name != sources[0].get('name')):
+            return None
+        source = sources[0]
+        field_id = source.get('id')
+        if not isinstance(field_id, str) or not field_id:
+            return None
+        requirement={'field_id':field_id,'field_name':source['name'],
+                     'output_name':output_name,'type':rule.get('type')}
+        if (classification=='identifier' and output_name=='patient_id'
+                and field_classification(source)=='identifier'
+                and rule.get('type') in ('string','integer')):
+            identifiers[field_id]=requirement
+        elif (classification=='health' and output_name!='patient_id'
+              and name_classification(output_name)!='identifier'
+              and field_classification(source)=='health'
+              and rule.get('type') in ('string','integer','number','boolean')):
+            if output_name!='admission_time' and name_classification(output_name)=='identifier':return None
+            health[field_id]=requirement
+        else:
+            return None
+    return {'health':health,'identifier':identifiers}
+
+
+def health_output_requirements(plan):
+    """Return only health fields; reject identifier-bearing plans for legacy callers."""
+    requirements=output_authorization_requirements(plan)
+    if requirements is None or requirements['identifier']:
+        return None
+    return requirements['health']
+
+
+def identifier_output_requirements(plan):
+    requirements=output_authorization_requirements(plan)
+    return None if requirements is None else requirements['identifier']
+
+
+def _safe_column(name, rule, origin, authorized_health_fields=(), authorized_identifier_fields=()):
+    if not isinstance(rule, dict):
         return False
     classification = CLASSIFICATIONS.get(normalized(rule.get('classification', '')), 'unknown')
     sources = rule.get('source_fields')
     if not isinstance(sources, list) or any(not isinstance(source, dict) for source in sources):
         return False
+    if classification=='identifier':
+        return (origin=='catalog' and name=='patient_id' and rule.get('type') in ('string','integer')
+                and rule.get('transform') is None and len(sources)==1
+                and sources[0].get('id') in authorized_identifier_fields
+                and sources[0].get('name')=='patient_id'
+                and field_classification(sources[0])=='identifier')
+    if name_classification(name)=='identifier':return False
     if classification == 'pseudonymized':
         return (origin == 'catalog' and name == 'patient_token'
                 and rule.get('type') == 'string'
@@ -185,12 +278,23 @@ def _safe_column(name, rule, origin):
             return name == 'count' and rule.get('type') == 'integer'
         return (origin == 'builtin:medical' and transform in ('age_band', 'category_bucket')
                 and bool(rule.get('allowed_values')) and rule.get('type') == 'string')
+    if classification == 'health':
+        if origin != 'catalog' or not isinstance(authorized_health_fields, (set, frozenset, list, tuple)):
+            return False
+        return (len(sources) == 1
+                and isinstance(sources[0].get('id'), str)
+                and sources[0]['id'] in authorized_health_fields
+                and field_classification(sources[0]) == 'health'
+                and name == sources[0].get('name')
+                and rule.get('transform') is None
+                and rule.get('type') in ('string', 'integer', 'number', 'boolean'))
     if classification not in ('public', 'internal') or not sources:
         return False
     return all(field_classification(source) in ('public', 'internal') for source in sources)
 
 
-def sensitive_output_allowed(result, plan):
+def sensitive_output_allowed(result, plan, authorized_health_fields=(), allow_health_plan=False,
+                             authorized_identifier_fields=()):
     policy = policy_for(plan)
     if not isinstance(policy, dict) or policy.get('version') != 1:
         return False
@@ -207,7 +311,16 @@ def sensitive_output_allowed(result, plan):
         return False
     if not isinstance(rows, list) or any(not isinstance(row, list) or len(row) != len(columns) for row in rows):
         return False
-    if not all(_safe_column(name, rules[name], origin) for name in columns):
+    if allow_health_plan and rows:
+        return False  # Plan compilation may inspect schema only; it never permits data rows.
+    if allow_health_plan:
+        requirements = output_authorization_requirements({'output_policy': policy})
+        if requirements is None:
+            return False
+        authorized_health_fields = set(requirements['health'])
+        authorized_identifier_fields = set(requirements['identifier'])
+    if not all(_safe_column(name, rules[name], origin, authorized_health_fields,
+                            authorized_identifier_fields) for name in columns):
         return False
     # Additional result keys are delivered too, so they need the same boundary.
     for key in set(result) - {'columns', 'rows'}:

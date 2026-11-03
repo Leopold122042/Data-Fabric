@@ -15,12 +15,40 @@ def timestamp(value):
 
 class Security:
     def __init__(self,store):self.store=store;self.lock=threading.RLock();self.plan_validator=None
-    def grant(self,body,actor):
+    def grant(self,body,actor,health_output_authorization=None,identifier_output_authorization=None):
         if self.store.environment!='demo':raise DomainError('真实授权适配器尚未接入，拒绝签发演示授权',503)
         if not all(body.get(k) for k in ('subject','purpose','plan_id','plan_version','expires_at')):raise DomainError('授权缺少主体、用途、方案版本或期限')
         timestamp(body['expires_at'])
         plan=self.store.require('plan',body['plan_id'],body['plan_version'])
         if self.plan_validator:self.plan_validator(plan)
+        from execution.security.output_policy import output_authorization_requirements
+        requirements=output_authorization_requirements(plan)
+        if requirements is None:
+            raise DomainError('方案包含不支持的健康信息输出，不能登记授权',403)
+        health_fields=requirements['health'];identifier_fields=requirements['identifier']
+        def validate_approval(required,supplied,label):
+            if not required:return None
+            supplied=supplied if isinstance(supplied,dict) else {}
+            expected_ids=set(required);supplied_ids=supplied.get('field_ids')
+            if (supplied.get('decision')!='approved' or supplied.get('approver_role')!='platform'
+                    or supplied.get('approver_id')!=actor
+                    or supplied.get('requester_id')!=body.get('subject')
+                    or not isinstance(supplied.get('request_id'),str) or not supplied.get('request_id')
+                    or supplied.get('plan_id')!=plan['id']
+                    or supplied.get('plan_version')!=plan['version']
+                    or supplied.get('purpose')!=body.get('purpose')
+                    or not isinstance(supplied_ids,list)
+                    or any(not isinstance(field_id,str) for field_id in supplied_ids)
+                    or set(supplied_ids)!=expected_ids):
+                raise DomainError(label+'须由平台方对本方案、本用途和指定字段作出批准',403)
+            return {'decision':'approved','approver_role':'platform','approver_id':actor,
+                    'requester_id':body['subject'],'request_id':supplied['request_id'],
+                    'plan_id':plan['id'],'plan_version':plan['version'],'purpose':body['purpose'],
+                    'field_ids':sorted(expected_ids),
+                    'fields':[required[field_id] for field_id in sorted(expected_ids)],
+                    'approved_at':now()}
+        consent=validate_approval(health_fields,health_output_authorization,'健康信息原值')
+        identifier_consent=validate_approval(identifier_fields,identifier_output_authorization,'原始患者标识')
         policy=plan.get('execution_policy')
         if not policy:raise DomainError('方案缺少执行条件，请重新生成',409)
         mode=body.get('mode',plan['output_mode'])
@@ -33,11 +61,19 @@ class Security:
         data={k:body[k] for k in ('subject','purpose','plan_id','plan_version','expires_at')}
         data.update(mode=mode,status='active',scope='local-demo',min_group_size=min_group,max_rows=max_rows,
                     execution_policy_digest=plan['execution_policy_digest'],plan_digest=fingerprint(plan))
+        if consent:
+            data['health_output_authorization']=consent
+            data['health_output_authorized_by']=actor
+        if identifier_consent:
+            data['identifier_output_authorization']=identifier_consent
+            data['identifier_output_authorized_by']=actor
         data['contract_id']=body.get('contract_id')
         if data['contract_id']:
             contract=self.store.require('contract',data['contract_id'])
             if (contract['plan_id'],contract['plan_version'])!=(data['plan_id'],data['plan_version']):raise DomainError('合约与方案版本不匹配')
-        return self.store.save('grant',new_id('GRANT'),data,0,actor,'本地授权登记；跨机构授权适配器尚未接入')
+        note=('平台方批准需求方指定健康信息字段申请并登记本地授权；绑定方案版本与用途'
+              if consent else '本地授权登记；跨机构授权适配器尚未接入')
+        return self.store.save('grant',new_id('GRANT'),data,0,actor,note)
     def revoke(self,oid,actor):
         with self.lock:
             g=self.store.require('grant',oid)
@@ -61,6 +97,31 @@ class Security:
                 policy=verify_plan_policy(plan)
                 if timestamp(grant['expires_at'])>instant(policy['deadline_at']) or grant['max_rows']>policy['max_rows'] or grant['min_group_size']<policy['min_group_size']:
                     raise DomainError('授权放宽了规格的期限或输出限制',403)
+                from execution.security.output_policy import output_authorization_requirements
+                requirements=output_authorization_requirements(plan)
+                if requirements is None:
+                    raise DomainError('方案包含不支持的健康信息输出，拒绝执行',403)
+                def verify_approval(required,consent_key,actor_key,label):
+                    if not required:return
+                    consent=grant.get(consent_key) or {}
+                    consent_ids=consent.get('field_ids');consent_fields=consent.get('fields')
+                    field_map=({item.get('field_id'):item for item in consent_fields
+                                if isinstance(item,dict)} if isinstance(consent_fields,list) else {})
+                    if (consent.get('decision')!='approved' or consent.get('approver_role')!='platform'
+                            or consent.get('approver_id')!=grant.get(actor_key)
+                            or consent.get('requester_id')!=grant.get('subject')
+                            or not isinstance(consent.get('request_id'),str) or not consent.get('request_id')
+                            or consent.get('plan_id')!=plan['id']
+                            or consent.get('plan_version')!=plan['version']
+                            or consent.get('purpose')!=grant.get('purpose')
+                            or not isinstance(consent_ids,list)
+                            or any(not isinstance(field_id,str) for field_id in consent_ids)
+                            or set(consent_ids)!=set(required) or field_map!=required):
+                        raise DomainError('缺少平台方对需求方该字段申请的有效批准：'+label,403)
+                verify_approval(requirements['health'],'health_output_authorization',
+                                'health_output_authorized_by','健康信息')
+                verify_approval(requirements['identifier'],'identifier_output_authorization',
+                                'identifier_output_authorized_by','原始患者标识')
             except DomainError as exc:reason=str(exc)
         if grant and grant.get('contract_id') and reason is None:
             contract=self.store.require('contract',grant['contract_id'])

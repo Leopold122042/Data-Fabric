@@ -21,6 +21,9 @@ def compile_node(policy, node, view=None, service=None):
         required = {c['field'] for c in policy['scope']['filters']}
         if policy.get('time_field'):
             required.add(policy['time_field'])
+        if policy.get('field_output'):
+            required.add(policy['field_output'])
+        required.update(policy.get('field_outputs', []))
         if not required <= set(view['field_versions']):
             raise DomainError('视图缺少规格要求的范围字段或时间字段，不能执行', 409)
         return {'filters': policy['scope']['filters'], 'time_field': policy.get('time_field'),

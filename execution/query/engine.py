@@ -85,37 +85,62 @@ class Queries:
         sources=[]
         for (sid,table),columns in sorted(groups.items()):
             if sid in ('his','lis','pacs','iot'):path=Path(medsim.DATA_DIR)/(sid+'.db')
+            elif sid=='emr':path=Path(medsim.DATA_DIR)/'emr'
             else:
                 registration=self.management.store.get('source',sid)
                 if not registration or registration.get('connector')!='sqlite':raise DomainError('此逻辑查询当前支持本地SQLite连接器')
                 path=(Path(medsim.DATA_DIR)/registration['path']).resolve()
-            if not path.is_file():raise DomainError('源不可达',503)
+            if sid=='emr':
+                if not path.is_dir() or not any(path.glob('*.json')):raise DomainError('EMR 文书目录不可达',503)
+            elif not path.is_file():raise DomainError('源不可达',503)
             root=Path(medsim.DATA_DIR).resolve()
             if not path.resolve().is_relative_to(root):raise DomainError('源不在允许的数据目录',403)
             sources.append((sid,table,path.resolve(),columns))
         return sources
-    def execute(self,view,mode,min_group=5,constraints=None,max_rows=200):
+    def execute(self,view,mode,min_group=5,constraints=None,max_rows=200,authorized_health_fields=(),
+                authorized_identifier_fields=()):
         import duckdb
         if mode!=view['output_mode']:raise DomainError('视图输出粒度与授权不一致',403)
         sources=self.sources(view)
         constraints=constraints or {}
+        selective_fields={condition['field'] for condition in view['filters']+constraints.get('filters',[])}
+        if constraints.get('time_field'):selective_fields.add(constraints['time_field'])
+        sources.sort(key=lambda source:(
+            not any(field['id'] in selective_fields for field in source[3]),source[0],source[1]))
+        from execution.security.output_policy import view_output_policy,sensitive_output_allowed
+        fields_by_id={f['id']:f for _,_,_,fields in sources for f in fields}
+        output_policy=view_output_policy(view,fields_by_id)
         required={c['field'] for c in constraints.get('filters',[])}|({constraints['time_field']} if constraints.get('time_field') else set())
         if not required<=set(view['field_versions']):raise DomainError('查询缺少执行条件字段',403)
         pseudonymizer=None
         if view.get('pseudonymize_fields'):
             from execution.security.pseudonym import PatientPseudonymizer
             pseudonymizer=PatientPseudonymizer(self.store)
-        stamp=[(sid,table,str(path.stat().st_mtime_ns),[(f['id'],f['version']) for f in fields],Path(str(path)+'-wal').stat().st_mtime_ns if Path(str(path)+'-wal').exists() else 0) for sid,table,path,fields in sources]
+        stamp=[]
+        for sid,table,path,fields in sources:
+            if sid=='emr' and path.is_dir():
+                source_stamp=[(entry.name,entry.stat().st_mtime_ns,entry.stat().st_size)
+                        for entry in sorted(path.glob('*.json')) if entry.is_file()]
+                wal_stamp=0
+            else:
+                source_stamp=path.stat().st_mtime_ns
+                wal=Path(str(path)+'-wal');wal_stamp=wal.stat().st_mtime_ns if wal.exists() else 0
+            stamp.append((sid,table,source_stamp,[(f['id'],f['version']) for f in fields],wal_stamp))
         # Exclude old materializations that serialized SQLite booleans as strings.
         pseudonym_key_id=hashlib.sha256(pseudonymizer.key).hexdigest() if pseudonymizer else None
-        key=hashlib.sha256(json.dumps(['sqlite-types-v3',view['id'],view['version'],stamp,mode,min_group,max_rows,constraints,pseudonym_key_id],sort_keys=True).encode()).hexdigest()
+        key=hashlib.sha256(json.dumps(['sqlite-types-v4',view['id'],view['version'],stamp,mode,min_group,max_rows,constraints,
+            sorted(set(authorized_health_fields)),sorted(set(authorized_identifier_fields)),pseudonym_key_id],sort_keys=True).encode()).hexdigest()
         cached=self.store.get('materialization',key)
-        if cached and cached['expires_epoch']>time.time():return cached['result'],{'cache_hit':True,'materialization_id':key,'sources':cached['sources']}
-        con=duckdb.connect(':memory:');deadline=time.monotonic()+5;locations={};trace=[]
+        if cached and cached['expires_epoch']>time.time():
+            if not sensitive_output_allowed(cached['result'],{'output_policy':output_policy},authorized_health_fields,
+                    authorized_identifier_fields=authorized_identifier_fields):
+                raise DomainError('缓存查询输出未通过当前字段授权复核，未返回结果',403)
+            return cached['result'],{'cache_hit':True,'materialization_id':key,'sources':cached['sources']}
+        con=duckdb.connect(':memory:');deadline=time.monotonic()+5;locations={};trace=[];loaded_values={}
         try:
             con.execute("SET enable_external_access=false");con.execute("SET memory_limit='128MB'");con.execute('SET threads=1')
             for index,(sid,table,path,fields) in enumerate(sources):
-                params=[];where=[];byid={f['id']:f for f in fields}
+                params=[];where=[];byid={f['id']:f for f in fields};emr_patient_candidates=[]
                 for condition in view['filters']+constraints.get('filters',[]):
                     if condition['field'] in byid:
                         where.append(quote(byid[condition['field']]['name'])+' '+condition['op']+' ?');params.append(condition.get('value'))
@@ -123,16 +148,89 @@ class Queries:
                     column=quote(byid[constraints['time_field']]['name'])
                     where.extend(['julianday('+column+') >= julianday(?)','julianday('+column+') < julianday(?)'])
                     params.extend([constraints['time_start'],constraints['time_end_exclusive']])
+                # Push exact filters through registered equality joins before
+                # scanning a related source table.
+                for left_id,right_id in view.get('joins',[]):
+                    current_id=prior_id=None
+                    if left_id in byid and right_id in loaded_values:
+                        current_id,prior_id=left_id,right_id
+                    elif right_id in byid and left_id in loaded_values:
+                        current_id,prior_id=right_id,left_id
+                    if not current_id:continue
+                    values=list(dict.fromkeys(value for value in loaded_values[prior_id] if value is not None))
+                    if not values:
+                        where.append('1=0')
+                    elif len(values)>900:
+                        raise DomainError('关联候选超过本地参数预算，请增加更精确的筛选条件')
+                    else:
+                        where.append(quote(byid[current_id]['name'])+' IN ('+','.join('?' for _ in values)+')')
+                        params.extend(values)
+                        # EMR documents are stored as <patient_id>.json. Keep
+                        # the propagated join values so the connector can open
+                        # only the matching documents instead of scanning the
+                        # entire directory before SQLite applies the filter.
+                        if (sid=='emr' and
+                                str(byid[current_id].get('name','')).casefold()=='patient_id'):
+                            emr_patient_candidates.append(values)
                 source_budget=min(10000,max_rows) if mode=='object' and len(sources)==1 else 10000
                 sql='SELECT '+','.join(quote(f['name']) for f in fields)+' FROM '+quote(table)+(' WHERE '+' AND '.join(where) if where else '')+' LIMIT '+str(source_budget+1)
-                db=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)
+                sql_types={'integer':' BIGINT','number':' DOUBLE','boolean':' BOOLEAN','string':' VARCHAR'}
+                types=[field_type(f) for f in fields]
+                if sid=='emr':
+                    db=sqlite3.connect(':memory:')
+                    declared=','.join(quote(field['name'])+sql_types[dtype]
+                        for field,dtype in zip(fields,types))
+                    db.execute('CREATE TABLE '+quote(table)+' ('+declared+')')
+                    projected=[]
+                    if emr_patient_candidates:
+                        # Multiple confirmed equality joins are conjunctive in
+                        # SQL. Any one patient_id candidate set narrows the
+                        # file lookup; SQLite still verifies every predicate.
+                        candidate_ids=list(dict.fromkeys(str(value)
+                            for value in emr_patient_candidates[0] if value is not None))
+                        documents=[]
+                        for patient_id in candidate_ids:
+                            document=(path/(patient_id+'.json')).resolve()
+                            if document.is_relative_to(path.resolve()) and document.is_file():
+                                documents.append(document)
+                    else:
+                        documents=sorted(path.glob('*.json'))
+                    for document in documents:
+                        if time.monotonic()>deadline:
+                            db.close()
+                            raise DomainError('本地查询超过时间预算，请增加筛选条件')
+                        if not document.is_file() or not document.resolve().is_relative_to(path.resolve()):continue
+                        try:
+                            with document.open(encoding='utf-8') as stream:record=json.load(stream)
+                        except (OSError,ValueError) as exc:
+                            db.close()
+                            raise DomainError('EMR 文书文件无法解析，查询已停止') from exc
+                        if not isinstance(record,dict):continue
+                        if emr_patient_candidates:
+                            patient_field=next((field for field in fields
+                                if str(field.get('name','')).casefold()=='patient_id'),None)
+                            if (patient_field is None or
+                                    str(record.get(patient_field['name'])) not in candidate_ids):
+                                continue
+                        values=[]
+                        for field in fields:
+                            value=record.get(field['name'])
+                            if isinstance(value,(dict,list)):value=json.dumps(value,ensure_ascii=False,separators=(',',':'))
+                            elif value is not None and not isinstance(value,(str,int,float,bool,bytes)):
+                                value=str(value)
+                            values.append(value)
+                        projected.append(tuple(values))
+                    if projected:
+                        db.executemany('INSERT INTO '+quote(table)+' VALUES ('+
+                            ','.join('?' for _ in fields)+')',projected)
+                else:
+                    db=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)
                 try:
                     db.set_progress_handler(lambda:int(time.monotonic()>deadline),1000)
                     rows=db.execute(sql,params).fetchall()
                 finally:db.close()
                 if len(rows)>source_budget:raise DomainError('源返回超过本次授权行数或本地查询预算，请增加筛选条件')
                 alias='s'+str(index)
-                types=[field_type(f) for f in fields]
                 boolean_columns=[i for i,dtype in enumerate(types) if dtype=='boolean']
                 if boolean_columns:
                     converted=[]
@@ -146,10 +244,10 @@ class Queries:
                                 values[i]=bool(value)
                         converted.append(values)
                     rows=converted
-                sql_types={'integer':' BIGINT','number':' DOUBLE','boolean':' BOOLEAN','string':' VARCHAR'}
                 con.execute('CREATE TABLE '+alias+'('+','.join('c'+str(i)+sql_types[dtype] for i,dtype in enumerate(types))+')')
                 if rows:con.executemany('INSERT INTO '+alias+' VALUES ('+','.join('?' for _ in fields)+')',rows)
                 for i,f in enumerate(fields):locations[f['id']]=alias+'.c'+str(i)
+                for i,f in enumerate(fields):loaded_values[f['id']]=[row[i] for row in rows]
                 trace.append({'source_id':sid,'table':table,'rows_read':len(rows),'pushed_projection':[f['name'] for f in fields],'pushed_filters':len(where),'local_alias':alias})
             predicates=[locations[a]+'='+locations[b] for a,b in view['joins']]
             tables=','.join('s'+str(i) for i in range(len(sources)))
@@ -180,12 +278,9 @@ class Queries:
                     index=selected.index(field_id)
                     output_rows=[row[:index]+[pseudonymizer.token(row[index])]+row[index+1:] for row in output_rows]
             result={'columns':columns,'rows':output_rows,'notice':'部分分组可能未满足输出条件' if mode=='aggregate' else '本地对象级结果'}
-            if constraints:
-                from execution.security.output_policy import view_output_policy,sensitive_output_allowed
-                fields_by_id={f['id']:f for _,_,_,fields in sources for f in fields}
-                output_policy=view_output_policy(view,fields_by_id)
-                if not sensitive_output_allowed(result,{'output_policy':output_policy}):
-                    raise DomainError('查询输出未通过字段分类或敏感内容检查，未缓存结果',403)
+            if not sensitive_output_allowed(result,{'output_policy':output_policy},authorized_health_fields,
+                    authorized_identifier_fields=authorized_identifier_fields):
+                raise DomainError('查询输出未通过字段分类或敏感内容检查，未缓存结果',403)
             old=self.store.get('materialization',key)
             self.store.save('materialization',key,{'result':result,'sources':trace,'expires_epoch':time.time()+60,'view_id':view['id']},old['version'] if old else 0,'execution','按版本与源指纹缓存，命中仍需重新授权')
             return result,{'cache_hit':False,'materialization_id':key,'sources':trace,'optimizer':'DuckDB本地代价优化','physical_plan':physical_plan,'chosen_plan':'字段/过滤下推后本地等值连接','alternatives':[{'name':'全表拉取','selected':False,'reason':'传输与内存成本较高'}]}

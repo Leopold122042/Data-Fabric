@@ -80,10 +80,13 @@ def can_read_management(runtime, kind, item, user):
         return True
     store = runtime.management.store
     if kind == 'demand':
-        return item.get('created_by') == user['id']
+        requester_id=item.get('requester_id') or ('demo-requester' if item.get('created_by')=='demo-platform' else None)
+        return item.get('created_by') == user['id'] or requester_id == user['id']
     if kind == 'spec':
         demand = store.get('demand', item.get('demand_id', ''))
-        return bool(demand and demand.get('created_by') == user['id'])
+        requester_id=(demand or {}).get('requester_id') or (
+            'demo-requester' if (demand or {}).get('created_by')=='demo-platform' else None)
+        return bool(demand and (demand.get('created_by') == user['id'] or requester_id == user['id']))
     if kind == 'service':
         if user['role'] == 'provider':
             return item.get('provider') == user['id']

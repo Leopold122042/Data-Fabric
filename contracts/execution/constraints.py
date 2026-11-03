@@ -37,12 +37,26 @@ def number(value, label, low, high, integer=False):
     return value
 
 
+def has_cost_constraint(value):
+    """Return whether a cost value represents an actual user constraint.
+
+    Ollama sometimes serializes JSON null as the literal string "null". Treat
+    those empty sentinels as absent, while keeping numeric zero as a real cap.
+    """
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip().casefold() not in {'', 'null', 'none', 'nil', 'undefined', 'n/a', 'na'}
+    return True
+
+
 def normalize(specification):
     raw = specification.get('execution_constraints')
     if not isinstance(raw, dict) or not raw:
         raise DomainError('规格缺少已确认的执行条件，请在需求受理页补充范围、时间字段和交付规则后重新确认', 409)
     allowed = {'scope', 'time_field', 'output_mode', 'circulation_modes',
-               'quality_min_complete', 'max_rows', 'min_group_size', 'identifier_output'}
+               'quality_min_complete', 'max_rows', 'min_group_size', 'identifier_output', 'field_output',
+               'field_outputs'}
     if set(raw) - allowed:
         raise DomainError('存在尚不支持的执行条件，不能忽略后继续执行')
     scope = raw.get('scope')
@@ -89,9 +103,22 @@ def normalize(specification):
         raise DomainError('交付形态说明与执行规则不一致或尚不支持，请明确选择汇总/对象级')
     if kind == 'lookup' and mode != 'object':
         raise DomainError('精确查询必须使用对象级受控输出')
-    if kind == 'lookup' and raw.get('identifier_output') != 'pseudonymized':
-        raise DomainError('患者精确查询必须明确声明伪名ID输出')
-    if kind != 'lookup' and raw.get('identifier_output') is not None:
+    field_output=raw.get('field_output')
+    field_outputs=raw.get('field_outputs')
+    identifier_output=raw.get('identifier_output')
+    if field_output is not None and field_outputs is not None:
+        raise DomainError('普通输出字段请使用field_output或field_outputs之一')
+    if kind == 'lookup':
+        if identifier_output=='pseudonymized':
+            if field_output is not None or field_outputs is not None:raise DomainError('患者伪名查询不能同时声明普通字段输出')
+        elif isinstance(field_output,str) and field_output:
+            if identifier_output is not None:raise DomainError('普通字段查询不能声明患者伪名输出')
+        elif (isinstance(field_outputs,list) and 1<=len(field_outputs)<=10
+                and all(isinstance(item,str) and item for item in field_outputs)
+                and len(set(field_outputs))==len(field_outputs)):
+            if identifier_output is not None:raise DomainError('目录字段查询不能声明患者伪名输出')
+        else:raise DomainError('精确查询需绑定患者伪名输出或一个目录字段')
+    if kind != 'lookup' and (identifier_output is not None or field_output is not None or field_outputs is not None):
         raise DomainError('患者伪名输出声明只能用于精确查询')
     if kind == 'metadata' and mode != 'object':
         raise DomainError('元数据快照返回目录对象，请选择对象级交付；不查询业务明细')
@@ -99,14 +126,17 @@ def normalize(specification):
     if not isinstance(modes, list) or not modes or any(m not in ('controlled_compute', 'api', 'download') for m in modes):
         raise DomainError('需明确允许的交付方式')
     if kind == 'lookup' and set(modes) != {'controlled_compute'}:
-        raise DomainError('患者精确查询的伪名结果只允许受控计算查看')
+        raise DomainError('患者精确查询结果只允许受控计算查看')
     quality = number(raw.get('quality_min_complete', 1), '完整率', 0, 1)
-    quality_label = str(specification.get('quality', '')).strip().lower()
-    if quality_label not in ('完整', '无缺失', 'complete', 'no missing values', '完整率', 'completeness'):
-        raise DomainError('当前仅支持完整率质量规则；其他质量要求需接入校验器后执行')
-    if quality_label in ('完整', '无缺失', 'complete', 'no missing values') and quality != 1:
+    quality_requirement = str(specification.get('quality', '')).strip()
+    quality_label = quality_requirement.rstrip('。.!！?？ ').strip().lower()
+    if not quality_requirement:
+        raise DomainError('必须填写质量要求')
+    completeness_rules = ('完整', '无缺失', 'complete', 'no missing values', '完整率', 'completeness')
+    quality_is_completeness = quality_label in completeness_rules
+    if quality_is_completeness and quality_label in ('完整', '无缺失', 'complete', 'no missing values') and quality != 1:
         raise DomainError('无缺失的质量要求不能降低完整率阈值')
-    if specification.get('cost') not in (None, ''):
+    if has_cost_constraint(specification.get('cost')):
         raise DomainError('成本预算执行适配器尚未接入，不能忽略已确认的成本约束', 409)
     start = instant(specification.get('time_start'))
     end = instant(specification.get('time_end'), end_of_date=True)
@@ -125,6 +155,16 @@ def normalize(specification):
               'max_rows': number(raw.get('max_rows', 200), '最大交付行数', 1, 200, True),
               'min_group_size': number(raw.get('min_group_size', 5), '最小分组记录数', 5, 100000, True),
               'source_specification_digest': fingerprint(specification)}
+    if not quality_is_completeness:
+        # Preserve the request in the immutable execution policy while making clear
+        # that the current executor does not measure accuracy, freshness, or other
+        # free-text quality claims.
+        policy['quality_requirement'] = quality_requirement
+        policy['quality_verification'] = 'unverified'
     if raw.get('identifier_output') is not None:
         policy['identifier_output'] = raw['identifier_output']
+    if field_output is not None:
+        policy['field_output'] = field_output
+    if field_outputs is not None:
+        policy['field_outputs'] = list(field_outputs)
     return policy
