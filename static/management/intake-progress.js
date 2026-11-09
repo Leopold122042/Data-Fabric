@@ -33,12 +33,13 @@ export function renderIntakeProgress(flow,{compact=false}={}){
  }
  if(flow.field_lookup){
   const classification=flow.field_lookup.classification;
+  const outputNames=(flow.field_lookup.output_fields||[]).map(item=>item.field_name).filter(Boolean);
   const classifiedValues=['public','internal','health','identifier','sensitive','公开','内部','健康信息','个人标识','敏感'];
   const status=classifiedValues.includes(classification)?'done':
    flow.state==='waiting_field_classification'?'current':flow.state==='attention'?'failed':'pending';
   const autoClassified=flow.classification_review?.decision==='auto_classified_from_catalog_context';
   const basis=flow.field_lookup.classification_basis||flow.classification_review?.classification_basis;
-  const detail=`${flow.field_lookup.table_name||''}.${flow.field_lookup.field_name||''} · ${classification||'待确认'}`+
+  const detail=`${flow.field_lookup.table_name||''}.${outputNames.join('、')||flow.field_lookup.field_name||''} · ${classification||'待确认'}`+
    (basis?' · 分类依据：'+basis:'');
   progress.push({label:autoClassified?'自动分类与依据':'平台确认输出字段分类',status,detail});
  }
@@ -90,8 +91,10 @@ export function renderIntakeProgress(flow,{compact=false}={}){
 export function appendIntakeDelivery(flow,body,onRead){
  const section=document.createElement('section');section.className='intake-result-confirmation';
  const heading=document.createElement('h3');heading.textContent=flow.delivery_result?'受控查询交付结果':'查询已完成，结果已进入平台交付';section.append(heading);
+ const outputNames=(flow.field_lookup?.output_fields||[]).map(item=>item.field_name).filter(Boolean);
+ const fieldSummary=outputNames.join('、')||flow.field_lookup?.field_name||'';
  const resultDescription=flow.output_preference==='admission_time'?'已确认的入院时间':
-  flow.output_preference==='catalog_field'?'已确认的目录字段 '+(flow.field_lookup?.field_name||''):
+  flow.output_preference==='catalog_field'?'已确认的目录字段 '+fieldSummary:
   flow.output_preference==='catalog_field_with_patient_id'?'已确认的目录字段 '+(flow.field_lookup?.field_name||'')+' 与原始 patient_id':'已确认的患者伪名ID';
  const intro=document.createElement('p');intro.textContent=flow.delivery_result?
   `交付编号：${flow.delivery_result.delivery_id} · 本次只展示${resultDescription}。`:

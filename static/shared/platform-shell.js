@@ -6,7 +6,7 @@
  if((path==='/'||path==='/static/index.html')&&!location.hash){location.replace('/static/workspace.html');return;}
  const sidebar=document.querySelector('.mf-sidebar');if(!sidebar)return;const intakeDock=document.querySelector('#intake-flow-dock');
  const access=await import('/static/shared/access.js');
- const {visibleNavigation}=await import('/static/shared/access-model.js');
+ const {visibleNavigation}=await import('/static/shared/access-model.js?v=field-library-6');
  const {icon}=await import('/static/shared/icons.js');
  access.bindRole();sidebar.replaceChildren();sidebar.classList.add('platform-sidebar');sidebar.setAttribute('aria-label','平台导航');
  const brand=document.createElement('a');brand.className='platform-brand';brand.href='/static/workspace.html';brand.textContent='MedFabric';sidebar.append(brand);
@@ -15,6 +15,7 @@
  caption.textContent='医疗数据平台';const navHost=intakeDock?document.createElement('div'):sidebar;if(intakeDock){navHost.className='platform-nav-groups';sidebar.append(navHost);}
  const hrefFor=target=>target.startsWith('/')?target:'/static/execution/index.html?tab='+target;
  function navLink(label,target,resource){const a=document.createElement('a');a.href=hrefFor(target);a.dataset.resource=resource;a.textContent=label;return a;}
+ const fieldLibraryNav=document.createElement('nav');fieldLibraryNav.className='platform-nav';fieldLibraryNav.setAttribute('aria-label','固定入口');fieldLibraryNav.append(navLink('字段库','/static/management/field-library.html','object'));sidebar.append(fieldLibraryNav);
  const groupIcons={'平台':'grid','数据资源':'database','需求与服务':'clipboard','执行与交付':'route','安全与治理':'shield','运行观测':'chart'};
  for(const [name,items] of visibleNavigation(permissions)){const group=document.createElement('details');const title=document.createElement('summary'),label=document.createElement('span');label.textContent=name;title.append(icon(groupIcons[name]||'grid'),label);group.append(title);const nav=document.createElement('nav');nav.className='platform-nav';for(const [label,target,resource] of items)nav.append(navLink(label,target,resource));group.append(nav);navHost.append(group);}if(intakeDock)sidebar.append(intakeDock);
  function highlight(){const current=new URL(location.href);if(current.pathname==='/static/platform/medical-overview.html')current.pathname='/static/platform/query.html';sidebar.querySelectorAll('nav a').forEach(a=>{const u=new URL(a.href);const same=(u.pathname===current.pathname||(current.pathname==='/'&&u.pathname==='/static/index.html'))&&(u.searchParams.get('tab')||'plan')===(current.searchParams.get('tab')||'plan');a.classList.toggle('is-active',same);if(same)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});}

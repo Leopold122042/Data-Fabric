@@ -40,14 +40,14 @@ export function appendPseudonymRevision(flow,body,onSaved){
 }
 
 export function appendFieldClassification(flow,body,onSaved){
- const lookup=flow.field_lookup||{};const section=el('section',undefined,'intake-result-confirmation');
+ const lookup=flow.field_lookup||{};const outputFields=lookup.output_fields||[];const outputNames=outputFields.map(item=>item.field_name).filter(Boolean);const section=el('section',undefined,'intake-result-confirmation');
  if(role()!=='platform'){
   section.append(el('h3','等待平台确认输出字段分类'));
-  section.append(el('p',`目录匹配到 ${lookup.table_name||'数据表'}.${lookup.field_name||'目标字段'}；分类尚未确认。平台方确认前不会建立方案或读取源数据。`));
+  section.append(el('p',`目录匹配到 ${lookup.table_name||'数据表'}中的 ${outputNames.join('、')||lookup.field_name||'目标字段'}；分类尚未确认。平台方确认前不会建立方案或读取源数据。`));
   body.append(section);return;
  }
  section.append(el('h3','请确认模型匹配的输出字段分类'));
- section.append(el('p',`目录匹配：${lookup.table_name||''}.${lookup.field_name||''}（${lookup.field_meaning||lookup.target_phrase||'目录字段'}）。姓名字段 ${lookup.name_field_name||'name'} 只用于精确筛选，不会输出。`));
+ section.append(el('p',`目录匹配：${lookup.table_name||''}.${outputNames.join('、')||lookup.field_name||''}（${lookup.target_phrase||lookup.field_meaning||'目录字段'}）。姓名字段 ${lookup.name_field_name||'name'} 只用于精确筛选，不会输出。`));
  const select=document.createElement('select');select.setAttribute('aria-label','输出字段分类');
  const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='选择分类';select.append(placeholder);
  for(const [value,label] of [['公开','公开'],['内部','内部'],['健康信息','健康信息'],['个人标识','个人标识'],['敏感','敏感']]){
@@ -69,20 +69,22 @@ export function appendFieldClassification(flow,body,onSaved){
 
 export function appendCatalogFieldSpecConfirmation(flow,body,onSaved){
  const lookup=flow.field_lookup||{},preview=flow.execution_plan_preview||{};
+ const outputFields=lookup.output_fields||[];
+ const outputNames=outputFields.map(item=>item.field_name).filter(Boolean);
  const section=el('section',undefined,'intake-result-confirmation');
  section.append(el('h3','平台已匹配字段并预填查询规格，请核对后确认'));
  section.append(el('p','SQL只读草案已按目录规则校验。姓名仅作精确筛选；输出字段、范围和用途均由当前规格固定。确认规格不会执行查询或授予权限。'));
  const summary=el('div',undefined,'intake-result-summary');
  for(const [name,value] of [['数据来源',`${lookup.source_id||preview.source_id||''} / ${lookup.table_name||preview.table||''}`],
   ['姓名匹配',`${lookup.name_field_name||'姓名'} = ${lookup.name||''}（精确匹配）`],
-  ['输出字段',`${lookup.field_name||''}${lookup.classification?' · '+lookup.classification:''}`],
+  ['输出字段',outputFields.length?outputFields.map(item=>`${item.field_name}${item.classification?' · '+item.classification:''}`).join('、'):`${lookup.field_name||''}${lookup.classification?' · '+lookup.classification:''}`],
   ['用途',flow.draft?.purpose||'按已确认任务规格'],['交付方式','对象级受控查看']])summary.append(el('p',`${name}：${value}`));
  section.append(summary);
  const qualityReview=appendQualityRequirementNotice(flow.draft?.quality,section,flow.draft?.execution_constraints?.quality_min_complete??1);
  const sql=el('pre',flow.query_validation?.normalized_sql||flow.query_draft||'缺少只读SQL草案');
  const details=document.createElement('details');details.append(el('summary','只读 SQL 草案'),sql);section.append(details);
  const check=document.createElement('input');check.type='checkbox';const label=el('label');
- label.append(check,document.createTextNode('我确认表、姓名筛选、输出字段和用途符合本次需求。'));section.append(label);
+ label.append(check,document.createTextNode(`我确认表、姓名筛选、输出字段（${outputNames.join('、')||lookup.field_name||'目录字段'}）和用途符合本次需求。`));section.append(label);
  const error=el('p',undefined,'intake-confirm-error');error.setAttribute('role','alert');
  const submit=actionButton('确认规格并生成固定方案',async()=>{
   submit.disabled=true;error.textContent='正在保存规格并生成方案草案…';
@@ -102,6 +104,8 @@ export function appendCatalogFieldSpecConfirmation(flow,body,onSaved){
 export function appendExecutionPlanConfirmation(flow,body,onSaved){
  const admissionTime=flow.output_preference==='admission_time';
  const patientIdentifier=flow.output_preference==='catalog_field_with_patient_id';
+ const outputNames=(flow.field_lookup?.output_fields||[]).map(item=>item.field_name).filter(Boolean);
+ const outputLabel=outputNames.join('、')||flow.field_lookup?.field_name||'目标字段';
  const section=el('section',undefined,'intake-result-confirmation');
  section.append(el('h3','请确认固定执行方案'));
  section.append(el('p','方案由已确认规格和目录元数据自动预填。此处只保存方案确认，不读取源数据、不提交查询，也不签发授权。'));
@@ -114,12 +118,12 @@ export function appendExecutionPlanConfirmation(flow,body,onSaved){
  for(const [name,value] of rows)summary.append(el('p',`${name}：${value}`));section.append(summary);
  if(requiresQualityReview(flow.draft?.quality))section.append(el('p',`质量要求“${flow.draft.quality}”已保留在规格中；平台只自动检查完整率，其他质量要求不会自动验证。`,'intake-result-blocker'));
  const check=document.createElement('input');check.type='checkbox';const label=el('label');
- label.append(check,document.createTextNode(admissionTime?'我已核对表关联、姓名与住院筛选及入院时间输出字段；此确认不是原值交付授权。':patientIdentifier?`我已核对${flow.field_lookup?.field_name||'目标字段'}及原始patient_id输出；个人标识仍需平台逐方案授权。`:flow.output_preference==='catalog_field'?'我已核对来源表、姓名筛选和目标字段；此处只确认方案，不代表授权或执行。':'我已核对来源表、姓名筛选和伪名输出，并确认此固定方案。'));section.append(label);
+ label.append(check,document.createTextNode(admissionTime?'我已核对表关联、姓名与住院筛选及入院时间输出字段；此确认不是原值交付授权。':patientIdentifier?`我已核对${flow.field_lookup?.field_name||'目标字段'}及原始patient_id输出；个人标识仍需平台逐方案授权。`:flow.output_preference==='catalog_field'?`我已核对来源表、姓名筛选和输出字段（${outputLabel}）；此处只确认方案，不代表授权或执行。`:'我已核对来源表、姓名筛选和伪名输出，并确认此固定方案。'));section.append(label);
  const error=el('p',undefined,'intake-confirm-error');error.setAttribute('role','alert');
  const submit=actionButton('确认方案，继续办理授权',async()=>{
   submit.disabled=true;error.textContent='正在记录方案确认…';
   const confirmationNote=admissionTime?'已核对自动预填的入院时间查询条件；后续由平台方授权或按需求方申请流程办理。':patientIdentifier?`已核对原姓名筛选、${flow.field_lookup?.field_name||'目标字段'}及目录patient_id输出；仍需按当前方案申请并批准原始标识字段。`:
-   flow.output_preference==='catalog_field'?`已核对自动预填的 ${flow.field_lookup?.table_name||'目录表'}.${flow.field_lookup?.field_name||'目标字段'} 普通字段查询方案。`:'已核对自动预填的单表精确查询方案；只输出患者伪名ID。';
+   flow.output_preference==='catalog_field'?`已核对自动预填的 ${flow.field_lookup?.table_name||'目录表'} 输出字段（${outputLabel}）查询方案。`:'已核对自动预填的单表精确查询方案；只输出患者伪名ID。';
   try{const result=await api('/intake/flows/'+flow.id+'/confirm-execution-plan',{expected_version:flow.version,confirmed:true,note:confirmationNote});
    onSaved(result,'方案已确认 · 等待授权');message(result.note);
   }catch(cause){error.textContent=cause.message||'方案确认失败，请刷新后重试。';sync();}

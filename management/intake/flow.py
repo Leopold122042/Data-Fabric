@@ -14,6 +14,13 @@ CAPABILITY_LABELS = {
 }
 
 
+def normalized_field_output_ids(constraints):
+    values=constraints.get('field_outputs')
+    if values is None and constraints.get('field_output'):
+        values=[constraints['field_output']]
+    return set(values or [])
+
+
 def validate_query_draft(sql, catalog):
     if sql is None:return {'status':'missing','errors':['模型未提供SQL草案；需补充查询意图和可用字段。'],'normalized_sql':None}
     try:
@@ -62,6 +69,8 @@ class IntakeFlow:
 
     def _catalog_metadata(self, external_catalog=()):
         # Give the local model structure metadata only. Never inspect source rows.
+        from management.catalog.field_library import FieldLibrary
+        definitions=FieldLibrary(self.store).confirmed()
         candidates=[]
         for row in self.store.list('object'):
             if row.get('status')=='deleted':continue
@@ -72,7 +81,15 @@ class IntakeFlow:
                 'data_type':row.get('data_type') or structure.get('type'),'status':row.get('status'),
                 'classification':row.get('classification'),'classification_basis':row.get('classification_basis'),
                 'columns':row.get('columns') or structure.get('columns',[])})
+        for candidate in candidates:
+            definition=definitions.get(candidate['id'])
+            if definition:
+                candidate.update(meaning=definition['definition'],field_label=definition['label'],
+                    aliases=definition.get('aliases',[]),unit=definition.get('unit',''),
+                    semantic_baseline={'label':definition['label']},
+                    definition_status='confirmed',definition_version=definition['version'])
         for row in self.store.list('service'):
+
             candidates.append({'id':row['id'],'kind':'service','name':row.get('name'),'description':row.get('description'),
                 'purpose':row.get('purpose'),'output':row.get('output'),'lifecycle':row.get('lifecycle')})
         for row in external_catalog:
@@ -179,8 +196,162 @@ class IntakeFlow:
             return True
         return False
 
+    def _person_multi_field_lookup(self,text,catalog,draft=None):
+        """Resolve every explicitly requested person attribute when the request names several."""
+        text=str(text or '')
+        fields=[row for row in catalog if row.get('kind')=='field' and row.get('status')=='active']
+        tables=[row for row in catalog if row.get('kind')=='table' and row.get('status')=='active']
+        table_by_id={row.get('id'):row for row in tables}
+        source_labels={'emr':('电子病历系统','电子病历','病历文书','病案库'),
+            'his':('医院信息系统','HIS'),'lis':('检验信息系统','LIS'),
+            'pacs':('影像归档系统','PACS'),'iot':('院内监测设备','IoT')}
+        parse_text=text
+        source_markers=[marker for row in tables for marker in
+            (row.get('source_id'),row.get('name'),row.get('table'),
+             *source_labels.get(str(row.get('source_id') or '').casefold(),()))
+            if isinstance(marker,str) and len(marker.strip())>=2]
+        for marker in sorted(set(source_markers),key=len,reverse=True):
+            parse_text=re.sub(re.escape(marker),' ',parse_text,flags=re.I)
+        parse_text=re.sub(r'^(?:(?:我想|我要|我需要|我在|我正在)\s*)?(?:请问|请|帮我查一下|麻烦查一下|查找|查看|查一下|查询|搜索|检索|获取|找出|帮我|麻烦|查|找)\s*','',parse_text)
+        request=re.search(r'(?P<name>[\u4e00-\u9fff]{2,4})\s*的\s*(?P<targets>.+?)\s*$',parse_text)
+        if not request:return None
+        targets=[item.strip(' \t，,、。.!！?？:：') for item in re.split(
+            r'\s*(?:以及|并且|同时|和|与|及|、|，|,|&|\+)\s*',request.group('targets'))]
+        targets=[item for item in targets if item]
+        if len(targets)<2:return None
+
+        aliases={
+            'id':('patient_id',),'患者id':('patient_id',),'病人id':('patient_id',),
+            'patientid':('patient_id',),'patient_id':('patient_id',),
+            '患者编号':('patient_id',),'病人编号':('patient_id',),'患者标识':('patient_id',),
+            '科室':('dept','department'),'就诊科室':('dept','department'),
+            '部门':('dept','department'),'department':('department','dept'),'dept':('dept','department'),
+            '性别':('gender','sex'),'gender':('gender','sex'),'sex':('gender','sex'),
+            '生日':('birth_date','date_of_birth','dob'),
+            '出生日期':('birth_date','date_of_birth','dob'),
+        }
+        def normalized(value):
+            return re.sub(r'[\s_-]+','',str(value or '')).casefold()
+        canonical={normalized(key):value for key,value in aliases.items()}
+        recommended={item.get('id') for item in (draft or {}).get('resource_recommendations',[])
+            if item.get('id')}
+        requested=[]
+        for target in targets:
+            names=canonical.get(normalized(target))
+            if not names:return None
+            semantic_tokens={key for key,field_names in canonical.items()
+                if any(name.casefold() in {value.casefold() for value in field_names} for name in names)}
+            candidates=[]
+            for field in fields:
+                if field.get('parent_id') not in table_by_id:continue
+                field_name=str(field.get('name','')).casefold()
+                terms=[field_name,*field.get('aliases',[]),field.get('field_label',''),field.get('meaning','')]
+                baseline=field.get('semantic_baseline')
+                if isinstance(baseline,dict):terms.extend(value for value in baseline.values() if isinstance(value,str))
+                elif isinstance(baseline,str):terms.append(baseline)
+                if field_name in names or any(normalized(term) in semantic_tokens for term in terms if term):
+                    candidates.append(field)
+            requested.append((target,names,candidates))
+
+        name_names={'name','patient_name','fullname','full_name','姓名','患者姓名'}
+        def name_binding(target_table):
+            target_fields=[row for row in fields if row.get('parent_id')==target_table.get('id')]
+            name=next((row for row in target_fields if str(row.get('name','')).casefold() in name_names),None)
+            if name:return name,None
+            target_key=next((row for row in target_fields
+                if str(row.get('name','')).casefold()=='patient_id'),None)
+            if not target_key:return None,None
+            related=[]
+            for candidate in tables:
+                if candidate.get('id')==target_table.get('id'):continue
+                candidate_fields=[row for row in fields if row.get('parent_id')==candidate.get('id')]
+                candidate_name=next((row for row in candidate_fields
+                    if str(row.get('name','')).casefold() in name_names),None)
+                candidate_key=next((row for row in candidate_fields
+                    if str(row.get('name','')).casefold()=='patient_id'),None)
+                same_source=candidate.get('source_id')==target_table.get('source_id')
+                linked=(candidate_key and not same_source and
+                    self._has_confirmed_patient_id_link(target_key['id'],candidate_key['id']))
+                if candidate_name and candidate_key and (same_source or linked):
+                    related.append((candidate,candidate_name))
+            return (related[0][1],related[0][0]) if len(related)==1 else (None,None)
+
+        # The current governed field-query plan supports one target table and, when
+        # needed, one patient table for exact-name filtering. Choose a table that
+        # contains all requested outputs before considering separate table matches.
+        from itertools import product
+        combinations=[]
+        if all(candidates for _,_,candidates in requested):
+            for selected in product(*(entry[2] for entry in requested)):
+                target_ids={field.get('parent_id') for field in selected}
+                if len(target_ids)!=1:continue
+                target_table=table_by_id[next(iter(target_ids))]
+                name_field,join_table=name_binding(target_table)
+                if not name_field:continue
+                if join_table and name_field.get('parent_id')!=join_table.get('id'):continue
+                connection=self._source_connection_status(target_table)
+                recommendation_penalty=sum(field.get('id') not in recommended for field in selected)
+                combinations.append(((recommendation_penalty,connection!='connected',target_table.get('source_id')!='his',
+                    target_table.get('name',''),tuple(field.get('name','') for field in selected)),
+                    selected,target_table,name_field,join_table))
+        if not combinations:
+            if any(not candidates for _,_,candidates in requested):
+                missing=[target for target,_,candidates in requested if not candidates]
+                return {'kind':'field_gap','name':request.group('name'),'targets':targets,
+                    'missing':missing,'reason':'目录没有为所有请求属性找到字段；未生成部分字段查询。'}
+            return {'kind':'field_gap','name':request.group('name'),'targets':targets,
+                'missing':targets,'reason':'目录无法通过姓名字段和已登记患者关联同时定位全部请求字段；未生成部分字段查询。'}
+        combinations.sort(key=lambda item:item[0])
+        _,selected,table,name_field,join_table=combinations[0]
+        # Preserve the user's requested order while avoiding duplicate projections.
+        selected_fields=list({field['id']:field for field in selected}.values())
+        person_name=request.group('name')
+        safe_name=person_name.replace("'","''")
+        quote=lambda value:'"'+str(value).replace('"','""')+'"'
+        table_name=table.get('table') or table.get('name')
+        if join_table:
+            left=next((field for field in fields if field.get('parent_id')==table.get('id')
+                and str(field.get('name','')).casefold()=='patient_id'),None)
+            right=next((field for field in fields if field.get('parent_id')==join_table.get('id')
+                and str(field.get('name','')).casefold()=='patient_id'),None)
+            if not left or not right:
+                return {'kind':'field_gap','name':person_name,'targets':targets,'missing':targets,
+                    'reason':'目录未能唯一确认姓名表与输出表的patient_id关联；未生成查询。'}
+            sql=(f"SELECT {', '.join('t.'+quote(field.get('name')) for field in selected_fields)} "
+                 f"FROM {quote(join_table.get('table') or join_table.get('name'))} p "
+                 f"JOIN {quote(table_name)} t ON p.{quote(right.get('name'))} = t.{quote(left.get('name'))} "
+                 f"WHERE p.{quote(name_field.get('name'))} = '{safe_name}' LIMIT 200")
+        else:
+            sql=(f"SELECT {', '.join(quote(field.get('name')) for field in selected_fields)} "
+                 f"FROM {quote(table_name)} WHERE {quote(name_field.get('name'))} = '{safe_name}' LIMIT 200")
+
+        output_labels=[]
+        for target,_,candidates in requested:
+            field=next((item for item in selected if item in candidates),None)
+            output_labels.append(f'“{target}”→{table.get("name")}.{field.get("name")}')
+        reason='目录规则已匹配全部请求字段：'+'；'.join(output_labels)+'；按姓名精确筛选。'
+        resources=[]
+        def add_resource(item,why):
+            if item and not any(value['id']==item['id'] for value in resources):
+                resources.append({'id':item['id'],'reason':why})
+        add_resource(table,reason)
+        for field in selected_fields:add_resource(field,reason)
+        add_resource(name_field,'仅用于姓名精确筛选，不会作为输出字段。')
+        join_fields=[]
+        if join_table:
+            add_resource(join_table,'按目录中patient_id等值关联到姓名字段所属表。')
+            for field in fields:
+                if field.get('parent_id') in (table.get('id'),join_table.get('id')) and str(field.get('name','')).casefold()=='patient_id':
+                    join_fields.append(field)
+                    add_resource(field,'仅用于已登记表之间的patient_id关联，不作为额外输出。')
+        return {'kind':'field_value','name':person_name,'table':table,'field':selected_fields[0],
+            'fields':selected_fields,'name_field':name_field,'sql':sql,'target_phrase':'、'.join(targets),
+            'join_table':join_table,'join_fields':join_fields,'resources':resources,'reason':reason}
+
     def _person_field_lookup(self,text,catalog,draft=None):
         """Resolve a person's requested output field from catalog names and semantics."""
+        multi=self._person_multi_field_lookup(text,catalog,draft)
+        if multi:return multi
         text=str(text or '')
         aliases={'性别':('gender','sex'),'gender':('gender','sex'),'sex':('gender','sex'),
                  '科室':('dept','department'),'就诊科室':('dept','department'),
@@ -245,7 +416,7 @@ class IntakeFlow:
             table=table_by_id.get(field.get('parent_id'))
             if not table:continue
             name_field,join_table=name_binding(table)
-            phrases=[]
+            phrases=list(field.get('aliases') or [])
             field_name=str(field.get('name') or '').strip()
             meaning=str(field.get('meaning') or '').strip()
             if meaning:phrases.append(meaning)
@@ -274,7 +445,7 @@ class IntakeFlow:
                 if not table:continue
                 name_field,join_table=name_binding(table)
                 reason=str(recommendations[field['id']]).casefold()
-                semantic=[str(field.get('name','')),str(field.get('meaning',''))]
+                semantic=[str(field.get('name','')),str(field.get('meaning','')),*field.get('aliases',[])]
                 baseline=field.get('semantic_baseline')
                 if isinstance(baseline,dict):semantic.extend(str(value) for value in baseline.values() if isinstance(value,str))
                 elif baseline:semantic.append(str(baseline))
@@ -504,6 +675,16 @@ class IntakeFlow:
         }
         for capability,value in defaults.items():proposed.setdefault(capability,{'capability':capability,**value})
         draft['capability_steps']=list(proposed.values())
+        if lookup and lookup.get('kind')=='field_gap':
+            note=lookup.get('reason') or '目录没有同时匹配到所有请求字段；未生成部分字段查询。'
+            draft['query_draft']=None;draft['execution_constraints']={}
+            draft['resource_recommendations']=[]
+            draft['uncertain_fields']=list(dict.fromkeys((draft.get('uncertain_fields') or [])+[note]))
+            proposed['catalog_search']['reason']=note
+            proposed['connected_source_discovery']['reason']='全部目标字段匹配前不选择或连接数据源。'
+            proposed['data_query']['reason']='所有请求字段尚未同时匹配；不会只查询其中一部分。'
+            draft['capability_steps']=list(proposed.values())
+            return draft,lookup
         if lookup and lookup.get('kind')=='pseudonymized_id':
             table=lookup['table'];name_field=lookup['name_field']
             draft['title']=draft.get('title') or f"查询{lookup['name']}的患者ID"
@@ -538,23 +719,30 @@ class IntakeFlow:
             draft['capability_steps']=list(proposed.values())
         elif lookup:
             table=lookup['table'];field=lookup['field'];name_field=lookup['name_field']
-            output_name=field.get('meaning') or field.get('name')
-            draft['title']=draft.get('title') or f"查询{lookup['name']}的{lookup['target_phrase']}"
-            draft['object_scope']=f"在 {table.get('name')} 表按姓名精确匹配 {lookup['name']}；只输出目录字段 {output_name}。"
+            output_fields=lookup.get('fields') or [field]
+            output_names=[item.get('meaning') or item.get('name') for item in output_fields]
+            draft['title']=(f"查询{lookup['name']}的{lookup['target_phrase']}" if len(output_fields)>1
+                else draft.get('title') or f"查询{lookup['name']}的{lookup['target_phrase']}")
+            draft['object_scope']=f"在 {table.get('name')} 表按姓名精确匹配 {lookup['name']}；输出目录字段 {'、'.join(output_names)}。"
             draft['delivery']='对象级';draft['query_draft']=lookup['sql']
+            output_ids=[item['id'] for item in output_fields]
+            output_binding=({'field_output':output_ids[0]} if len(output_ids)==1
+                else {'field_outputs':output_ids})
             draft['execution_constraints']={'scope':{'kind':'lookup','filters':[
                 {'field':name_field['id'],'op':'=','value':lookup['name']}]},
-                'time_field':None,'output_mode':'object','field_output':field['id'],
+                'time_field':None,'output_mode':'object',**output_binding,
                 'circulation_modes':['controlled_compute'],'quality_min_complete':1,
                 'max_rows':200,'min_group_size':5}
-            recommendations=[]
-            for item,reason in ((table,lookup['reason']),(field,lookup['reason']),(name_field,'仅用于姓名精确筛选，不会作为输出字段。')):
-                if not any(row.get('id')==item.get('id') for row in recommendations):
-                    recommendations.append({'id':item['id'],'reason':reason})
+            recommendations=lookup.get('resources') or []
+            if not recommendations:
+                for item,reason in ((table,lookup['reason']),(field,lookup['reason']),
+                        (name_field,'仅用于姓名精确筛选，不会作为输出字段。')):
+                    if not any(row.get('id')==item.get('id') for row in recommendations):
+                        recommendations.append({'id':item['id'],'reason':reason})
             draft['resource_recommendations']=recommendations
             proposed['catalog_search']['reason']=lookup['reason']
             proposed['connected_source_discovery']['reason']=f"检查 {table.get('name')} 表所属 {table.get('source_id') or '已连接'} 数据源；已连接来源直接沿用。"
-            proposed['data_query']['reason']=f"按姓名精确匹配并只返回 {table.get('name')}.{field.get('name')}。"
+            proposed['data_query']['reason']=f"按姓名精确匹配并返回 {', '.join(table.get('name','')+'.'+item.get('name','') for item in output_fields)}。"
             draft['capability_steps']=list(proposed.values())
         return draft,lookup
 
@@ -565,16 +753,17 @@ class IntakeFlow:
                        if flow.get('spec_id') else None)
         confirmed_constraints=((confirmed_spec or {}).get('specification') or {}).get('execution_constraints') or {}
         already_field_bound=bool(confirmed_spec and confirmed_spec.get('confirmed')
-                                 and confirmed_constraints.get('field_output'))
+                                 and (confirmed_constraints.get('field_output') or confirmed_constraints.get('field_outputs')))
         prior_lookup=flow.get('field_lookup') or {}
+        prior_field_ids=set(prior_lookup.get('field_ids') or [prior_lookup.get('field_id')])
         prior_field=self.store.get('object',prior_lookup.get('field_id','')) if prior_lookup.get('field_id') else None
         prior_inference=(infer_catalog_classification(prior_field)
                          if prior_field else ('unknown',None))
         validation=flow.get('query_validation') or {}
         previously_confirmed=any(
             spec.get('demand_id')==flow.get('demand_id') and spec.get('confirmed')
-            and ((spec.get('specification') or {}).get('execution_constraints') or {}).get('field_output')
-                ==prior_lookup.get('field_id')
+            and prior_field_ids <= normalized_field_output_ids(
+                ((spec.get('specification') or {}).get('execution_constraints') or {}))
             and (spec.get('specification') or {}).get('query_draft')==validation.get('normalized_sql')
             for spec in self.store.list('spec'))
         if flow.get('state')=='waiting_manual_spec_confirmation' and previously_confirmed:
@@ -696,15 +885,22 @@ class IntakeFlow:
         """Prepare a matched ordinary-field lookup without reading source rows."""
         from execution.security.output_policy import field_classification,infer_catalog_classification
         catalog=catalog or self._catalog_metadata()
-        table=lookup['table'];field=lookup['field'];name_field=lookup['name_field']
-        inferred,basis=infer_catalog_classification(field)
-        if inferred!='unknown' and field.get('classification') in (None,'','待确认'):
-            labels={'health':'健康信息','identifier':'个人标识','sensitive':'敏感',
-                    'public':'公开','internal':'内部'}
-            field=self.runtime.management.catalog.annotate(field['id'],{
-                'expected_version':field['version'],'classification':labels[inferred],
-                'classification_basis':basis},actor)
-            lookup={**lookup,'field':field}
+        table=lookup['table'];name_field=lookup['name_field']
+        output_fields=lookup.get('fields') or [lookup['field']]
+        labels={'health':'健康信息','identifier':'个人标识','sensitive':'敏感',
+                'public':'公开','internal':'内部'}
+        refreshed=[];inferences={}
+        for output_field in output_fields:
+            inferred,basis=infer_catalog_classification(output_field)
+            inferences[output_field['id']]=(inferred,basis)
+            if inferred!='unknown' and output_field.get('classification') in (None,'','待确认'):
+                output_field=self.runtime.management.catalog.annotate(output_field['id'],{
+                    'expected_version':output_field['version'],'classification':labels[inferred],
+                    'classification_basis':basis},actor)
+            refreshed.append(output_field)
+        output_fields=refreshed;field=output_fields[0]
+        inferred,basis=inferences[field['id']]
+        lookup={**lookup,'field':field,'fields':output_fields}
         demand=self.store.require('demand',flow['demand_id'])
         proposal={**demand,'expected_version':demand['version'],
             'title':draft.get('title') or f"查询{lookup['name']}的{lookup['target_phrase']}",
@@ -718,34 +914,37 @@ class IntakeFlow:
             {'expected_version':demand['version'],'proposal':draft|proposal,'model':flow.get('model')},actor)['demand']
             if changed else demand)
         validation=validate_query_draft(lookup['sql'],catalog)
-        classification=field_classification(field)
+        classifications=[field_classification(item) for item in output_fields]
+        classification=classifications[0]
+        has_unknown='unknown' in classifications
+        allowed_classifications=('public','internal','health','identifier')
+        all_outputs_allowed=all(value in allowed_classifications for value in classifications)
         source_status=self._source_connection_status(table)
         previous={item.get('id'):item for item in flow.get('resources',[])}
-        table_resource={**table,'reason':lookup['reason'],'review_status':
-            'human_confirmed' if previous.get(table['id'],{}).get('review_status')=='human_confirmed'
-            else 'model_recommended_pending_human_confirmation'}
-        output_resource={**field,'reason':lookup['reason'],'review_status':
-            'human_confirmed' if previous.get(field['id'],{}).get('review_status')=='human_confirmed'
-            else 'model_recommended_pending_human_confirmation'}
-        filter_resource={**name_field,'reason':'仅用于姓名精确筛选，不会作为输出字段。','review_status':
-            'human_confirmed' if previous.get(name_field['id'],{}).get('review_status')=='human_confirmed'
-            else 'model_recommended_pending_human_confirmation'}
-        resources=[table_resource,output_resource,filter_resource]
+        resources=[]
+        def add_resource(item,reason):
+            if not item or any(resource.get('id')==item.get('id') for resource in resources):return
+            resources.append({**item,'reason':reason,'review_status':
+                'human_confirmed' if previous.get(item['id'],{}).get('review_status')=='human_confirmed'
+                else 'model_recommended_pending_human_confirmation'})
+        add_resource(table,lookup['reason'])
+        for output_field in output_fields:add_resource(output_field,lookup['reason'])
+        add_resource(name_field,'仅用于姓名精确筛选，不会作为输出字段。')
         join_table=lookup.get('join_table')
         join_fields=[]
         if join_table:
             join_fields=[row for row in catalog if row.get('kind')=='field'
                 and row.get('status')=='active' and row.get('name')=='patient_id'
                 and row.get('parent_id') in (table['id'],join_table['id'])]
-            resources.extend([{**join_table,'reason':'按目录中 patient_id 等值关联，用于定位目标患者。',
-                'review_status':'human_confirmed' if previous.get(join_table['id'],{}).get('review_status')=='human_confirmed'
-                    else 'model_recommended_pending_human_confirmation'}])
-            resources.extend([{**row,'reason':'仅用于已登记表之间的 patient_id 关联，不作为输出。',
-                'review_status':'human_confirmed' if previous.get(row['id'],{}).get('review_status')=='human_confirmed'
-                    else 'model_recommended_pending_human_confirmation'} for row in join_fields])
+            add_resource(join_table,'按目录中patient_id等值关联，用于定位目标患者。')
+            for row in join_fields:add_resource(row,'仅用于已登记表之间的patient_id关联，不作为额外输出。')
         lookup_record={'kind':'field_value','table_id':table['id'],'table_name':table.get('name'),
             'source_id':table.get('source_id'),'field_id':field['id'],'field_name':field.get('name'),
             'field_meaning':field.get('meaning'),'name_field_id':name_field['id'],
+            'field_ids':[item['id'] for item in output_fields],
+            'output_fields':[{'field_id':item['id'],'field_name':item.get('name'),
+                'table_id':item.get('parent_id'),'table_name':item.get('table'),
+                'classification':field_classification(item)} for item in output_fields],
             'name_field_name':name_field.get('name'),'name':lookup['name'],
             'target_phrase':lookup['target_phrase'],'reason':lookup['reason'],
             'classification':field.get('classification'),
@@ -765,17 +964,19 @@ class IntakeFlow:
                 if source_status=='connected' else '所选字段所属数据源尚不可用，需先处理连接或登记。'},
             {'id':'step-3','capability':'data_query','label':CAPABILITY_LABELS['data_query'],
              'reason':lookup['reason'],'depends_on':['step-2'],
-             'status':'waiting_field_classification' if classification=='unknown' else
-                'waiting_manual_spec_confirmation' if classification in ('public','internal','health') and source_status=='connected' else 'blocked',
-             'detail':('输出字段分类尚未确认；请平台方在当前窗口选择分类。确认前不生成可执行方案。'
-                if classification=='unknown' else
-                '字段分类不允许直接输出；请平台方复核分类或调整输出方式。'
-                if classification not in ('public','internal','health') else
+             'status':'waiting_field_classification' if has_unknown else
+                'waiting_manual_spec_confirmation' if all_outputs_allowed and source_status=='connected' else 'blocked',
+             'detail':('至少一个输出字段分类尚未确认；请平台方在当前窗口复核。确认前不生成可执行方案。'
+                if has_unknown else
+                '输出字段分类不允许直接输出；请平台方复核分类或调整输出方式。'
+                if not all_outputs_allowed else
+                '姓名与所有目标字段已匹配；个人标识字段仍需平台逐方案授权。确认任务规格不会执行查询。'
+                if 'identifier' in classifications else
                 '只读SQL已按目录字段和姓名精确匹配预填；确认任务规格后自动建立固定方案草案。查询尚未提交。')}]
         if source_status=='cloud':state='waiting_authorization'
         elif source_status!='connected' or validation['status']!='valid_pending_human_confirmation':state='attention'
-        elif classification=='unknown':state='waiting_field_classification'
-        elif classification in ('public','internal','health'):state='waiting_manual_spec_confirmation'
+        elif has_unknown:state='waiting_field_classification'
+        elif all_outputs_allowed:state='waiting_manual_spec_confirmation'
         else:state='attention'
         revised_draft={**draft,'time_start':updated.get('time_start'),'time_end':updated.get('time_end'),
             'purpose':updated.get('purpose'),'quality':updated.get('quality'),'deadline':updated.get('deadline')}
@@ -998,13 +1199,21 @@ class IntakeFlow:
                     if resources else '尚无匹配的微信指数数据表和字段；完成目录登记与扫描后重新检索，才可编制查询。')
         field_lookup_record=None
         if person_lookup and person_lookup.get('kind')=='field_value':
+            from execution.security.output_policy import field_classification
+            output_fields=person_lookup.get('fields') or [person_lookup['field']]
             field_lookup_record={'kind':'field_value','table_id':person_lookup['table']['id'],
                 'table_name':person_lookup['table'].get('name'),'source_id':person_lookup['table'].get('source_id'),
                 'field_id':person_lookup['field']['id'],'field_name':person_lookup['field'].get('name'),
                 'field_meaning':person_lookup['field'].get('meaning'),
+                'field_ids':[item['id'] for item in output_fields],
+                'output_fields':[{'field_id':item['id'],'field_name':item.get('name'),
+                    'table_id':item.get('parent_id'),'table_name':item.get('table'),
+                    'classification':field_classification(item)} for item in output_fields],
                 'name_field_id':person_lookup['name_field']['id'],'name_field_name':person_lookup['name_field'].get('name'),
+                'join_table_id':person_lookup.get('join_table',{}).get('id') if person_lookup.get('join_table') else None,
+                'join_field_ids':[item['id'] for item in person_lookup.get('join_fields',[])],
                 'name':person_lookup['name'],'target_phrase':person_lookup['target_phrase'],
-                'reason':person_lookup['reason'],'classification':person_lookup['field'].get('classification')}
+                'reason':person_lookup['reason'],'classification':field_classification(person_lookup['field'])}
         is_pseudonym_lookup=bool(person_lookup and person_lookup.get('kind')=='pseudonymized_id')
         record=self.store.save('intake_flow',new_id('FLOW'),{
             'demand_id':demand_id,'demand_version':demand['version'],'created_by':actor,
@@ -1085,31 +1294,43 @@ class IntakeFlow:
             elif any(s['status']=='waiting_manual_spec_confirmation' for s in steps):state='waiting_manual_spec_confirmation'
             field_lookup=flow.get('field_lookup')
             if field_lookup and state not in ('attention','waiting_authorization'):
-                required_ids={field_lookup.get('table_id'),field_lookup.get('field_id'),field_lookup.get('name_field_id')}
+                output_fields=field_lookup.get('output_fields') or []
+                output_ids=set(field_lookup.get('field_ids') or [field_lookup.get('field_id')])
+                required_ids={field_lookup.get('table_id'),field_lookup.get('name_field_id'),
+                    field_lookup.get('join_table_id'),*field_lookup.get('join_field_ids',[]),*output_ids}
+                required_ids|={item.get('table_id') for item in output_fields if item.get('table_id')}
+                required_ids.discard(None)
                 if not required_ids<=accepted_ids:
                     state='attention'
                     for step in steps:
                         if step.get('capability')=='data_query':
-                            step.update(status='blocked',detail='需同时确认目标表、输出字段和姓名筛选字段；当前未生成查询规格。')
+                            step.update(status='blocked',detail='需同时确认全部输出字段、所属表、姓名筛选字段和患者关联字段；当前未生成查询规格。')
                 else:
-                    field=self.store.require('object',field_lookup['field_id'])
+                    fields=[self.store.require('object',field_id) for field_id in output_ids]
                     from execution.security.output_policy import field_classification
-                    classification=field_classification(field)
+                    classifications=[field_classification(field) for field in fields]
+                    unknown_fields=[field for field,classification in zip(fields,classifications)
+                        if classification=='unknown']
+                    if unknown_fields:
+                        field=unknown_fields[0]
+                        field_lookup={**field_lookup,'field_id':field['id'],'field_name':field.get('name'),
+                            'table_id':field.get('parent_id'),'table_name':field.get('table')}
                     data_step=next((step for step in steps if step.get('capability')=='data_query'),None)
                     source_step=next((step for step in steps if step.get('capability')=='connected_source_discovery'),None)
                     connected=bool(source_step and source_step.get('status')=='completed')
-                    if classification=='unknown':
+                    if unknown_fields:
                         state='waiting_field_classification'
                         if data_step:data_step.update(status='waiting_field_classification',
-                            detail='目标字段分类待确认；请平台方在当前窗口登记分类。确认前不会建立方案或读取数据。')
-                    elif classification in ('public','internal','health') and connected:
+                            detail='至少一个目标字段分类待确认；请平台方逐字段登记分类。确认前不会建立方案或读取数据。')
+                    elif all(classification in ('public','internal','health','identifier') for classification in classifications) and connected:
                         state='waiting_manual_spec_confirmation'
                         if data_step:data_step.update(status='waiting_manual_spec_confirmation',
-                            detail='目标字段已登记分类；请核对预填SQL和范围，确认任务规格后自动建立固定方案。尚未读取源数据行。')
+                            detail='全部目标字段已登记分类；请核对预填SQL和范围，确认任务规格后自动建立固定方案。个人标识字段仍需平台逐方案授权。')
                     else:
                         state='attention'
-                        if data_step:data_step.update(status='blocked',detail='该分类不允许直接输出此字段，或数据源当前不可用；请调整分类或输出方式。')
+                        if data_step:data_step.update(status='blocked',detail='至少一个字段分类不允许直接输出，或数据源当前不可用；请调整分类或输出方式。')
             return self.store.save('intake_flow',flow_id,{**flow,'steps':steps,'resources':resources,'state':state,
+                'field_lookup':field_lookup,
                 'confirmation':{'actor':actor,'note':note,'confirmed':True,
                     'reviewed_resource_ids':sorted(candidate_ids),
                     'accepted_resource_ids':sorted(accepted_ids)},
@@ -1146,7 +1367,7 @@ class IntakeFlow:
         current_constraints=spec.get('specification',{}).get('execution_constraints') or {}
         # Ordinary catalog-field lookups are object-level too. Route them from
         # the confirmed field binding, never from granularity alone.
-        if current_constraints.get('field_output'):
+        if current_constraints.get('field_output') or current_constraints.get('field_outputs'):
             return self.repair_field_query(flow, actor)
         if (current_constraints.get('scope',{}).get('kind')=='lookup'
                 and current_constraints.get('output_mode')=='object'
@@ -1228,7 +1449,7 @@ class IntakeFlow:
         classification=field_classification(field)
         manual_basis=str(field.get('classification_basis') or '').startswith('人工确认')
         if flow.get('state')=='waiting_field_classification' and manual_basis:
-            allowed=classification in ('public','internal','health')
+            allowed=classification in ('public','internal','health','identifier')
             newer_replacement=next((other for other in self.store.list('intake_flow')
                 if other.get('id')!=flow.get('id') and other.get('demand_id')==flow.get('demand_id')
                 and (other.get('field_lookup') or {}).get('field_id')==field['id']
@@ -1240,8 +1461,9 @@ class IntakeFlow:
             confirmed_spec=(self.store.get('spec',flow.get('spec_id',''),flow.get('spec_version'))
                 if flow.get('spec_id') else None)
             constraints=((confirmed_spec or {}).get('specification') or {}).get('execution_constraints') or {}
+            confirmed_outputs=normalized_field_output_ids(constraints)
             already_confirmed=bool(confirmed_spec and confirmed_spec.get('confirmed')
-                and constraints.get('field_output')==field['id']
+                and set(lookup.get('field_ids') or [lookup.get('field_id')])<=confirmed_outputs
                 and (confirmed_spec.get('specification') or {}).get('query_draft')==
                     (flow.get('query_validation') or {}).get('normalized_sql'))
             target_state='attention' if not allowed or newer_replacement else 'awaiting_execution_plan' if already_confirmed else 'waiting_manual_spec_confirmation'
@@ -1304,11 +1526,15 @@ class IntakeFlow:
         lookup=flow.get('field_lookup') or {}
         table=self.store.require('object',lookup.get('table_id',''))
         field=self.store.require('object',lookup.get('field_id',''))
+        output_fields=[self.store.require('object',field_id) for field_id in
+            (lookup.get('field_ids') or [field['id']])]
         name_field=self.store.require('object',lookup.get('name_field_id',''))
         if (table.get('kind')!='table' or field.get('kind')!='field'
                 or field.get('parent_id')!=table['id'] or name_field.get('kind')!='field'):
             raise DomainError('已确认查询绑定的表或字段与当前目录不一致',409)
-        required=[table,field,name_field];join_table=None;join_field_ids=[]
+        if any(item.get('kind')!='field' or item.get('parent_id')!=table['id'] for item in output_fields):
+            raise DomainError('多字段查询的输出字段必须属于同一张已确认目录表',409)
+        required=[table,*output_fields,name_field];join_table=None;join_field_ids=[]
         if name_field.get('parent_id')!=table['id']:
             join_table=self.store.require('object',name_field.get('parent_id',''))
             if join_table.get('kind')!='table':
@@ -1376,10 +1602,14 @@ class IntakeFlow:
         lookup=flow.get('field_lookup') or {}
         field=self.store.require('object',lookup.get('field_id',''))
         classification=field_classification(field)
-        if classification not in ('public','internal','health'):
-            raise DomainError('输出字段分类尚未确认或不允许直接交付，不能建立固定方案',403)
+        output_ids=lookup.get('field_ids') or [field['id']]
+        output_fields=[self.store.require('object',field_id) for field_id in output_ids]
+        output_classifications=[field_classification(item) for item in output_fields]
+        if any(value not in ('public','internal','health','identifier') for value in output_classifications):
+            raise DomainError('至少一个输出字段分类尚未确认或不允许输出，不能建立固定方案',403)
         policy=specification.get('specification',{}).get('execution_constraints') or {}
-        if policy.get('field_output')!=field['id']:
+        expected_outputs=policy.get('field_outputs') or ([policy.get('field_output')] if policy.get('field_output') else [])
+        if set(expected_outputs)!=set(output_ids):
             raise DomainError('任务规格输出字段与人工确认的目录匹配不一致',409)
         if specification.get('confirmed'):
             flow=self._complete_confirmed_field_query_resources(flow,specification,actor)
@@ -1388,11 +1618,13 @@ class IntakeFlow:
         for step in flow.get('steps',[]):
             item=dict(step)
             if item.get('capability')=='data_query':
+                output_names=[item.get('name') for item in output_fields]
                 item.update(status='awaiting_plan_confirmation',detail=(
-                    f"已建立 {shape['table'].get('name')}.{field.get('name')} 固定方案草案；仅用姓名精确筛选并输出该字段。"
-                    '未读取源数据行。确认方案后，需求方提交授权申请，平台方最终审批。'))
+                    f"已建立 {shape['table'].get('name')} 固定方案草案；按姓名精确筛选并输出 {'、'.join(output_names)}。"
+                    '未读取源数据行。个人标识需平台逐方案授权；其他敏感字段仍按各自分类审核。'))
             steps.append(item)
-        description=f"仅输出 {shape['table'].get('name')}.{field.get('name')}（分类：{field.get('classification')}）"
+        description='输出 '+ '、'.join(
+            f"{item.get('name')}（分类：{item.get('classification')}）" for item in output_fields)
         return self.store.save('intake_flow',flow['id'],{**flow,'steps':steps,
             'state':'awaiting_plan_confirmation','spec_id':specification['id'],
             'spec_version':specification['version'],'execution_plan_id':plan['id'],
@@ -1400,9 +1632,10 @@ class IntakeFlow:
             'execution_plan_preview':{'name':plan['name'],'plan_id':plan['id'],'version':plan['version'],
                 'source_id':shape['table'].get('source_id'),'table':shape['table'].get('table') or shape['table'].get('name'),
                 'filters':shape['filters'],'filter_names':shape['filter_names'],
-                'output_columns':[field.get('name')],'output_description':description,
+                'output_columns':[item.get('name') for item in output_fields],'output_description':description,
                 'output_mode':'object','reads_source_rows':False,
-                'health_output_authorization_required':classification=='health'},
+                'health_output_authorization_required':'health' in output_classifications,
+                'identifier_output_authorization_required':'identifier' in output_classifications},
             'output_preference':'catalog_field','execution_authorized':False,
             'demand_version':specification.get('demand_version')},flow['version'],actor,
             '已按人工确认的目录字段和SQL建立固定方案草案；未读取源数据行')

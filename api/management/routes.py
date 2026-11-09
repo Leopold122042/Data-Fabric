@@ -40,7 +40,7 @@ def create_router(runtime,identity):
 
     from management.work_orders import WorkOrders
     work_orders=WorkOrders(runtime)
-    from management.intake.flow import IntakeFlow
+    from management.intake.flow import IntakeFlow,normalized_field_output_ids
     intake_flow=IntakeFlow(runtime)
 
     @router.get('/work-orders')
@@ -96,6 +96,39 @@ def create_router(runtime,identity):
         if kind not in READ_KINDS:raise DomainError('未知资源类型',404)
         require_resource(user,kind);own(kind,oid,user)
         return {'items':[management_record(runtime,kind,r,user) for r in m.store.history(kind,oid) if can_read(kind,r,user)]}
+
+    from management.catalog.field_library import FieldLibrary
+    field_library=FieldLibrary(m.store)
+
+    @router.get('/field-library')
+    def fields_list(request:Request):
+        user=who(request);require_resource(user,'object')
+        return {'items':field_library.items()}
+
+    @router.post('/field-library/sync')
+    def fields_sync(request:Request):
+        user=who(request,action='object.annotate')
+        return {'changed':len(field_library.sync(user['id']))}
+
+    @router.post('/field-library/match')
+    async def fields_match(request:Request):
+        user=who(request);require_resource(user,'object')
+        return field_library.match((await request.json()).get('text'))
+
+    @router.get('/field-library/{oid}/history')
+    def field_history(oid:str,request:Request):
+        user=who(request);require_resource(user,'object')
+        return {'items':m.store.history('field_definition',oid)}
+
+    @router.post('/field-library/{oid}/save')
+    async def field_save(oid:str,request:Request):
+        user=who(request,action='object.annotate')
+        return field_library.save(oid,await request.json(),user['id'])
+
+    @router.post('/field-library/{oid}/confirm')
+    async def field_confirm(oid:str,request:Request):
+        user=who(request,action='object.annotate')
+        return field_library.save(oid,await request.json(),user['id'],confirm=True)
 
     @router.get('/catalog/export')
     def export(request:Request):
@@ -307,8 +340,8 @@ def create_router(runtime,identity):
                 validation=item.get('query_validation') or {}
                 confirmed_specs=[spec for spec in m.store.list('spec')
                     if spec.get('demand_id')==item.get('demand_id') and spec.get('confirmed')
-                    and ((spec.get('specification') or {}).get('execution_constraints') or {}).get('field_output')
-                        ==item['field_lookup'].get('field_id')
+                    and set(item['field_lookup'].get('field_ids') or [item['field_lookup'].get('field_id')]) <= normalized_field_output_ids(
+                        ((spec.get('specification') or {}).get('execution_constraints') or {}))
                     and (spec.get('specification') or {}).get('query_draft')==validation.get('normalized_sql')]
                 if confirmed_specs:
                     spec=max(confirmed_specs,key=lambda row:(row.get('version',0),row.get('updated_at','')))
@@ -319,9 +352,11 @@ def create_router(runtime,identity):
                         '恢复已确认的目录字段规格；准备补建固定方案')
             spec=m.store.get('spec',item.get('spec_id',''),item.get('spec_version')) if item.get('spec_id') else None
             constraints=((spec or {}).get('specification') or {}).get('execution_constraints') or {}
+            confirmed_outputs=normalized_field_output_ids(constraints)
             if (item.get('state')=='awaiting_execution_plan' and item.get('auto_prepare_field_plan')
                     and item.get('field_lookup') and not item.get('execution_plan_id')
-                    and spec and spec.get('confirmed') and constraints.get('field_output')==item['field_lookup'].get('field_id')):
+                    and spec and spec.get('confirmed')
+                    and set(item['field_lookup'].get('field_ids') or [item['field_lookup'].get('field_id')])<=confirmed_outputs):
                 item=intake_flow._prepare_catalog_field_plan(item,spec,user['id'])
             resumed_plans.append(item)
         items=resumed_plans
@@ -474,11 +509,13 @@ def create_router(runtime,identity):
             updated_field=m.catalog.annotate(field['id'],{'expected_version':field['version'],
                 'classification':classification,
                 'classification_basis':'人工确认：用户确认字段分类为'+classification+'；字段名和含义不足以自动判断。'},user['id'])
-            allowed_output=classification in ('公开','内部','健康信息')
+            allowed_output=classification in ('公开','内部','健康信息','个人标识')
             validation=flow.get('query_validation') or {}
+            expected_outputs=set(lookup.get('field_ids') or [field['id']])
             confirmed_specs=[spec for spec in m.store.list('spec')
                 if spec.get('demand_id')==flow.get('demand_id') and spec.get('confirmed')
-                and ((spec.get('specification') or {}).get('execution_constraints') or {}).get('field_output')==field['id']
+                and expected_outputs<=normalized_field_output_ids(
+                    ((spec.get('specification') or {}).get('execution_constraints') or {}))
                 and (spec.get('specification') or {}).get('query_draft')==validation.get('normalized_sql')]
             confirmed_spec=max(confirmed_specs,key=lambda row:(row.get('version',0),row.get('updated_at','')),
                 default=None)

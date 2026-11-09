@@ -2,13 +2,13 @@
 export const roleNames={platform:'平台方 / 数据服务中心',provider:'供给方 / 医院数据中心',requester:'需求方 / 临床研究中心',auditor:'审计方 / 数据合规岗'};
 export const navigationGroups=[
  ['平台',[['总览','/static/workspace.html','overview']]],
- ['数据资源',[['外部数据接入','/static/platform/connections.html','connection'],['资源目录','/static/platform/resources.html','object'],['概念映射','/static/management/semantic.html','concept'],['语义图谱','/static/platform/graph.html','concept'],['查询中心','/static/platform/query.html','view']]],
+ ['数据资源',[['外部数据接入','/static/platform/connections.html','connection'],['资源目录','/static/platform/resources.html','object'],['字段库','/static/management/field-library.html','object'],['概念映射','/static/management/semantic.html','concept'],['语义图谱','/static/platform/graph.html','concept'],['查询中心','/static/platform/query.html','view']]],
  ['需求与服务',[['协作工单','/static/management/work-orders.html','work_order'],['需求受理','/static/management/intake.html','demand'],['服务目录与发布','/static/management/services.html','service'],['元数据维护','/static/management/catalog.html','object']]],
  ['执行与交付',[['执行方案','plan','plan'],['逻辑视图','view','view'],['执行流程','workflow','workflow'],['运行任务','job','job'],['触发调度','trigger','trigger'],['结果与凭证','delivery','delivery']]],
  ['安全与治理',[['访问授权','grant','grant'],['授权核验','decision','decision'],['运行证据','run','run'],['偏差校准','/static/management/reconciliation.html','case'],['评价复测','/static/management/feedback.html','feedback'],['合作约定','contract','contract'],['设施管理','facility','facility']]],
  ['运行观测',[['元数据事件','/static/platform/events.html','event'],['自动化规则','/static/platform/rules.html','rule'],['风险监测','/static/platform/security.html','risk'],['平台说明','/static/platform/about.html','about']]]
 ];
-const pageResources={'work-orders':'work_order','intake':'demand','services':'service','catalog':'object','semantic':'concept','reconciliation':'case','feedback':'feedback','connections':'connection','resources':'object','graph':'concept','query':'view','patients':'patient','events':'event','rules':'rule','security':'risk','about':'about','workspace':'overview'};
+const pageResources={'field-library':'object','work-orders':'work_order','intake':'demand','services':'service','catalog':'object','semantic':'concept','reconciliation':'case','feedback':'feedback','connections':'connection','resources':'object','graph':'concept','query':'view','patients':'patient','events':'event','rules':'rule','security':'risk','about':'about','workspace':'overview'};
 export function level(snapshot,resource){const value=snapshot?.resources?.[resource];return ['read','write'].includes(value)?value:'none';}
 export function canRead(snapshot,resource){return level(snapshot,resource)!=='none';}
 export function pageResource(url){const u=new URL(url,'http://local');if(u.pathname==='/static/execution/index.html')return u.searchParams.get('tab')||'plan';const name=u.pathname.split('/').pop().replace(/\.html$/,'');return pageResources[name]||null;}

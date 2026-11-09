@@ -51,6 +51,8 @@ class Catalog:
                 for mapping in self.store.list('mapping'):
                     if any(f in affected|{change['id']} for f in mapping.get('fields',[])) and mapping.get('status')=='confirmed':
                         self.store.save('mapping',mapping['id'],{**mapping,'status':'review_required'},mapping['version'],reason='源结构变化，需复核')
+            from management.catalog.field_library import FieldLibrary
+            FieldLibrary(self.store).sync()
             return changes
 
     def scan_engine(self, engine):

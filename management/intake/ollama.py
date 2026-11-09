@@ -59,6 +59,8 @@ class OllamaIntake:
                 'connected_source_discovery（已连接数据源的结构发现）、data_query（数据查询）、trend_analysis（指标趋势分析）。'
                 '简短表达也可能是查询，例如“唐军的性别”“李明年龄”；识别姓名和目标属性，即使没有“查询/查找”等动词也要提出 catalog_search、'
                 'connected_source_discovery、data_query 三步。必须在给定目录中按字段名、业务含义和语义基线匹配目标字段，'
+                '当原文并列多个目标属性（如“某人的ID和科室”）时，必须逐项匹配并全部放入查询输出列与资源推荐；不得只返回最后一个或最显著的属性。'
+                '字段库的 definition_status=confirmed 表示人工确认的定义；优先结合 field_label、meaning、aliases、unit 与所属来源表匹配，遇到同名字段保留歧义，不自行确认。'
                 '将目标表、目标字段和仅用于精确姓名筛选的姓名字段列入 resource_recommendations；推荐理由要说明“原文目标属性→目录字段”的匹配依据。'
                 '只有目录元数据明确支持需求主题时才能推荐该资源；不要把生命体征表当作无关指标的数据源。如果目录中没有匹配项或有多个同等候选，不要猜字段，query_draft 填 null 并把缺口或歧义写入 uncertain_fields。'
                 'resource_recommendations只能从提供的目录元数据中选择ID，不得推断未列出的数据源。这里只提供结构元数据，不含数据行。'
