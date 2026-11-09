@@ -1,12 +1,37 @@
 /* Pure presentation rules. The server remains authoritative for every request. */
 export const roleNames={platform:'平台方 / 数据服务中心',provider:'供给方 / 医院数据中心',requester:'需求方 / 临床研究中心',auditor:'审计方 / 数据合规岗'};
 export const navigationGroups=[
- ['平台',[['总览','/static/workspace.html','overview']]],
- ['数据资源',[['外部数据接入','/static/platform/connections.html','connection'],['资源目录','/static/platform/resources.html','object'],['字段库','/static/management/field-library.html','object'],['概念映射','/static/management/semantic.html','concept'],['语义图谱','/static/platform/graph.html','concept'],['查询中心','/static/platform/query.html','view']]],
- ['需求与服务',[['协作工单','/static/management/work-orders.html','work_order'],['需求受理','/static/management/intake.html','demand'],['服务目录与发布','/static/management/services.html','service'],['元数据维护','/static/management/catalog.html','object']]],
- ['执行与交付',[['执行方案','plan','plan'],['逻辑视图','view','view'],['执行流程','workflow','workflow'],['运行任务','job','job'],['触发调度','trigger','trigger'],['结果与凭证','delivery','delivery']]],
- ['安全与治理',[['访问授权','grant','grant'],['授权核验','decision','decision'],['运行证据','run','run'],['偏差校准','/static/management/reconciliation.html','case'],['评价复测','/static/management/feedback.html','feedback'],['合作约定','contract','contract'],['设施管理','facility','facility']]],
- ['运行观测',[['元数据事件','/static/platform/events.html','event'],['自动化规则','/static/platform/rules.html','rule'],['风险监测','/static/platform/security.html','risk'],['平台说明','/static/platform/about.html','about']]]
+ ['工作台',[['总览','/static/workspace.html','overview']]],
+ ['数据资产',[
+   ['外部数据接入','/static/platform/connections.html','connection'],
+   ['资源目录','/static/platform/resources.html','object'],
+   ['元数据维护','/static/management/catalog.html','object'],
+   ['字段库','/static/management/field-library.html','object'],
+   ['概念映射','/static/management/semantic.html','concept'],
+   ['语义图谱','/static/platform/graph.html','concept'],
+   ['查询中心','/static/platform/query.html','view']
+ ]],
+ ['需求与交付',[
+   ['协作工单','/static/management/work-orders.html','work_order'],
+   ['需求受理','/static/management/intake.html','demand'],
+   ['服务目录与发布','/static/management/services.html','service'],
+   ['执行与交付','/static/execution/index.html?tab=plan','plan']
+ ]],
+ ['安全与治理',[
+   ['访问授权','/static/execution/index.html?tab=grant','grant'],
+   ['授权检验','/static/execution/index.html?tab=decision','decision'],
+   ['运行证据','/static/execution/index.html?tab=run','run'],
+   ['偏差校准','/static/management/reconciliation.html','case'],
+   ['评价复测','/static/management/feedback.html','feedback'],
+   ['风险监测','/static/platform/security.html','risk'],
+   ['合作约定','/static/execution/index.html?tab=contract','contract'],
+   ['设施管理','/static/execution/index.html?tab=facility','facility']
+ ]],
+ ['运行与设置',[
+   ['元数据事件','/static/platform/events.html','event'],
+   ['自动化规则','/static/platform/rules.html','rule'],
+   ['平台说明','/static/platform/about.html','about']
+ ]]
 ];
 const pageResources={'field-library':'object','work-orders':'work_order','intake':'demand','services':'service','catalog':'object','semantic':'concept','reconciliation':'case','feedback':'feedback','connections':'connection','resources':'object','graph':'concept','query':'view','patients':'patient','events':'event','rules':'rule','security':'risk','about':'about','workspace':'overview'};
 export function level(snapshot,resource){const value=snapshot?.resources?.[resource];return ['read','write'].includes(value)?value:'none';}
@@ -63,7 +88,7 @@ export function paginationState(page,total,size){
  return {previousDisabled:page===0,nextDisabled:(page+1)*size>=total};
 }
 
-export const executionLabels={plan:'方案',workflow:'执行流程',view:'逻辑视图',job:'任务',grant:'授权',decision:'授权核验',run:'运行证据',delivery:'交付凭证',trigger:'触发器',contract:'合作约定',facility:'设施'};
+export const executionLabels={plan:'方案',workflow:'执行流程',view:'逻辑视图',job:'任务',grant:'访问授权',decision:'授权检验',run:'运行证据',delivery:'交付凭证',trigger:'触发器',contract:'合作约定',facility:'设施管理'};
 export const executionActions={
  '新建医疗汇总方案':['plan.create'], '从需求规格生成方案':['plan.create'], '确认当前版本':['plan.confirm',true], '修改方案生成新版本':['plan.update',true], '签发本地授权':['grant.create',true], '执行当前方案':['plan.run',true], '测试医疗明细导出拒绝':['plan.detail_export',true], '测试过期授权拒绝':['plan.expiry_test',true], '暂停后续节点':['plan.pause',true],
  '从目录字段建立视图':['view.create'], '查看最新节点和时间线':['job.read',true], '取消任务':['job.cancel',true], '重试失败任务':['job.retry',true], '查看受控结果':['job.result',true], '撤销授权':['grant.revoke',true],

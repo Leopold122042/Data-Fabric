@@ -15,7 +15,7 @@ $('#dashboard-dialog').addEventListener('click',e=>{if(e.target!==e.currentTarge
 $('#dashboard-help').replaceChildren(icon('info'),node('span','指标口径'));
 $('#dashboard-help').onclick=()=>summary('指标口径',[
  '业务数据为当前快照，各自按人、次、份和点统计。元数据事件为留存窗口，最多 800 条；核验与交付为已保存记录。',
- '首页仅显示当前身份可见的摘要。已有凭证不代表当前可读取结果，读取时重新核验授权。'
+ '首页仅显示当前身份可见的摘要。已有凭证不代表当前可读取结果，读取时重新检验授权。'
 ],'/static/platform/about.html#dashboard-design','完整口径与身份分区');
 $('#dashboard-refresh').replaceChildren(icon('refresh'),node('span','刷新'));
 const footerLink=$('.dashboard-footer>a');footerLink.replaceChildren(node('span','首页设计说明'),icon('arrow'));footerLink.classList.add('dashboard-footer-link');
@@ -106,7 +106,7 @@ function renderRequester(d,grid,metrics){
  metric(metrics,'我的申请',d.order_counts.total,paths.orders,'当前记录','clipboard');
  metric(metrics,'待确认需求',d.order_counts.draft||0,paths.orders,'补全范围后由平台确认','clock','amber');
  metric(metrics,'执行中需求',d.order_counts.running||0,paths.orders,'含排队中的需求','activity','violet');
- metric(metrics,'交付凭证',d.delivery_count,executionURL('delivery'),'读取时重新核验授权','package','teal');
+ metric(metrics,'交付凭证',d.delivery_count,executionURL('delivery'),'读取时重新检验授权','package','teal');
  metric(metrics,'未解决异常',d.order_counts.exceptions,paths.orders,'当前记录','alert','amber');
  metric(metrics,'可见服务',d.service_counts.total,paths.services,'当前记录','grid');
  const progress=panel('我的需求进展',paths.orders,'全部申请','route');progress.classList.add('dashboard-progress');const list=node('div','','dashboard-order-list');
@@ -134,10 +134,10 @@ function renderAuditor(d,grid,metrics){
  metric(metrics,'登记授权',d.authorization.grants,executionURL('grant'),'包含过期及撤销记录','key');
  metric(metrics,'待核查风险',d.risks?.open,paths.risk,'风险留存窗口','shield','teal');
  metric(metrics,'交付凭证',d.delivery_count,executionURL('delivery'),'不含结果内容','package','violet');
- const auth=panel('访问授权与核验',executionURL('decision'),'查看全部','shield');auth.classList.add('dashboard-auth');
- const overview=node('div','','dashboard-auth-summary');overview.append(badge('累计 '+format(d.authorization.total)+' 次核验','blue','key'),node('span','已保存的授权核验记录','dashboard-muted'));auth.append(overview);
+ const auth=panel('访问授权与授权检验',executionURL('decision'),'查看全部','shield');auth.classList.add('dashboard-auth');
+ const overview=node('div','','dashboard-auth-summary');overview.append(badge('累计 '+format(d.authorization.total)+' 次授权检验','blue','key'),node('span','已保存的授权检验记录','dashboard-muted'));auth.append(overview);
  const plot=node('div','','dashboard-auth-plot'),reasons=node('div','','dashboard-auth-reasons');reasons.append(node('h3','访问拒绝原因'));
- bars(reasons,d.authorization.reasons,{}, {tone:'amber',unit:'次',label:'访问拒绝原因分布',onDetail:(name,count,share)=>summary(name,[`拒绝 ${format(count)} 次，占全部拒绝记录 ${share}。`,'拒绝记录与待核查风险分别统计。'],executionURL('decision'),'查看授权核验')});
+ bars(reasons,d.authorization.reasons,{}, {tone:'amber',unit:'次',label:'访问拒绝原因分布',onDetail:(name,count,share)=>summary(name,[`拒绝 ${format(count)} 次，占全部拒绝记录 ${share}。`,'拒绝记录与待核查风险分别统计。'],executionURL('decision'),'查看授权检验')});
  plot.append(authorizationChart(d.authorization),reasons);auth.append(plot,node('p','通过率按已保存核验记录计算；拒绝记录不等同于待核查风险。','dashboard-note'));
  const evidence=panel('运行证据追溯',executionURL('run'),'查看全部','file'),runs=node('div','','dashboard-records');
  for(const r of d.evidence.slice(0,2))row(runs,r.name||r.plan_id||r.id,'方案版本 '+(r.plan_version||'—')+' · '+statusName(r.status),executionURL('run',r.id),'查看证据','file',r.status==='success'?'teal':'amber');if(!d.evidence.length)empty(runs,'尚无运行证据','file');evidence.append(runs);
