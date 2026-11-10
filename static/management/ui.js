@@ -8,7 +8,19 @@ let entries=[],currentKind=pageResource(location.href),actionEntries=[];
 export function refreshActions(){actionEntries=actionEntries.filter(x=>x.button.isConnected);for(const entry of actionEntries){const d=typeof entry.descriptor==='function'?entry.descriptor():entry.descriptor;const state=buttonState(presentation(currentAccess(),d,currentKind,selected),entry);entry.button.hidden=state.hidden;entry.button.disabled=state.disabled;}}
 export function setActionDisabled(button,disabled){const entry=actionEntries.find(x=>x.button===button);if(entry)entry.businessDisabled=!!disabled;refreshActions();}
 export function message(text,error=false){$('#status').textContent=text;$('#status').classList.toggle('error',error);}
-export async function api(path,body){await ready();const r=await fetch('/api/management'+path,{method:body===undefined?'GET':'POST',headers:headers({'Content-Type':'application/json'}),...(body===undefined?{}:{body:JSON.stringify(body)})});const value=await r.json();if(!r.ok)throw Error(value.error||value.detail||'请求失败');return value;}
+export async function api(path,body){
+ await ready();
+ const r=await fetch('/api/management'+path,{method:body===undefined?'GET':'POST',headers:headers({'Content-Type':'application/json'}),...(body===undefined?{}:{body:JSON.stringify(body)})});
+ const responseText=await r.text();
+ let value;
+ try{value=responseText?JSON.parse(responseText):{};}
+ catch{
+  if(!r.ok)throw Error(`接口请求失败（HTTP ${r.status} ${r.statusText||''}）；服务端返回了非JSON错误，请查看启动平台的终端日志。`.trim());
+  throw Error(`接口返回格式无效（HTTP ${r.status}）；请检查平台服务日志。`);
+ }
+ if(!r.ok)throw Error(value.error||value.detail||`请求失败（HTTP ${r.status}）`);
+ return value;
+}
 export function show(value,title='详情'){$('#detail-title').textContent=title;$('#detail').textContent=typeof value==='string'?value:JSON.stringify(value,null,2);if(!location.pathname.includes('/management/'))return;let host=$('#record-preview');if(!host){host=document.createElement('div');host.id='record-preview';$('#detail').before(host);}host.replaceChildren(renderRecord(value));$('#detail').hidden=true;const b=document.createElement('button');b.className='mf-button';b.textContent='查看完整记录';b.onclick=()=>{$('#detail').hidden=!$('#detail').hidden;b.textContent=$('#detail').hidden?'查看完整记录':'收起完整记录';};host.append(b);}
 export function action(label,handler,target='#actions',descriptor=null){const b=document.createElement('button');b.type='button';b.className='mf-button';b.textContent=label;b.hidden=true;const resolve=descriptor||(()=>target==='#pager'?{key:currentKind+'.read'}:managementRule(label,currentKind));const entry={button:b,descriptor:resolve,businessDisabled:false,busy:false};actionEntries.push(entry);b.addEventListener('click',async()=>{const rule=typeof resolve==='function'?resolve():resolve;const permission=presentation(currentAccess(),rule,currentKind,selected);if(buttonState(permission,entry).disabled)return;entry.busy=true;refreshActions();try{await handler();}catch(e){message(e.message,true);}finally{entry.busy=false;refreshActions();}});$(target).append(b);refreshActions();return b;}
 export async function list(kind){
