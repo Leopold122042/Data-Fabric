@@ -245,7 +245,7 @@ def create_field_plan(runtime,flow,specification,actor):
         raise DomainError('先确认精确匹配和输出字段规格，才能生成固定方案',409)
     approved_ids=[item['id'] for item in flow.get('resources',[])
         if item.get('review_status')=='human_confirmed']
-    if flow.get('query_mode')=='professional':
+    if flow.get('query_mode') in ('professional','semantic'):
         from management.intake.professional import professional_shape
         shape=professional_shape(spec_body.get('query_draft'),runtime.management.store)
         if not {table['id'] for table in shape['tables']}<=set(approved_ids):
@@ -260,7 +260,7 @@ def create_field_plan(runtime,flow,specification,actor):
         'name':shape['table'].get('name','目录字段查询')+' · '+'、'.join(field.get('name','') for field in shape['output_fields']),
         'fields':shape['fields'],'output_fields':[field['id'] for field in shape['output_fields']],
         'joins':shape.get('joins',[]),'filters':[],'group_by':[],'output_mode':'object'}
-    if flow.get('query_mode')=='professional':
+    if flow.get('query_mode') in ('professional','semantic'):
         view_body.update(order_by=shape['order_by'],row_limit=shape['row_limit'])
     versions={field_id:runtime.management.store.require('object',field_id)['version']
         for field_id in shape['fields']}

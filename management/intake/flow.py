@@ -135,7 +135,7 @@ class IntakeFlow:
 
     def _semantic_field_bindings(self, text, draft, catalog, lookup=None, field_selections=None):
         """Resolve each model-parsed field intent to confirmed field-library entries."""
-        person_attribute=re.search(r'[\u4e00-\u9fff]{2,4}的([\u4e00-\u9fffA-Za-z_]{2,24})[。？！?！\s]*$',str(text or '').split('\n',1)[0])
+        person_attribute=re.fullmatch(r'(?:(?:查询|查看|查找|搜索)\s*)?[\u4e00-\u9fff]{2,4}的([\u4e00-\u9fffA-Za-z_]{2,24})[。？！?！\s]*$',str(text or '').split('\n',1)[0])
         query_intent=bool(person_attribute or re.search(r'查询|查找|搜索|检索|获取|找出|查看|统计|分析|获取|显示|列出|返回',str(text or ''))
                            or lookup or draft.get('field_intents') or draft.get('query_draft')
                            or any(item.get('capability') in ('data_query','trend_analysis')
@@ -550,7 +550,7 @@ class IntakeFlow:
         for marker in sorted(set(source_markers),key=len,reverse=True):
             parse_text=re.sub(re.escape(marker),' ',parse_text,flags=re.I)
         parse_text=re.sub(r'^(?:(?:我想|我要|我需要|我在|我正在)\s*)?(?:请问|请|帮我查一下|麻烦查一下|查找|查看|查一下|查询|搜索|检索|获取|找出|帮我|麻烦|查|找)\s*','',parse_text)
-        request=re.search(r'(?P<name>[\u4e00-\u9fff]{2,4})\s*的\s*(?P<targets>.+?)\s*$',parse_text)
+        request=re.fullmatch(r'(?P<name>[\u4e00-\u9fff]{2,4})\s*的\s*(?P<targets>.+?)\s*$',parse_text)
         if not request:return None
         targets=[item.strip(' \t，,、。.!！?？:：') for item in re.split(
             r'\s*(?:以及|并且|同时|和|与|及|、|，|,|&|\+)\s*',request.group('targets'))]
@@ -1313,6 +1313,7 @@ class IntakeFlow:
 
     def repair_field_query(self, flow, actor):
         """Return misrouted ordinary lookups to explicit field/specification review."""
+        if flow.get('query_mode') in ('professional','semantic'):return flow
         from execution.security.output_policy import infer_catalog_classification
         confirmed_spec=(self.store.get('spec',flow.get('spec_id',''),flow.get('spec_version'))
                        if flow.get('spec_id') else None)

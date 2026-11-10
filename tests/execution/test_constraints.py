@@ -21,11 +21,12 @@ class ExecutionConstraintTests(unittest.TestCase):
         self.data_patch.start()
         con = sqlite3.connect(self.source / 'his.db')
         con.execute('CREATE TABLE observations(cohort TEXT, observed_at TEXT, region TEXT, value INTEGER)')
-        # A within January has exactly six rows, including timezone/date boundaries.
+        # Date-only windows use Asia/Shanghai: include both representations of
+        # the last second of January; exclude local February midnight.
         rows = [('A', stamp, 'north', 1) for stamp in
                 ['2026-01-01', '2026-01-01T08:00:00+08:00', '2026-01-10',
-                 '2026-01-20', '2026-01-31T23:59:59Z', '2026-02-01T07:59:59+08:00']]
-        rows += [('A', '2026-02-01T00:00:00Z', 'north', 1)] * 6
+                 '2026-01-20', '2026-01-31T15:59:59Z', '2026-01-31T23:59:59+08:00']]
+        rows += [('A', '2026-02-01T00:00:00+08:00', 'north', 1)] * 6
         rows += [('B', '2026-01-15', 'north', 1)] * 7
         rows += [('A', 'invalid-time', 'north', 1)]
         con.executemany('INSERT INTO observations VALUES(?,?,?,?)', rows)

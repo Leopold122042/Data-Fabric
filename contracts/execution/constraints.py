@@ -88,11 +88,10 @@ def normalize(specification):
             raise DomainError('数据行查询必须绑定时间字段')
     elif kind == 'lookup':
         if (not checked or scope.get('all_rows') is True
-                or any(condition['op'] != '=' or type(condition['value']) is not str
-                       or not condition['value'].strip() for condition in checked)):
-            raise DomainError('精确查询必须使用一个或多个非空等值筛选，且不能查询全部对象')
+                or any(isinstance(condition['value'], str) and not condition['value'].strip() for condition in checked)):
+            raise DomainError('对象查询必须使用一个或多个非空比较条件，且不能查询全部对象')
         if raw.get('time_field'):
-            raise DomainError('精确查询不使用出生日期或其他事件时间筛选')
+            raise DomainError('对象查询的日期条件应放在 filters 中，不绑定独立执行时间字段')
     elif checked or raw.get('time_field') or scope.get('all_rows'):
         raise DomainError('元数据快照不接受患者范围条件；请使用数据行查询')
     mode = raw.get('output_mode')

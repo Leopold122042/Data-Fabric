@@ -19,7 +19,7 @@ def professional_shape(sql, store):
     tree = statements[0]
     allowed = {'expressions', 'from_', 'joins', 'where', 'order', 'limit'}
     if any(value and key not in allowed for key, value in tree.args.items()):
-        raise DomainError('当前查询支持选列、精确筛选、患者关联、排序和条数限制；暂不支持聚合、子查询或其他 SQL 子句')
+        raise DomainError('当前查询支持选列、条件筛选、患者关联、排序和条数限制；暂不支持聚合、子查询或其他 SQL 子句')
     if list(tree.find_all(exp.Subquery)) or len(list(tree.find_all(exp.Select))) != 1:
         raise DomainError('请直接选择目录中的表，暂不支持子查询')
     tables = []
@@ -78,16 +78,26 @@ def professional_shape(sql, store):
             raise DomainError('当前不支持直接交付该个人标识字段：' + definitions[field['id']]['label'])
     where = tree.args.get('where')
     if not where:
-        raise DomainError('请至少添加一个精确筛选条件，避免无范围读取')
-    from execution.query.intake_plan import _where_terms
+        raise DomainError('请至少添加一个条件筛选条件，避免无范围读取')
+    def terms(node):
+        if isinstance(node, exp.Paren): return terms(node.this)
+        if isinstance(node, exp.And): return terms(node.this) + terms(node.expression)
+        if not isinstance(node, (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE)):
+            raise DomainError('当前支持同时成立的比较条件，不支持 OR 或其他条件表达式')
+        return [node]
     filters = []
-    for term in _where_terms(where.this):
+    for term in terms(where.this):
         left, right = term.this, term.expression
-        if isinstance(left, exp.Literal): left, right = right, left
+        op={exp.EQ:'=',exp.NEQ:'!=',exp.GT:'>',exp.GTE:'>=',exp.LT:'<',exp.LTE:'<='}[type(term)]
+        if isinstance(left, exp.Literal):
+            left, right = right, left
+            op={'<':'>','<=':'>=','>':'<','>=':'<=','=':'=','!=':'!='}[op]
         field = resolve(left)
+        if isinstance(right, exp.Neg) and isinstance(right.this, exp.Literal) and not right.this.is_string:
+            right=exp.Literal.number('-'+str(right.this.this))
         if not isinstance(right, exp.Literal) or not str(right.this).strip():
-            raise DomainError('精确筛选需要明确的文本或数字常量')
-        filters.append({'field': field['id'], 'op': '=', 'value': str(right.this)})
+            raise DomainError('条件筛选需要明确的文本或数字常量')
+        filters.append({'field': field['id'], 'op': op, 'value': str(right.this)})
     if len(filters) > 20: raise DomainError('筛选条件最多 20 项')
     ordering = []
     for item in (tree.args.get('order').expressions if tree.args.get('order') else []):
@@ -103,6 +113,8 @@ def professional_shape(sql, store):
     tree = tree.limit(count)
     required = list(dict.fromkeys([x['id'] for x in outputs] + [x['field'] for x in filters]
                     + [x['field'] for x in ordering] + [x for pair in joins for x in pair]))
+    if any(fid not in definitions for fid in required):
+        raise DomainError('筛选、排序或关联字段定义尚未确认，请由管理员确认')
     return {'sql': tree.sql(dialect='duckdb'), 'table': tables[-1], 'tables': tables, 'joins': joins,
             'output_field': outputs[0], 'output_fields': outputs, 'filters': filters, 'fields': required,
             'filter_names': [store.require('object', x['field'])['name'] for x in filters],

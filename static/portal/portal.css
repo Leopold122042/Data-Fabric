@@ -7,3 +7,5 @@
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 
 [hidden]{display:none!important}
+
+.operation-summary{background:#f3f8f5;border-color:#dce9e1;color:#34574a}

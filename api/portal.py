@@ -88,10 +88,30 @@ def create_router(runtime, identity):
         principal=user(request,'demand.create');require_action(principal,'demand.understand')
         body=await request.json();text=body.get('text')
         if not isinstance(text,str) or not 1<=len(text.strip())<=4000:raise DomainError('请填写 1 至 4000 字的查询需求')
-        demand=runtime.management.intake.save({'title':text.strip()[:80],'entry':'goal','portal_mode':'natural'},principal['id'])
-        from management.intake.ollama import OllamaIntake
-        flow=await run_in_threadpool(intake.propose,demand['id'],text.strip(),principal['id'],OllamaIntake(),())
+        from management.intake.semantic_query import prepare
+        flow=await run_in_threadpool(prepare,runtime,text.strip(),principal['id'],catalog())
         return {'flow':flow}
+
+    @router.post('/queries/{flow_id}/clarify')
+    async def clarify_query(flow_id:str,request:Request):
+        principal=user(request,'demand.understand');flow=owned(flow_id,principal)
+        body=await request.json()
+        if flow.get('query_mode')!='semantic' or flow['state']!='awaiting_chain_confirmation':
+            raise DomainError('当前查询不在操作澄清阶段',409)
+        if body.get('expected_version')!=flow['version']:raise DomainError('查询已变化，请刷新',409)
+        answers=body.get('answers')
+        if not isinstance(answers,list) or len(answers)!=len(flow['field_bindings']):raise DomainError('请回答必要的查询问题')
+        byid={a.get('intent_id'):a.get('answer') for a in answers if isinstance(a,dict)}
+        additions=[]
+        for binding in flow['field_bindings']:
+            answer=byid.get(binding['intent_id'])
+            if not isinstance(answer,str) or not 1<=len(answer.strip())<=2000:raise DomainError('请填写查询口径')
+            additions.append(binding['question']+'：'+answer.strip())
+        text=flow['request_text']+'\n用户补充：'+'；'.join(additions)
+        if len(text)>12000:raise DomainError('补充内容过长，请重新描述需求')
+        from management.intake.semantic_query import prepare
+        updated=await run_in_threadpool(prepare,runtime,text,principal['id'],catalog(),flow)
+        return {'flow':updated}
 
     @router.post('/professional/preview')
     async def preview(request:Request):
@@ -115,7 +135,7 @@ def create_router(runtime, identity):
                 'quality_min_complete':1,'max_rows':shape['max_rows'],'min_group_size':5}
         definitions=FieldLibrary(store).confirmed()
         title='查询 '+ '、'.join(definitions[f['id']]['label'] for f in shape['output_fields'])
-        draft={'title':title,'entry':'goal','object_scope':'按已确认 SQL 的精确条件筛选，最多返回 '+str(shape['max_rows'])+' 条',
+        draft={'title':title,'entry':'goal','object_scope':'按已确认 SQL 的条件筛选，最多返回 '+str(shape['max_rows'])+' 条',
                'time_start':today.isoformat(),'time_end':end.isoformat(),'deadline':end.isoformat(),
                'purpose':'自主数据查询','quality':'完整','delivery':'对象级','execution_constraints':policy,
                'cost':'','attachments':[],'service_ids':[],'query_draft':shape['sql']}
@@ -130,14 +150,20 @@ def create_router(runtime, identity):
             'output_preference':'catalog_field','execution_authorized':False,'professional_preview':shape},0,principal['id'],'用户确认专业查询草案')
         return {'flow':flow}
 
+    @router.post('/queries/{flow_id}/confirm')
     @router.post('/professional/{flow_id}/confirm')
     async def confirm_professional(flow_id:str,request:Request):
         principal=user(request,'demand.confirm');flow=owned(flow_id,principal);body=await request.json()
-        if flow.get('query_mode')!='professional' or flow['state']!='waiting_manual_spec_confirmation':
+        if flow.get('query_mode') not in ('professional','semantic') or flow['state']!='waiting_manual_spec_confirmation':
             raise DomainError('当前查询不在规格确认阶段',409)
         if body.get('confirmed') is not True or body.get('expected_version')!=flow['version']:
             raise DomainError('请刷新后确认本次查询范围',409)
+        if flow.get('query_mode')=='semantic':
+            from management.intake.semantic_query import compile_intent
+            checked=compile_intent(flow['semantic_intent'],store)
+            if not checked or checked['sql']!=flow['query_draft']:raise DomainError('查询意图与草案不一致，请重新理解查询',409)
         professional_shape(flow['query_draft'],store)
+        flow={**flow,'resources':[{**r,'review_status':'human_confirmed'} for r in flow['resources']]}
         with store.atomic():
             demand=store.require('demand',flow['demand_id'])
             spec=runtime.management.intake.confirm(demand['id'],{'expected_version':demand['version'],
