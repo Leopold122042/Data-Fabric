@@ -73,5 +73,7 @@ def create_app(control_root=None,start_runtime=True,simulate=None,identity=None)
     from execution.external.routes import create_router as external_governance_router
     app.include_router(external_governance_router(runtime,app.state.identity))
     app.include_router(execution_router(runtime,app.state.identity))
+    from api.portal import create_router as portal_router
+    app.include_router(portal_router(runtime,app.state.identity))
     app.mount('/static',StaticFiles(directory=ROOT/'static'),name='static')
     return app

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light"><title>总览 · 数据编织平台</title>
+<link rel="stylesheet" href="/static/portal/portal.css?v=1"></head>
+<body><a class="skip" href="#main">跳到主要内容</a>
+<div class="app"><aside class="sidebar" aria-label="主导航">
+<a class="brand" href="/static/portal/index.html"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>数据编织平台<small>DATA WORKSPACE</small></span></a>
+<p class="nav-caption">工作空间</p><nav id="nav">
+<a href="?page=home" data-page="home"><span data-icon="grid"></span>总览</a>
+<a href="/static/portal/cockpit.html"><span data-icon="chart"></span>驾驶舱总览</a>
+<a href="?page=ask" data-page="ask"><span data-icon="spark"></span>自然语言查询<span class="nav-tag">AI</span></a>
+<a href="?page=query" data-page="query"><span data-icon="sliders"></span>专业查询</a>
+</nav><div class="sidebar-bottom"><div class="workspace-note"><span class="status-dot"></span>你的数据，清晰可用<p>从一个问题，到一个答案。</p></div>
+<a id="admin-link" class="admin-link" href="?page=admin" hidden><span data-icon="settings"></span>管理入口<span>↗</span></a>
+<div class="profile"><span class="avatar" id="avatar">用</span><div><strong id="identity">正在连接</strong><small>当前工作空间</small></div></div></div></aside>
+<div class="body"><header class="topbar"><div><span class="breadcrumb">工作空间</span><span class="divider">/</span><strong id="page-label">总览</strong></div><div class="topbar-right"><span class="connection" id="connection"><span class="status-dot"></span>连接平台</span><button class="icon-button" id="refresh" aria-label="刷新当前页面" title="刷新"><span data-icon="refresh"></span></button></div></header>
+<main id="main" tabindex="-1"><div class="loading"><span class="spinner"></span>正在载入工作空间…</div></main>
+<footer class="page-footer"><span>数据编织平台</span><span>以当前账号的可见数据与权限为准</span></footer></div></div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<script type="module" src="/static/portal/portal.js?v=1"></script></body></html>

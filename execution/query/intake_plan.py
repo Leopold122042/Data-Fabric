@@ -245,7 +245,13 @@ def create_field_plan(runtime,flow,specification,actor):
         raise DomainError('先确认精确匹配和输出字段规格，才能生成固定方案',409)
     approved_ids=[item['id'] for item in flow.get('resources',[])
         if item.get('review_status')=='human_confirmed']
-    shape=field_query_shape(spec_body.get('query_draft'),runtime.management.store,approved_ids)
+    if flow.get('query_mode')=='professional':
+        from management.intake.professional import professional_shape
+        shape=professional_shape(spec_body.get('query_draft'),runtime.management.store)
+        if not {table['id'] for table in shape['tables']}<=set(approved_ids):
+            raise DomainError('专业查询表尚未确认',409)
+    else:
+        shape=field_query_shape(spec_body.get('query_draft'),runtime.management.store,approved_ids)
     if (scope.get('filters')!=shape['filters'] or policy.get('max_rows',0)<shape['max_rows']
             or set(expected_outputs)!={field['id'] for field in shape['output_fields']}):
         raise DomainError('规格范围或行数上限与已确认SQL不一致',403)
@@ -254,13 +260,17 @@ def create_field_plan(runtime,flow,specification,actor):
         'name':shape['table'].get('name','目录字段查询')+' · '+'、'.join(field.get('name','') for field in shape['output_fields']),
         'fields':shape['fields'],'output_fields':[field['id'] for field in shape['output_fields']],
         'joins':shape.get('joins',[]),'filters':[],'group_by':[],'output_mode':'object'}
+    if flow.get('query_mode')=='professional':
+        view_body.update(order_by=shape['order_by'],row_limit=shape['row_limit'])
     versions={field_id:runtime.management.store.require('object',field_id)['version']
         for field_id in shape['fields']}
     view_matches=bool(old_view and old_view.get('fields')==view_body['fields']
         and old_view.get('output_fields')==view_body['output_fields']
         and old_view.get('field_versions')==versions and old_view.get('filters')==[]
         and old_view.get('group_by')==[] and old_view.get('joins')==shape.get('joins',[])
-        and old_view.get('projections')=={} and old_view.get('output_mode')=='object')
+        and old_view.get('projections')=={} and old_view.get('output_mode')=='object'
+        and old_view.get('order_by')==view_body.get('order_by')
+        and old_view.get('row_limit')==view_body.get('row_limit'))
     view=old_view if view_matches else runtime.execution.queries.define(view_body,actor)
     plan_id='PLAN-'+flow['id']+'-FIELD';old_plan=runtime.execution.store.get('plan',plan_id)
     from contracts.execution.constraints import normalize,fingerprint

@@ -58,6 +58,18 @@ class Queries:
         data={'created_by':(old or {}).get('created_by',actor),'name':body.get('name') or oid,'fields':selected,'field_versions':{f['id']:f['version'] for f in fields},'mapping_versions':mapping_versions,
               'projections':projections,'output_fields':output_fields,'pseudonymize_fields':list(dict.fromkeys(pseudonymize_fields)),'joins':joins,'filters':body.get('filters',[]),'group_by':body.get('group_by',[]),'output_mode':body.get('output_mode','aggregate')}
         if data['output_mode'] not in ('aggregate','object'):raise DomainError('输出粒度非法')
+        if 'row_limit' in body or 'order_by' in body:
+            row_limit=body.get('row_limit',200);ordering=body.get('order_by',[])
+            if data['output_mode']!='object' or type(row_limit) is not int or not 1<=row_limit<=200:
+                raise DomainError('排序和返回条数仅支持对象查询，条数为1至200')
+            if not isinstance(ordering,list) or len(ordering)>10:
+                raise DomainError('排序字段最多10个')
+            for item in ordering:
+                if (not isinstance(item,dict) or set(item)!={'field','direction','nulls_first'}
+                        or item['field'] not in selected or item['direction'] not in ('asc','desc')
+                        or type(item['nulls_first']) is not bool):
+                    raise DomainError('排序字段或方向不合法')
+            data.update(row_limit=row_limit,order_by=ordering)
         if pseudonymize_fields:
             if data['output_mode']!='object':raise DomainError('患者伪名ID只允许对象级受控输出')
             by_id={f['id']:f for f in fields}
@@ -172,7 +184,7 @@ class Queries:
                         if (sid=='emr' and
                                 str(byid[current_id].get('name','')).casefold()=='patient_id'):
                             emr_patient_candidates.append(values)
-                source_budget=min(10000,max_rows) if mode=='object' and len(sources)==1 else 10000
+                source_budget=min(10000,max_rows) if mode=='object' and len(sources)==1 and not view.get('row_limit') else 10000
                 sql='SELECT '+','.join(quote(f['name']) for f in fields)+' FROM '+quote(table)+(' WHERE '+' AND '.join(where) if where else '')+' LIMIT '+str(source_budget+1)
                 sql_types={'integer':' BIGINT','number':' DOUBLE','boolean':' BOOLEAN','string':' VARCHAR'}
                 types=[field_type(f) for f in fields]
@@ -264,7 +276,12 @@ class Queries:
             if mode=='aggregate':projection.append('COUNT(*) AS count')
             sql='SELECT '+','.join(projection)+' FROM '+tables+(' WHERE '+' AND '.join(predicates) if predicates else '')
             if mode=='aggregate':sql+=(' GROUP BY '+','.join(str(i+1) for i in range(len(selected))) if selected else '')+' HAVING COUNT(*) >= '+str(int(min_group))
-            sql+=' LIMIT 201'
+            if view.get('order_by'):
+                sql+=' ORDER BY '+','.join(locations[item['field']]+' '+item['direction'].upper()+
+                    (' NULLS FIRST' if item['nulls_first'] else ' NULLS LAST') for item in view['order_by'])
+            requested_limit=view.get('row_limit')
+            if requested_limit and requested_limit>max_rows:raise DomainError('查询条数超过当前授权上限',403)
+            sql+=' LIMIT '+str(requested_limit or 201)
             physical_plan=con.execute('EXPLAIN '+sql,bound).fetchall()[-1][-1]
             import threading
             timer=threading.Timer(max(.01,deadline-time.monotonic()),con.interrupt);timer.start()
