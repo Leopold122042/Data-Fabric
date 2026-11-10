@@ -111,6 +111,11 @@ export function appendIntakeDelivery(flow,body,onRead){
   const button=document.createElement('button');button.type='button';button.className='mf-button mf-button-primary';button.textContent='读取本次交付结果';button.onclick=()=>onRead(flow);actions.append(button);section.append(actions);
  }else{
   const result=flow.delivery_result.result||{},columns=result.columns||[],rows=result.rows||[];
+  const summary=document.createElement('p');
+  summary.textContent=rows.length?`本次返回 ${rows.length} 条记录。`:
+   '查询已执行，返回 0 条记录。当前数据源中没有满足本次筛选和关联条件的记录；这不代表该患者从未有过相关记录。';
+  if(!rows.length)summary.className='intake-result-blocker';
+  section.append(summary);
   const table=document.createElement('table');table.className='intake-delivery-table';
   const head=document.createElement('thead'),headerRow=document.createElement('tr');
   for(const column of columns){const th=document.createElement('th');th.textContent=column;headerRow.append(th);}head.append(headerRow);table.append(head);

@@ -47,7 +47,7 @@ function render(){
 }
 
 if(!labels[kind])kind='plan';
-async function selectTab(key,preserveSelection=false){if(!readable(key))return;kind=key;chosen=null;const u=new URL(location.href);u.searchParams.set('tab',kind);if(!preserveSelection)u.searchParams.delete('selected');history.replaceState(null,'',u);$('#page-title').textContent=labels[kind];document.title=labels[kind]+' · MedFabric';$('#actions').replaceChildren();actions();document.querySelectorAll('#subtabs button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.kind===kind)));window.dispatchEvent(new Event('platform-navigation'));await load();}
+async function selectTab(key,preserveSelection=false){if(!readable(key))return;kind=key;chosen=null;const u=new URL(location.href);u.searchParams.set('tab',kind);if(!preserveSelection)u.searchParams.delete('selected');history.replaceState(null,'',u);$('#page-title').textContent=labels[kind];document.title=labels[kind]+' · 数据编织平台';$('#actions').replaceChildren();actions();document.querySelectorAll('#subtabs button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.kind===kind)));window.dispatchEvent(new Event('platform-navigation'));await load();}
 for(const [key,label] of visibleExecutionTabs(currentAccess())){const b=document.createElement('button');b.type='button';b.className='mf-button';b.textContent=label;b.dataset.kind=key;b.onclick=()=>selectTab(key).catch(e=>message(e.message));$('#subtabs').append(b);}
 
 function actions(){

@@ -1,5 +1,6 @@
 @echo off
 setlocal
+if not defined MEDFABRIC_OLLAMA_MODEL set "MEDFABRIC_OLLAMA_MODEL=gemma4:12b"
 cd /d "%~dp0"
 set "MEDFABRIC_PYTHON=python"
 if exist ".venv\Scripts\python.exe" set "MEDFABRIC_PYTHON=.venv\Scripts\python.exe"

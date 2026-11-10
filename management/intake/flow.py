@@ -135,7 +135,8 @@ class IntakeFlow:
 
     def _semantic_field_bindings(self, text, draft, catalog, lookup=None, field_selections=None):
         """Resolve each model-parsed field intent to confirmed field-library entries."""
-        query_intent=bool(re.search(r'查询|查找|搜索|检索|获取|找出|查看|统计|分析|获取|显示|列出|返回',str(text or ''))
+        person_attribute=re.search(r'[\u4e00-\u9fff]{2,4}的([\u4e00-\u9fffA-Za-z_]{2,24})[。？！?！\s]*$',str(text or '').split('\n',1)[0])
+        query_intent=bool(person_attribute or re.search(r'查询|查找|搜索|检索|获取|找出|查看|统计|分析|获取|显示|列出|返回',str(text or ''))
                            or lookup or draft.get('field_intents') or draft.get('query_draft')
                            or any(item.get('capability') in ('data_query','trend_analysis')
                                   for item in draft.get('capability_steps',[])))
@@ -144,6 +145,8 @@ class IntakeFlow:
         fields=[row for row in catalog if row.get('kind')=='field' and row.get('status')=='active'
                 and row.get('parent_id') in tables]
         intents=draft.get('field_intents') or []
+        if not intents and person_attribute:
+            intents=[{'phrase':person_attribute.group(1),'meaning':'','role':'output'}]
         fixed=[]
         if lookup and lookup.get('kind')=='field_value':
             explicit=lookup.get('semantic_bindings') or []
@@ -282,6 +285,11 @@ class IntakeFlow:
                 table=tables.get(field.get('parent_id'),{})
                 score=(1.0 if exact_options or (fixed_field and field.get('id')==fixed_field.get('id'))
                        else self._field_semantic_score(intent,field))
+                phrase_key=self._semantic_text(phrase)
+                field_terms=[field.get('field_label',''),*field.get('aliases',[])]
+                if not fixed_field and not exact_options and len(phrase_key)>=2 and any(
+                        phrase_key in self._semantic_text(term) for term in field_terms if term):
+                    score=max(score,0.65)
                 ranked.append({'field_id':field['id'],'field_name':field.get('name'),
                     'field_label':field.get('field_label') or field.get('name'),
                     'definition':field.get('meaning') or '', 'aliases':field.get('aliases') or [],
@@ -505,9 +513,18 @@ class IntakeFlow:
             if {relation.get('source'),relation.get('target')}!=expected:continue
             current={left_id:self.store.get('object',left_id),right_id:self.store.get('object',right_id)}
             versions=relation.get('field_versions') or {}
-            if any(not item or item.get('status')!='active'
-                   or (versions.get(field_id) is not None and item.get('version')!=versions[field_id])
-                   for field_id,item in current.items()):continue
+            valid=True
+            structural_keys=('kind','name','parent_id','source_id','table','structure','status')
+            for field_id,item in current.items():
+                if not item or item.get('status')!='active':
+                    valid=False;break
+                version=versions.get(field_id)
+                if version is not None and item.get('version')!=version:
+                    prior=next((entry for entry in self.store.history('object',field_id)
+                                if entry.get('version')==version),None)
+                    if not prior or any(prior.get(key)!=item.get(key) for key in structural_keys):
+                        valid=False;break
+            if not valid:continue
             return True
         return False
 
@@ -538,7 +555,7 @@ class IntakeFlow:
         targets=[item.strip(' \t，,、。.!！?？:：') for item in re.split(
             r'\s*(?:以及|并且|同时|和|与|及|、|，|,|&|\+)\s*',request.group('targets'))]
         targets=[item for item in targets if item]
-        if len(targets)<2 and not field_selections:return None
+        if not targets:return None
 
         aliases={
             'id':('patient_id',),'患者id':('patient_id',),'病人id':('patient_id',),
@@ -554,10 +571,16 @@ class IntakeFlow:
         }
         def normalized(value):
             return re.sub(r'[\s_-]+','',str(value or '')).casefold()
+        patient_id_targets={normalized(value) for value in (
+            'id','patientid','patient_id','患者id','病人id','患者编号','病人编号','患者标识')}
+        patient_master_names={normalized(value) for value in (
+            'patient','patient_master','patient_registry','患者主索引','患者主索引表')}
         selection_map={normalized(key):set(value if isinstance(value,list) else [value])
             for key,value in (field_selections or {}).items() if key and value}
         canonical={normalized(key):value for key,value in aliases.items()}
-        full_fold=selection_free_text.casefold()
+        # Explicit table scope comes only from the user's original request.
+        # A selected candidate such as visit.dept must not globally filter gender/ID.
+        full_fold=text.casefold()
         explicit_table_ids={row['id'] for row in tables if any(
             isinstance(value,str) and len(value.strip())>=2 and value.casefold() in full_fold
             for value in (row.get('name'),row.get('table')))}
@@ -570,6 +593,12 @@ class IntakeFlow:
             if not names:
                 selected_fields=[field for field in fields if field.get('id') in selected_ids
                                  and field.get('parent_id') in table_by_id]
+                if not selected_ids:
+                    selected_fields=[field for field in fields
+                        if field.get('parent_id') in table_by_id
+                        and field.get('definition_status')=='confirmed'
+                        and any(normalized(target)==normalized(term) for term in
+                            [field.get('name',''),field.get('field_label',''),*field.get('aliases',[])] if term)]
                 if not selected_fields:
                     return {'kind':'field_gap','name':request.group('name'),'targets':targets,
                         'missing':[target],'reason':f'无法把请求属性“{target}”可靠匹配到字段库；未生成部分字段查询。'}
@@ -586,7 +615,8 @@ class IntakeFlow:
                 elif isinstance(baseline,str):terms.append(baseline)
                 if field_name in names or any(normalized(term) in semantic_tokens for term in terms if term):
                     candidates.append(field)
-            context_text=(target+' '+clarification_text).casefold()
+            field_note=re.search(re.escape(target)+r'\s*[:\uFF1A]\s*([^\uFF1B;\n]+)',clarification_text,re.I)
+            context_text=(target+' '+(field_note.group(1) if field_note else '')).casefold()
             context_markers=[]
             if any(word in context_text for word in ('就诊','门诊','住院','诊疗')):
                 context_markers.extend(('visit','encounter','就诊','门诊','住院','诊疗'))
@@ -601,6 +631,14 @@ class IntakeFlow:
                     str(table_by_id.get(field.get('parent_id'),{}).get('name',''))+' '+
                     str(field.get('table',''))+' '+str(field.get('meaning',''))).casefold()
                     for marker in context_markers)]
+            # A person-scoped plain ID means the canonical patient identifier.
+            # Do not surface the same patient_id repeated across fact tables as
+            # separate semantic choices; explicit table hints or human choices win.
+            if normalized(target) in patient_id_targets and not selected_ids and not explicit_table_ids:
+                master_ids={row['id'] for row in tables
+                    if normalized(row.get('name') or row.get('table')) in patient_master_names}
+                master_candidates=[field for field in candidates if field.get('parent_id') in master_ids]
+                if master_candidates:candidates=master_candidates
             if selected_ids:
                 matched_ids={field.get('id') for field in candidates}&selected_ids
                 if matched_ids!=selected_ids:
@@ -688,7 +726,7 @@ class IntakeFlow:
                 return {'kind':'field_gap','name':request.group('name'),'targets':targets,
                     'missing':missing,'reason':'目录没有为所有请求属性找到字段；未生成部分字段查询。'}
             return {'kind':'field_gap','name':request.group('name'),'targets':targets,
-                'missing':targets,'reason':'目录无法通过姓名字段和已登记患者关联同时定位全部请求字段；未生成部分字段查询。'}
+                'missing':targets,'reason':'目录无法通过已确认的 patient_id 关联安全合并全部请求字段；字段若来自多张明细表，直接连接可能放大行数。请说明希望保留的字段组合或结果粒度；未生成部分字段查询。'}
         combinations.sort(key=lambda item:item[0])
         _,selected,table,name_field,join_table,name_table,name_key,target_keys=combinations[0]
         # Preserve the user's requested order while avoiding duplicate projections.
@@ -748,8 +786,13 @@ class IntakeFlow:
             join_fields=[name_key,target_keys.get(table.get('id'))]
             for field in join_fields:
                 if field:add_resource(field,'仅用于已登记表之间的patient_id关联，不作为额外输出。')
+        # Alternatives must participate in a complete executable combination.
+        # Per-field matches alone can include a third detail table that cannot
+        # be joined at the requested grain and must not block a valid plan.
+        feasible_ids={field['id'] for combination in combinations for field in combination[1]}
         semantic_bindings=[]
         for target,_,target_candidates in requested:
+            target_candidates=[field for field in target_candidates if field['id'] in feasible_ids]
             selected_for_target=[item for item in selected if item in target_candidates]
             for selected_field in selected_for_target:
                 semantic_bindings.append({'phrase':target,'meaning':selected_field.get('meaning',''),
@@ -1643,6 +1686,10 @@ class IntakeFlow:
         else:
             draft=model_client.extract(text,catalog)
         draft,person_lookup=self._complete_query_intent(text,draft,catalog,field_selections)
+        if person_lookup and person_lookup.get('kind') in ('field_value','pseudonymized_id'):
+            # A reused draft may retain a resolved linkage blocker. The current
+            # planner result is authoritative, not the previous attempt's flags.
+            draft.pop('catalog_match_resolution',None)
         if not draft.get('capability_steps'):
             # Capability proposals are model hints. A structurally incomplete
             # response must not prevent the platform from producing a reviewable
@@ -1656,6 +1703,17 @@ class IntakeFlow:
         field_bindings=([] if rule_gap else self._semantic_field_bindings(
             text,draft,catalog,person_lookup,field_selections))
         clarification_questions=[item['question'] for item in field_bindings if item.get('question')]
+        relationship_gap=bool(person_lookup and person_lookup.get('kind')=='field_gap'
+            and re.search(r'患者关联|姓名字段|patient_id关联|patient_id 关联',
+                          str(person_lookup.get('reason','')),re.I))
+        if relationship_gap:
+            question=('这些字段目前无法通过已确认的患者关系安全合成一个结果；若涉及多张明细表，'
+                '直接连接可能造成记录重复。请说明要保留哪些字段，以及希望逐条返回、分开查询还是按患者汇总。')
+            field_bindings.append({'intent_id':f'field-combination-{len(field_bindings)+1}',
+                'phrase':'跨表结果组合方式','meaning':person_lookup.get('reason',''),
+                'role':'unknown','status':'combination_unresolved','question':question,
+                'suggested_field_id':None,'selected_field_id':None,'candidates':[]})
+            clarification_questions.append(question)
         model_mapping_gaps=[str(item).strip() for item in (draft.get('uncertain_fields') or [])
             if isinstance(item,str) and item.strip() and re.search(
                 r'字段|含义|口径|匹配|歧义|不确定|无法|缺少|未能|待确认|需确认|未找到',item)
@@ -1848,7 +1906,7 @@ class IntakeFlow:
             for step in steps:
                 if step['capability'] in ('data_query','trend_analysis'):
                     step['status']='gap'
-                    step['detail']='字段语义尚未全部确认；请先回答字段澄清问题并重新匹配，当前不生成或执行查询。'
+                    step['detail']='查询仍有字段候选或结果口径待澄清项；请查看下方具体问题并重新匹配，当前不生成或执行查询。'
         field_lookup_record=None
         if person_lookup and person_lookup.get('kind')=='field_value':
             from execution.security.output_policy import field_classification
@@ -2196,8 +2254,18 @@ class IntakeFlow:
         output_fields=[self.store.require('object',field_id) for field_id in
             (lookup.get('field_ids') or [field['id']])]
         name_field=self.store.require('object',lookup.get('name_field_id',''))
+        # The first projection may belong to the patient table while the
+        # query's row grain belongs to its joined records table. Resolve the
+        # main table from the confirmed SQL, not from projection order.
+        from execution.query.intake_plan import field_query_shape
+        binding_ids={item.get('id') for item in flow.get('resources',[])
+            if item.get('review_status')=='human_confirmed'}
+        binding_ids.update([table['id'],name_field.get('parent_id'),
+            *(item.get('parent_id') for item in output_fields)])
+        confirmed_shape=field_query_shape(sql,self.store,binding_ids)
+        table=confirmed_shape['table']
         if (table.get('kind')!='table' or field.get('kind')!='field'
-                or field.get('parent_id')!=table['id'] or name_field.get('kind')!='field'):
+                or name_field.get('kind')!='field'):
             raise DomainError('已确认查询绑定的表或字段与当前目录不一致',409)
         required=[table,*output_fields,name_field];join_table=None;join_field_ids=[]
         if name_field.get('parent_id')!=table['id']:
@@ -2235,7 +2303,7 @@ class IntakeFlow:
         observed_join_pairs={tuple(sorted(pair)) for pair in shape.get('joins',[])}
         if (policy.get('scope',{}).get('filters')!=shape['filters']
                 or set(expected_outputs)!={item['id'] for item in shape['output_fields']}
-                or shape['output_field']['id']!=field['id']
+                or field['id'] not in {item['id'] for item in shape['output_fields']}
                 or shape['table']['id']!=table['id']
                 or observed_table_ids!=expected_table_ids
                 or observed_join_pairs!=expected_join_pairs):
@@ -2252,7 +2320,10 @@ class IntakeFlow:
                 '已确认SQL使用的patient_id等值关联字段；不作为输出。' if item['id'] in join_field_ids else
                 '已确认SQL绑定的输出表或字段。')
             resources.append({**item,'reason':reason,'review_status':'human_confirmed'})
-        next_lookup={**lookup,'join_table_id':join_table.get('id') if join_table else None,
+        next_lookup={**lookup,'field_id':shape['output_field']['id'],
+            'field_name':shape['output_field'].get('name'),
+            'field_meaning':shape['output_field'].get('meaning',''),
+            'table_id':table['id'],'join_table_id':join_table.get('id') if join_table else None,
             'join_field_ids':join_field_ids}
         if resources==flow.get('resources') and next_lookup==lookup:return flow
         note='已按用户确认的SQL和目录patient_id关系补齐执行所需目录表与关联字段；未读取源数据行。'

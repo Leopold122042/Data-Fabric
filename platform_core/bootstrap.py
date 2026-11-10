@@ -58,7 +58,7 @@ def create_app(control_root=None,start_runtime=True,simulate=None,identity=None)
             runtime.external_governance.close()
             runtime.execution.close()
             runtime.shutdown()
-    app=FastAPI(title='MedFabric',lifespan=lifespan)
+    app=FastAPI(title='数据编织平台',lifespan=lifespan)
     app.state.runtime=runtime
     app.state.identity=identity or LocalDemoIdentity()
     from execution.security.legacy_guard import install

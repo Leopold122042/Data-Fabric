@@ -151,7 +151,7 @@ async function refresh(){
  try{
   const response=await fetch('/api/dashboard',{headers:headers(),cache:'no-store'}),d=await response.json();
   if(!response.ok)throw Error(d.error||'读取总览失败');if(d.role!==currentAccess().principal.role)throw Error('身份已变化，请刷新页面');
-  const config=dashboardRoles.find(x=>x.role===d.role);$('#dashboard-title').textContent=config.title;document.title=config.title+' · MedFabric';$('#dashboard-scope').textContent=d.scope+' · '+config.focus;
+  const config=dashboardRoles.find(x=>x.role===d.role);$('#dashboard-title').textContent=config.title;document.title=config.title+' · 数据编织平台';$('#dashboard-scope').textContent=d.scope+' · '+config.focus;
   const metrics=node('section','','dashboard-metrics');metrics.setAttribute('aria-label','核心指标');const grid=node('div','','dashboard-grid '+d.role);
   ({platform:renderPlatform,provider:renderProvider,requester:renderRequester,auditor:renderAuditor}[d.role])(d,grid,metrics);
   root.replaceChildren(metrics,grid);lastData=d;$('#dashboard-status').textContent=d.errors.join('；');$('#dashboard-status').hidden=!d.errors.length;$('#dashboard-time').textContent='更新于 '+new Date(d.updated_at).toLocaleTimeString('zh-CN',{hour12:false});

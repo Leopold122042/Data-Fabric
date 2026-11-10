@@ -3,17 +3,20 @@ import {api,message} from './ui.js';
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;};
 const ROLE={output:'输出',filter:'筛选',group:'分组',time:'时间',join:'关联',metric:'指标',unknown:'待确认'};
 const STATUS={suggested:'字段库定义已确认 · 最优推荐',ambiguous:'有相近候选，请核对选择',missing:'字段库没有匹配项',
- definition_unconfirmed:'字段定义尚未确认',low_confidence:'语义证据不足',sql_missing:'SQL没有覆盖该字段',model_missing:'模型没有拆出字段'};
-const TEXT_REQUIRED=new Set(['missing','model_missing','sql_missing']);
+ definition_unconfirmed:'字段定义尚未确认',low_confidence:'语义证据不足',sql_missing:'SQL没有覆盖该字段',model_missing:'模型没有拆出字段',
+ combination_unresolved:'字段无法安全合并为一个结果'};
+const TEXT_REQUIRED=new Set(['missing','model_missing','sql_missing','combination_unresolved']);
 const RESPONSE_LABEL={
  missing:'补充该字段的业务含义、数据来源或实际字段名称',
  model_missing:'说明本次查询需要返回、筛选、分组或统计什么',
  sql_missing:'补充本次查询的筛选条件、统计口径和输出方式',
+ combination_unresolved:'说明希望如何处理这些字段和结果粒度',
 };
 const RESPONSE_PLACEHOLDER={
  missing:'请说明字段含义、数据来源或实际字段名称。',
  model_missing:'请说明本次查询需要返回、筛选、分组或统计什么。',
  sql_missing:'例如：按姓名精确筛选，只返回性别；如需统计，请说明统计口径。',
+ combination_unresolved:'例如：只保留某张表的字段；分开查询；或按患者汇总。若逐条返回，请说明每行代表哪类记录。',
 };
 
 export function appendSemanticFieldMatches(flow,body,onSaved){

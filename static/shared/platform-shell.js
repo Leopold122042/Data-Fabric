@@ -9,10 +9,10 @@
  const {visibleNavigation}=await import('/static/shared/access-model.js?v=field-library-6');
  const {icon}=await import('/static/shared/icons.js');
  access.bindRole();sidebar.replaceChildren();sidebar.classList.add('platform-sidebar');sidebar.setAttribute('aria-label','平台导航');
- const brand=document.createElement('a');brand.className='platform-brand';brand.href='/static/workspace.html';brand.textContent='MedFabric';sidebar.append(brand);
- const caption=document.createElement('p');caption.className='platform-caption';caption.textContent='医疗数据平台 · 正在加载权限';sidebar.append(caption);
+ const brand=document.createElement('a');brand.className='platform-brand';brand.href='/static/workspace.html';brand.textContent='数据编织平台';sidebar.append(brand);
+ const caption=document.createElement('p');caption.className='platform-caption';caption.textContent='数据编织平台 · 正在加载权限';sidebar.append(caption);
  let permissions;try{permissions=await access.ready();}catch(error){caption.textContent='权限暂不可用';access.denyPage(error.message+'，数据与操作入口已隐藏。');return;}
- caption.textContent='医疗数据平台';const navHost=intakeDock?document.createElement('div'):sidebar;if(intakeDock){navHost.className='platform-nav-groups';sidebar.append(navHost);}
+ caption.textContent='数据编织平台';const navHost=intakeDock?document.createElement('div'):sidebar;if(intakeDock){navHost.className='platform-nav-groups';sidebar.append(navHost);}
  const hrefFor=target=>target.startsWith('/')?target:'/static/execution/index.html?tab='+target;
  function navLink(label,target,resource){const a=document.createElement('a');a.href=hrefFor(target);a.dataset.resource=resource;a.textContent=label;return a;}
  const fieldLibraryNav=document.createElement('nav');fieldLibraryNav.className='platform-nav';fieldLibraryNav.setAttribute('aria-label','固定入口');fieldLibraryNav.append(navLink('字段库','/static/management/field-library.html','object'));sidebar.append(fieldLibraryNav);

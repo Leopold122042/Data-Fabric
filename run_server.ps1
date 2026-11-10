@@ -1,5 +1,6 @@
 param([int]$Port = 8321)
 $ErrorActionPreference = 'Stop'
+if (-not $env:MEDFABRIC_OLLAMA_MODEL) { $env:MEDFABRIC_OLLAMA_MODEL = 'gemma4:12b' }
 Set-Location -LiteralPath $PSScriptRoot
 $pythonExecutable = 'python'
 $localPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
