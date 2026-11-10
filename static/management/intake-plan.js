@@ -46,8 +46,8 @@ export function appendFieldClassification(flow,body,onSaved){
   section.append(el('p',`目录匹配到 ${lookup.table_name||'数据表'}中的 ${outputNames.join('、')||lookup.field_name||'目标字段'}；分类尚未确认。平台方确认前不会建立方案或读取源数据。`));
   body.append(section);return;
  }
- section.append(el('h3','请确认模型匹配的输出字段分类'));
- section.append(el('p',`目录匹配：${lookup.table_name||''}.${outputNames.join('、')||lookup.field_name||''}（${lookup.target_phrase||lookup.field_meaning||'目录字段'}）。姓名字段 ${lookup.name_field_name||'name'} 只用于精确筛选，不会输出。`));
+ section.append(el('h3',`请确认待处理字段 ${lookup.table_name||''}.${lookup.field_name||'输出字段'} 的分类`));
+ section.append(el('p',`本次所有输出：${outputNames.join('、')||lookup.field_name||'目录字段'}（${lookup.target_phrase||lookup.field_meaning||'目录字段'}）。姓名字段 ${lookup.name_field_name||'name'} 只用于精确筛选，不会输出。多个输出字段会逐项确认分类。`));
  const select=document.createElement('select');select.setAttribute('aria-label','输出字段分类');
  const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='选择分类';select.append(placeholder);
  for(const [value,label] of [['公开','公开'],['内部','内部'],['健康信息','健康信息'],['个人标识','个人标识'],['敏感','敏感']]){
@@ -250,20 +250,4 @@ export function appendQueryRetry(flow,body,onSaved){
   }catch(cause){error.textContent=cause.message||'重试失败，请刷新后查看当前状态。';retry.disabled=false;}
  });
  const actions=el('div',undefined,'intake-result-actions');actions.append(retry);section.append(error,actions);body.append(section);
-}
-
-export function appendPatientIdentifierRevision(flow,body,onSaved){
- if(role()!=='platform'||flow.output_preference!=='catalog_field')return;
- const section=el('section',undefined,'intake-result-confirmation');
- section.append(el('h3','用患者标识区分同名记录'));
- section.append(el('p',`可在原姓名筛选和关联范围内增加原始 patient_id 与${flow.field_lookup?.field_name||'目标字段'}。patient_id 是个人标识；新方案会单独记录平台字段批准，并重新查询。`));
- const error=el('p',undefined,'intake-confirm-error');error.setAttribute('role','alert');
- const revise=actionButton('增加原始 patient_id 并重新生成方案',async()=>{
-  revise.disabled=true;error.textContent='正在按目录 patient_id 生成新规格和方案…';
-  try{const result=await api('/intake/flows/'+flow.id+'/add-patient-identifier',
-   {expected_version:flow.version,confirmed:true,identifier_output:'raw'});
-   onSaved(result.flow,'患者标识字段已加入新方案');message(result.note);
-  }catch(cause){error.textContent=cause.message||'增加患者标识失败，请刷新后重试。';revise.disabled=false;}
- });
- const actions=el('div',undefined,'intake-result-actions');actions.append(revise);section.append(error,actions);body.append(section);
 }

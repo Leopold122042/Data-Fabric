@@ -1,5 +1,6 @@
 """Compile confirmed rules into supported executors; unsupported handlers never run."""
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from contracts.execution.constraints import fingerprint, instant, normalize
 from platform_core.storage import DomainError
 
@@ -9,7 +10,11 @@ def check_window(policy, stage):
     if now >= instant(policy['deadline_at']):
         raise DomainError('已超过规格约定的交付时限', 403)
     if policy['window_kind'] == 'execution' and now < instant(policy['time_start']):
-        raise DomainError('尚未进入规格约定的执行时间窗', 403)
+        start = instant(policy['time_start']).astimezone(ZoneInfo('Asia/Shanghai'))
+        current = now.astimezone(ZoneInfo('Asia/Shanghai'))
+        raise DomainError(
+            f'执行时间窗从北京时间 {start:%Y-%m-%d %H:%M} 开始；'
+            f'当前为 {current:%Y-%m-%d %H:%M}，尚未开始', 403)
 
 
 def compile_node(policy, node, view=None, service=None):

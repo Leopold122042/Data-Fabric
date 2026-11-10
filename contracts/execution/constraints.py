@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from platform_core.storage import DomainError
 
 
@@ -21,14 +22,14 @@ def instant(value, end_of_date=False):
             raise ValueError()
         parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
         if len(value) == 10:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.replace(tzinfo=ZoneInfo('Asia/Shanghai'))
             if end_of_date:
                 parsed += timedelta(days=1)
         elif parsed.tzinfo is None:
             raise ValueError()
         return parsed.astimezone(timezone.utc)
     except (ValueError, TypeError, OverflowError):
-        raise DomainError('执行时间需为ISO日期或带时区的时间；日期按UTC日界计算')
+        raise DomainError('执行时间需为ISO日期或带时区的时间；日期按北京时间日界计算')
 
 
 def number(value, label, low, high, integer=False):

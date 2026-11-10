@@ -1,5 +1,7 @@
 """Auditable, non-executable demand workflow proposals and gated preparation."""
 import re
+import unicodedata
+from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -70,7 +72,8 @@ class IntakeFlow:
     def _catalog_metadata(self, external_catalog=()):
         # Give the local model structure metadata only. Never inspect source rows.
         from management.catalog.field_library import FieldLibrary
-        definitions=FieldLibrary(self.store).confirmed()
+        definitions={item['field_id']:item for item in FieldLibrary(self.store).items()
+                     if item.get('status')!='retired'}
         candidates=[]
         for row in self.store.list('object'):
             if row.get('status')=='deleted':continue
@@ -87,7 +90,7 @@ class IntakeFlow:
                 candidate.update(meaning=definition['definition'],field_label=definition['label'],
                     aliases=definition.get('aliases',[]),unit=definition.get('unit',''),
                     semantic_baseline={'label':definition['label']},
-                    definition_status='confirmed',definition_version=definition['version'])
+                    definition_status=definition['status'],definition_version=definition['version'])
         for row in self.store.list('service'):
 
             candidates.append({'id':row['id'],'kind':'service','name':row.get('name'),'description':row.get('description'),
@@ -96,6 +99,313 @@ class IntakeFlow:
             candidates.append({'id':row['id'],'kind':'connected_external_table','name':row.get('name'),
                 'table':row['id'],'source_id':'connected-cloud','columns':row.get('columns',[]),'types':row.get('types',[])})
         return candidates[:300]
+
+    @staticmethod
+    def _semantic_text(value):
+        value=unicodedata.normalize('NFKC',str(value or '')).casefold()
+        return ''.join(character for character in value if character.isalnum() or '\u4e00'<=character<='\u9fff')
+
+    @classmethod
+    def _field_semantic_score(cls, intent, field):
+        from difflib import SequenceMatcher
+        requested=[intent.get('phrase',''),*intent.get('aliases',[])]
+        labels=[field.get('field_label',''),field.get('name',''),*field.get('aliases',[])]
+        requested=[cls._semantic_text(value) for value in requested if cls._semantic_text(value)]
+        labels=[cls._semantic_text(value) for value in labels if cls._semantic_text(value)]
+        surface=0.0
+        for term in requested:
+            for label in labels:
+                if term==label:surface=max(surface,1.0)
+                elif len(term)>=3 and (term in label or label in term):surface=max(surface,0.94)
+                else:surface=max(surface,SequenceMatcher(None,term,label).ratio())
+        meaning=cls._semantic_text(intent.get('meaning',''))
+        definition=cls._semantic_text(field.get('meaning',''))
+        meaning_score=SequenceMatcher(None,meaning,definition).ratio() if meaning and definition else 0.0
+        table_name=cls._semantic_text(field.get('table',''))
+        domain=cls._semantic_text(field.get('domain',''))
+        context=cls._semantic_text(intent.get('context',''))
+        context_score=1.0 if context and (context in table_name or table_name in context or context in domain) else 0.0
+        # Exact names matter, but they cannot erase business meaning: several
+        # tables may use the same short label (for example, “科室”).
+        if meaning and definition:
+            score=0.72*surface+0.24*meaning_score+0.04*context_score
+        else:
+            score=0.82*surface+0.18*context_score
+        return round(score,3)
+
+    def _semantic_field_bindings(self, text, draft, catalog, lookup=None, field_selections=None):
+        """Resolve each model-parsed field intent to confirmed field-library entries."""
+        query_intent=bool(re.search(r'查询|查找|搜索|检索|获取|找出|查看|统计|分析|获取|显示|列出|返回',str(text or ''))
+                           or lookup or draft.get('field_intents') or draft.get('query_draft')
+                           or any(item.get('capability') in ('data_query','trend_analysis')
+                                  for item in draft.get('capability_steps',[])))
+        if not query_intent:return []
+        tables={row['id']:row for row in catalog if row.get('kind')=='table' and row.get('status')=='active'}
+        fields=[row for row in catalog if row.get('kind')=='field' and row.get('status')=='active'
+                and row.get('parent_id') in tables]
+        intents=draft.get('field_intents') or []
+        fixed=[]
+        if lookup and lookup.get('kind')=='field_value':
+            explicit=lookup.get('semantic_bindings') or []
+            if explicit:
+                intents=[{'phrase':item.get('phrase',''),'meaning':item.get('meaning',''),
+                          'aliases':item.get('aliases',[]),'role':item.get('role') or 'output',
+                          'candidate_fields':item.get('candidate_fields',[]),
+                          'allow_alternatives':bool(item.get('allow_alternatives')),
+                          'selection_locked':bool(item.get('selection_locked'))} for item in explicit]
+                fixed=[item.get('field') for item in explicit]
+            else:
+                output_fields=lookup.get('fields') or [lookup.get('field')]
+                targets=lookup.get('targets') or [lookup.get('target_phrase') or lookup.get('field',{}).get('name','')]
+                intents=[{'phrase':targets[index] if index<len(targets) else field.get('name',''),
+                          'meaning':field.get('meaning',''),'aliases':field.get('aliases',[]),'role':'output',
+                          'selection_locked':str(field.get('name','')).casefold()=='patient_id'}
+                         for index,field in enumerate(output_fields) if field]
+                fixed=[field for field in output_fields if field]
+            output_ids={field.get('id') for field in fixed if field}
+            extras=[]
+            if lookup.get('name_field') and lookup['name_field'].get('id') not in output_ids:
+                extras.append(('患者姓名','filter',lookup['name_field']))
+            join_fields=lookup.get('join_fields') or []
+            if not join_fields and lookup.get('join_table'):
+                table_ids={lookup.get('table',{}).get('id'),lookup['join_table'].get('id')}
+                join_fields=[field for field in fields if field.get('parent_id') in table_ids
+                    and str(field.get('name','')).casefold()=='patient_id']
+            for field in join_fields:
+                if field and field.get('id') not in output_ids:
+                    extras.append(('患者关联键','join',field))
+            for phrase,role,field in extras:
+                if role=='join':phrase='患者ID关联键'
+                intents.append({'phrase':phrase,'meaning':field.get('meaning','患者/姓名关联字段'),
+                    'aliases':field.get('aliases',[]),'role':role,'selection_locked':True})
+                fixed.append(field)
+        elif lookup and lookup.get('kind')=='pseudonymized_id':
+            field=lookup.get('id_field')
+            if field:
+                intents=[{'phrase':'患者ID','meaning':field.get('meaning','患者唯一标识'),
+                          'aliases':['ID','患者编号','患者标识'],'role':'output'}]
+                fixed=[field]
+                name_field=lookup.get('name_field')
+                if name_field:
+                    intents.append({'phrase':'患者姓名','meaning':name_field.get('meaning','患者姓名'),
+                        'aliases':name_field.get('aliases',[]),'role':'filter'})
+                    fixed.append(name_field)
+        elif lookup and lookup.get('kind') in ('field_gap','catalog_candidate'):
+            targets=lookup.get('targets') or [lookup.get('target_phrase','')]
+            if targets:
+                model_intents=list(intents)
+                intents=[]
+                fixed=[None for _ in targets]
+                known_terms={
+                    'id':('患者编号','患者ID','患者标识','患者号','patient_id'),
+                    '患者id':('患者编号','患者ID','患者标识','患者号','patient_id'),
+                    '病人id':('患者编号','患者ID','患者标识','患者号','patient_id'),
+                    'patientid':('患者编号','患者ID','患者标识','患者号','patient_id'),
+                    'patient_id':('患者编号','患者ID','患者标识','患者号','patient_id'),
+                    '患者编号':('患者编号','患者ID','患者标识','患者号','patient_id'),
+                    '病人编号':('患者编号','患者ID','患者标识','患者号','patient_id'),
+                    '患者标识':('患者编号','患者ID','患者标识','患者号','patient_id'),
+                    '科室':('科室','诊疗科室','department','dept'),
+                    '就诊科室':('科室','诊疗科室','department','dept'),
+                    '门诊科室':('科室','诊疗科室','department','dept'),
+                    '住院科室':('科室','诊疗科室','department','dept'),
+                    '部门':('科室','department','dept'),
+                    'department':('科室','诊疗科室','department','dept'),
+                    'dept':('科室','诊疗科室','department','dept'),
+                }
+                for target in targets:
+                    normalized_target=self._semantic_text(target)
+                    known_aliases=next((values for key,values in known_terms.items()
+                        if normalized_target==self._semantic_text(key)),())
+                    def covers_target(item):
+                        terms=[item.get('phrase',''),*item.get('aliases',[])]
+                        for term in terms:
+                            normalized_term=self._semantic_text(term)
+                            if normalized_target and (normalized_term==normalized_target
+                                    or normalized_term.endswith('的'+normalized_target)):
+                                return True
+                        return False
+                    matched=next((item for item in model_intents if covers_target(item)),None)
+                    matched_aliases=list(matched.get('aliases',[])) if matched else []
+                    merged_aliases=list(dict.fromkeys([*matched_aliases,*known_aliases]))
+                    intents.append({'phrase':target,
+                        'meaning':matched.get('meaning','') if matched else
+                            '患者身份编号' if known_aliases and 'patient_id' in known_aliases else
+                            '诊疗业务记录所属科室；需明确具体业务口径' if known_aliases else '',
+                        'aliases':merged_aliases,
+                        'role':matched.get('role','output') if matched else 'output'})
+        selection_stale_phrases=set()
+        if field_selections and not lookup:
+            normalize=lambda value:re.sub(r'[\s_-]+','',str(value or '')).casefold()
+            selected_by_phrase={normalize(key):(value if isinstance(value,list) else [value])
+                for key,value in field_selections.items() if key and value}
+            active_by_id={field.get('id'):field for field in fields}
+            expanded_intents=[];expanded_fixed=[]
+            for intent in intents:
+                phrase=str(intent.get('phrase') or '').strip()
+                selected_ids=selected_by_phrase.get(normalize(phrase))
+                selected_rows=[active_by_id.get(field_id) for field_id in selected_ids or []]
+                if selected_ids and all(selected_rows):
+                    for field in selected_rows:
+                        expanded_intents.append(dict(intent));expanded_fixed.append(field)
+                else:
+                    if selected_ids:
+                        selection_stale_phrases.add(phrase)
+                        draft['field_selection_error']='你上次勾选的字段在目录更新后已不可用，请从当前候选中重新选择。'
+                    expanded_intents.append(dict(intent));expanded_fixed.append(None)
+            intents=expanded_intents;fixed=expanded_fixed
+        if not intents:
+            return [{'intent_id':'field-intent-1','phrase':'具体查询字段','meaning':'','role':'unknown',
+                     'status':'model_missing','question':'模型没有逐项提取查询字段。请补充需要返回、筛选、分组或统计的字段及其业务含义。',
+                     'suggested_field_id':None,'candidates':[]}]
+        bindings=[]
+        lookup_option_map={self._semantic_text(key):value for key,value in
+                           (lookup or {}).get('candidates_by_target',{}).items()}
+        for index,intent in enumerate(intents,1):
+            phrase=str(intent.get('phrase') or '').strip()
+            meaning=str(intent.get('meaning') or '').strip()
+            aliases=intent.get('aliases') if isinstance(intent.get('aliases'),list) else []
+            fixed_field=fixed[index-1] if index<=len(fixed) else None
+            exact_options=lookup_option_map.get(self._semantic_text(phrase)) or []
+            alternative_fields=(intent.get('candidate_fields')
+                if intent.get('allow_alternatives') and not field_selections else [])
+            if not isinstance(alternative_fields,list):alternative_fields=[]
+            if fixed_field:
+                rows=[fixed_field,*alternative_fields]
+            elif exact_options:
+                rows=exact_options
+            else:
+                rows=fields
+            rows=list({field.get('id'):field for field in rows if field}.values())
+            ranked=[]
+            for field in rows:
+                table=tables.get(field.get('parent_id'),{})
+                score=(1.0 if exact_options or (fixed_field and field.get('id')==fixed_field.get('id'))
+                       else self._field_semantic_score(intent,field))
+                ranked.append({'field_id':field['id'],'field_name':field.get('name'),
+                    'field_label':field.get('field_label') or field.get('name'),
+                    'definition':field.get('meaning') or '', 'aliases':field.get('aliases') or [],
+                    'definition_status':field.get('definition_status') or 'missing',
+                    'source_id':field.get('source_id'),'table_id':table.get('id'),
+                    'table_name':table.get('name') or field.get('table'),
+                    'table':field.get('table'),'score':score,
+                    'match_evidence':'目录别名与已登记姓名/患者关联规则' if fixed_field else
+                        '字段库精确别名匹配；同名字段存在不同业务表' if exact_options else
+                        '字段名称、已确认定义、别名和所属表语义'})
+            ranked.sort(key=lambda item:(item['field_id']!=fixed_field.get('id') if fixed_field else False,
+                -item['score'],item.get('definition_status')!='confirmed',
+                item.get('source_id') or '',item.get('table') or '',item['field_id']))
+            ranked=[item for item in ranked if item['score']>=0.2]
+            best=ranked[0] if ranked else None
+            # Keep only candidates close enough to the best score to be useful
+            # alternatives. The best remains the default selection in the UI.
+            candidates=([item for item in ranked
+                         if item['score']>=best['score']-0.18][:5] if best else [])
+            if not best:
+                status='missing'
+                question=f'字段库没有找到“{phrase}”的可靠对应字段。请补充它的业务含义、数据来源或实际字段名称。'
+                selected=None
+            elif best['definition_status']!='confirmed':
+                status='definition_unconfirmed'
+                question=f'“{phrase}”最接近 {best["table_name"]}.{best["field_name"]}，但字段库定义尚未确认。请先确认字段定义，或补充更准确的字段语义。'
+                selected=best['field_id']
+            elif len(candidates)>1:
+                status='ambiguous'
+                question=f"“{phrase}”有多个相近字段。系统已预选最优推荐 {best['table_name']}.{best['field_name']}；可保留推荐或勾选其他候选。"
+                selected=best['field_id']
+            elif intent.get('role')=='unknown':
+                status='low_confidence'
+                question=f'已找到“{phrase}”的候选字段，但还不能确定它是输出、筛选、分组、时间、关联还是统计指标。请说明本次用途。'
+                selected=None
+            elif best['score']<0.72:
+                status='low_confidence'
+                question=f'“{phrase}”与目录字段的语义证据不足。请说明该字段的业务口径、所属数据来源或示例含义。'
+                selected=best['field_id']
+            else:
+                status='suggested';question=None;selected=best['field_id']
+            if lookup and lookup.get('kind')=='field_gap' and len(candidates)>1:
+                status='ambiguous'
+                question=f'“{phrase}”有多个可用候选。系统首选 {best["table_name"]}.{best["field_name"]} 已默认勾选；请勾选本次要使用的字段。'
+                selected=best['field_id']
+            if phrase in selection_stale_phrases:
+                status='ambiguous'
+                question=f'“{phrase}”上次勾选的字段在目录更新后已不可用，请从当前候选中重新选择。'
+                selected=best['field_id'] if best else None
+            previous_selections=(draft.get('field_selection_attempt') or {}).get(phrase,[])
+            if not isinstance(previous_selections,list):previous_selections=[previous_selections]
+            valid_previous=[field_id for field_id in previous_selections
+                            if any(item['field_id']==field_id for item in candidates)]
+            if valid_previous:selected=valid_previous[0]
+            bindings.append({'intent_id':f'field-intent-{index}','phrase':phrase,'meaning':meaning,
+                'role':intent.get('role') or 'unknown','status':status,'question':question,
+                'suggested_field_id':selected,'selected_field_id':selected,
+                'selected_field_ids':valid_previous or ([selected] if selected else []),
+                'selection_locked':bool(intent.get('selection_locked')),'candidates':candidates})
+        if bindings and draft.get('query_draft'):
+            try:
+                import sqlglot
+                from sqlglot import exp
+                parsed=sqlglot.parse_one(draft['query_draft'],read='duckdb')
+                aliases={table.alias_or_name.casefold():table.name.casefold() for table in parsed.find_all(exp.Table)}
+                query_tables=set(aliases.values())
+                def expression_columns(expressions):
+                    if expressions is None:return []
+                    roots=expressions if isinstance(expressions,(list,tuple)) else [expressions]
+                    return [column for root in roots if isinstance(root,exp.Expression)
+                            for column in root.find_all(exp.Column) if column.name]
+                select_columns=expression_columns(parsed.expressions)
+                where_columns=expression_columns(parsed.args.get('where'))
+                group_columns=expression_columns(parsed.args.get('group'))
+                having_columns=expression_columns(parsed.args.get('having'))
+                order_columns=expression_columns(parsed.args.get('order'))
+                join_columns=expression_columns(parsed.args.get('joins'))
+            except Exception:
+                aliases={};query_tables=set();select_columns=[];where_columns=[]
+                group_columns=[];having_columns=[];order_columns=[];join_columns=[]
+            def column_matches_candidate(column,candidate):
+                expected_table=str(candidate.get('table') or '').casefold()
+                field_name=str(candidate.get('field_name') or '').casefold()
+                if column.name.casefold()!=field_name:return False
+                if column.table:
+                    return aliases.get(column.table.casefold(),column.table.casefold())==expected_table
+                if len(query_tables)==1:return expected_table in query_tables
+                matching_tables=[]
+                for table_name in query_tables:
+                    table_row=next((row for row in catalog if row.get('kind')=='table'
+                        and str(row.get('table') or row.get('name') or '').casefold()==table_name),None)
+                    if table_row and field_name in {str(value).casefold() for value in table_row.get('columns',[])}:
+                        matching_tables.append(table_name)
+                return len(matching_tables)==1 and expected_table in matching_tables
+            for binding in bindings:
+                if binding['status']!='suggested':continue
+                candidate=next((item for item in binding['candidates']
+                    if item['field_id']==binding['suggested_field_id']),None)
+                role_columns={
+                    'output':select_columns,
+                    'filter':where_columns+having_columns,
+                    'group':group_columns,
+                    'time':select_columns+where_columns+group_columns+order_columns,
+                    'join':join_columns,
+                    'metric':select_columns+having_columns,
+                }.get(binding.get('role'),[])
+                sql_covers_intent=bool(candidate and any(
+                    column_matches_candidate(column,candidate) for column in role_columns))
+                if candidate and not sql_covers_intent:
+                    binding.update(status='sql_missing',question=(
+                        f'已匹配“{binding["phrase"]}”→ {candidate["table_name"]}.{candidate["field_name"]}，'
+                        f'但SQL没有按“{binding.get("role") or "字段"}”用途正确使用该字段。请补充或确认查询表达。'),
+                        selected_field_id=None,suggested_field_id=None)
+        elif bindings and not (lookup and lookup.get('kind')=='field_gap'):
+            for binding in bindings:
+                if binding['status']!='suggested':continue
+                candidate=next((item for item in binding['candidates']
+                    if item['field_id']==binding['suggested_field_id']),None)
+                location=(f'{candidate["table_name"]}.{candidate["field_name"]}' if candidate else '目录字段')
+                binding.update(status='sql_missing',question=(
+                    f'已匹配“{binding["phrase"]}”→ {location}，但还没有可核对的SQL草案；'
+                    '请补充筛选条件、统计口径和输出方式，直到SQL覆盖该字段。'),
+                    selected_field_id=None,suggested_field_id=None)
+        return bindings
 
     @staticmethod
     def _is_wechat_index_request(text):
@@ -163,9 +473,14 @@ class IntakeFlow:
         return 'unknown'
 
     def _person_id_lookup(self, text, catalog):
+        text=re.split(r'\n用户针对字段映射的补充说明：',str(text or ''),maxsplit=1)[0]
         match=re.search(r'(?:查询|查找|搜索|检索|获取|找出|查看)\s*([\u4e00-\u9fff]{2,4})\s*的\s*(?:(?:患者|病人|住院|病案)\s*)?(?:patient[_\s-]*id|id|编号|标识|号码)',
                         str(text or ''),re.I)
         if not match:return None
+        # Do not let the ID-only shortcut consume one attribute from a request
+        # that explicitly asks for several outputs, e.g. “唐军的ID和科室”.
+        tail=str(text or '')[match.end():]
+        if re.match(r'\s*(?:和|与|及|、|,|，|并且|以及|同时)\s*\S+',tail):return None
         person_name=match.group(1)
         tables=[row for row in catalog if row.get('kind')=='table' and row.get('status')=='active'
                 and {'name','patient_id'}<={str(column).casefold() for column in row.get('columns',[])}]
@@ -196,9 +511,14 @@ class IntakeFlow:
             return True
         return False
 
-    def _person_multi_field_lookup(self,text,catalog,draft=None):
+    def _person_multi_field_lookup(self,text,catalog,draft=None,field_selections=None):
         """Resolve every explicitly requested person attribute when the request names several."""
-        text=str(text or '')
+        full_text=str(text or '')
+        choice_pattern=r'需求字段“[^”]+”用户选定：.*?；只按所选字段匹配本次需求。'
+        selection_free_text=re.sub(choice_pattern,'',full_text)
+        clarification_text=(selection_free_text.split('\n用户针对字段映射的补充说明：',1)[1]
+            if '\n用户针对字段映射的补充说明：' in selection_free_text else '')
+        text=full_text.split('\n用户针对字段映射的补充说明：',1)[0]
         fields=[row for row in catalog if row.get('kind')=='field' and row.get('status')=='active']
         tables=[row for row in catalog if row.get('kind')=='table' and row.get('status')=='active']
         table_by_id={row.get('id'):row for row in tables}
@@ -218,13 +538,15 @@ class IntakeFlow:
         targets=[item.strip(' \t，,、。.!！?？:：') for item in re.split(
             r'\s*(?:以及|并且|同时|和|与|及|、|，|,|&|\+)\s*',request.group('targets'))]
         targets=[item for item in targets if item]
-        if len(targets)<2:return None
+        if len(targets)<2 and not field_selections:return None
 
         aliases={
             'id':('patient_id',),'患者id':('patient_id',),'病人id':('patient_id',),
             'patientid':('patient_id',),'patient_id':('patient_id',),
             '患者编号':('patient_id',),'病人编号':('patient_id',),'患者标识':('patient_id',),
             '科室':('dept','department'),'就诊科室':('dept','department'),
+            '门诊科室':('dept','department'),'住院科室':('dept','department'),
+            '医嘱科室':('dept','department'),'处方科室':('dept','department'),
             '部门':('dept','department'),'department':('department','dept'),'dept':('dept','department'),
             '性别':('gender','sex'),'gender':('gender','sex'),'sex':('gender','sex'),
             '生日':('birth_date','date_of_birth','dob'),
@@ -232,13 +554,26 @@ class IntakeFlow:
         }
         def normalized(value):
             return re.sub(r'[\s_-]+','',str(value or '')).casefold()
+        selection_map={normalized(key):set(value if isinstance(value,list) else [value])
+            for key,value in (field_selections or {}).items() if key and value}
         canonical={normalized(key):value for key,value in aliases.items()}
+        full_fold=selection_free_text.casefold()
+        explicit_table_ids={row['id'] for row in tables if any(
+            isinstance(value,str) and len(value.strip())>=2 and value.casefold() in full_fold
+            for value in (row.get('name'),row.get('table')))}
         recommended={item.get('id') for item in (draft or {}).get('resource_recommendations',[])
             if item.get('id')}
         requested=[]
         for target in targets:
             names=canonical.get(normalized(target))
-            if not names:return None
+            selected_ids=selection_map.get(normalized(target),set())
+            if not names:
+                selected_fields=[field for field in fields if field.get('id') in selected_ids
+                                 and field.get('parent_id') in table_by_id]
+                if not selected_fields:
+                    return {'kind':'field_gap','name':request.group('name'),'targets':targets,
+                        'missing':[target],'reason':f'无法把请求属性“{target}”可靠匹配到字段库；未生成部分字段查询。'}
+                names=tuple(dict.fromkeys(str(field.get('name','')) for field in selected_fields))
             semantic_tokens={key for key,field_names in canonical.items()
                 if any(name.casefold() in {value.casefold() for value in field_names} for name in names)}
             candidates=[]
@@ -251,49 +586,102 @@ class IntakeFlow:
                 elif isinstance(baseline,str):terms.append(baseline)
                 if field_name in names or any(normalized(term) in semantic_tokens for term in terms if term):
                     candidates.append(field)
+            context_text=(target+' '+clarification_text).casefold()
+            context_markers=[]
+            if any(word in context_text for word in ('就诊','门诊','住院','诊疗')):
+                context_markers.extend(('visit','encounter','就诊','门诊','住院','诊疗'))
+            if any(word in context_text for word in ('医嘱','处方','用药')):
+                context_markers.extend(('order','医嘱','处方','用药'))
+            if any(word in context_text for word in ('检验','化验')):
+                context_markers.extend(('lab','result','检验','化验'))
+            if explicit_table_ids:
+                candidates=[field for field in candidates if field.get('parent_id') in explicit_table_ids]
+            if context_markers:
+                candidates=[field for field in candidates if any(marker in (
+                    str(table_by_id.get(field.get('parent_id'),{}).get('name',''))+' '+
+                    str(field.get('table',''))+' '+str(field.get('meaning',''))).casefold()
+                    for marker in context_markers)]
+            if selected_ids:
+                matched_ids={field.get('id') for field in candidates}&selected_ids
+                if matched_ids!=selected_ids:
+                    return {'kind':'field_gap','name':request.group('name'),'targets':targets,
+                        'missing':[target],'reason':f'“{target}”的已选候选已不在当前目录匹配结果中；请刷新候选后重选。'}
+                candidates=[field for field in candidates if field.get('id') in selected_ids]
             requested.append((target,names,candidates))
 
+        # For person lookups, a standalone exact field-name match can point to
+        # an aggregate table that has no patient key. Let the combination planner
+        # rank candidates by a complete, confirmed patient join path first; the
+        # semantic matcher still exposes close alternatives for human selection.
         name_names={'name','patient_name','fullname','full_name','姓名','患者姓名'}
-        def name_binding(target_table):
-            target_fields=[row for row in fields if row.get('parent_id')==target_table.get('id')]
-            name=next((row for row in target_fields if str(row.get('name','')).casefold() in name_names),None)
-            if name:return name,None
-            target_key=next((row for row in target_fields
-                if str(row.get('name','')).casefold()=='patient_id'),None)
-            if not target_key:return None,None
-            related=[]
-            for candidate in tables:
-                if candidate.get('id')==target_table.get('id'):continue
-                candidate_fields=[row for row in fields if row.get('parent_id')==candidate.get('id')]
-                candidate_name=next((row for row in candidate_fields
-                    if str(row.get('name','')).casefold() in name_names),None)
-                candidate_key=next((row for row in candidate_fields
-                    if str(row.get('name','')).casefold()=='patient_id'),None)
-                same_source=candidate.get('source_id')==target_table.get('source_id')
-                linked=(candidate_key and not same_source and
-                    self._has_confirmed_patient_id_link(target_key['id'],candidate_key['id']))
-                if candidate_name and candidate_key and (same_source or linked):
-                    related.append((candidate,candidate_name))
-            return (related[0][1],related[0][0]) if len(related)==1 else (None,None)
+        def name_context(target_ids):
+            target_tables=[table_by_id[table_id] for table_id in target_ids if table_id in table_by_id]
+            if not target_tables or len(set(target_ids))>2:return []
+            matches=[]
+            for name_table in tables:
+                name_fields=[row for row in fields if row.get('parent_id')==name_table.get('id')]
+                name_field=next((row for row in name_fields if str(row.get('name','')).casefold() in name_names),None)
+                name_key=next((row for row in name_fields if str(row.get('name','')).casefold()=='patient_id'),None)
+                if not name_field or not name_key:continue
+                target_keys={}
+                valid=True
+                for target_table in target_tables:
+                    if target_table.get('id')==name_table.get('id'):continue
+                    target_key=next((row for row in fields if row.get('parent_id')==target_table.get('id')
+                        and str(row.get('name','')).casefold()=='patient_id'),None)
+                    if not target_key:valid=False;break
+                    same_source=target_table.get('source_id')==name_table.get('source_id')
+                    linked=(not same_source and self._has_confirmed_patient_id_link(name_key['id'],target_key['id']))
+                    if not same_source and not linked:valid=False;break
+                    target_keys[target_table['id']]=target_key
+                if not valid or len({name_table['id'],*target_ids})>2:continue
+                output_table=next((row for row in target_tables if row['id']!=name_table['id']),name_table)
+                matches.append((name_table,name_field,name_key,output_table,target_keys))
+            # A name table must be unambiguous for the selected output fields.
+            unique={item[0]['id']:item for item in matches}
+            canonical=[item for item in unique.values()
+                       if str(item[0].get('name') or item[0].get('table') or '').casefold()
+                       in {'patient','patient_master','patient_registry','患者主索引','患者主索引表'}]
+            if len(canonical)==1:
+                # Prefer the registered patient master when both it and a
+                # clinical document contain a name. The downstream join still
+                # requires the confirmed patient_id relation for other tables.
+                return canonical
+            return list(unique.values()) if len(unique)==1 else []
 
-        # The current governed field-query plan supports one target table and, when
-        # needed, one patient table for exact-name filtering. Choose a table that
-        # contains all requested outputs before considering separate table matches.
+        # The governed field-query plan supports up to two tables. A patient ID
+        # output and a visit department can therefore be joined through patient_id.
         from itertools import product
         combinations=[]
         if all(candidates for _,_,candidates in requested):
-            for selected in product(*(entry[2] for entry in requested)):
+            if selection_map:
+                selected_by_target=[]
+                for target,_,candidates in requested:
+                    chosen=(candidates if selection_map.get(normalized(target)) else candidates[:1])
+                    selected_by_target.append(chosen)
+                selected=list({field['id']:field for group in selected_by_target for field in group}.values())
                 target_ids={field.get('parent_id') for field in selected}
-                if len(target_ids)!=1:continue
-                target_table=table_by_id[next(iter(target_ids))]
-                name_field,join_table=name_binding(target_table)
-                if not name_field:continue
-                if join_table and name_field.get('parent_id')!=join_table.get('id'):continue
-                connection=self._source_connection_status(target_table)
-                recommendation_penalty=sum(field.get('id') not in recommended for field in selected)
-                combinations.append(((recommendation_penalty,connection!='connected',target_table.get('source_id')!='his',
-                    target_table.get('name',''),tuple(field.get('name','') for field in selected)),
-                    selected,target_table,name_field,join_table))
+                contexts=name_context(target_ids)
+                if contexts:
+                    name_table,name_field,name_key,target_table,target_keys=contexts[0]
+                    join_table=name_table if name_table.get('id')!=target_table.get('id') else None
+                    connection=self._source_connection_status(target_table)
+                    recommendation_penalty=sum(field.get('id') not in recommended for field in selected)
+                    combinations.append(((recommendation_penalty,connection!='connected',target_table.get('source_id')!='his',
+                        target_table.get('name',''),tuple(field.get('name','') for field in selected)),
+                        selected,target_table,name_field,join_table,name_table,name_key,target_keys))
+            else:
+                for selected in product(*(entry[2] for entry in requested)):
+                    target_ids={field.get('parent_id') for field in selected}
+                    contexts=name_context(target_ids)
+                    if not contexts:continue
+                    name_table,name_field,name_key,target_table,target_keys=contexts[0]
+                    join_table=name_table if name_table.get('id')!=target_table.get('id') else None
+                    connection=self._source_connection_status(target_table)
+                    recommendation_penalty=sum(field.get('id') not in recommended for field in selected)
+                    combinations.append(((recommendation_penalty,connection!='connected',target_table.get('source_id')!='his',
+                        target_table.get('name',''),tuple(field.get('name','') for field in selected)),
+                        selected,target_table,name_field,join_table,name_table,name_key,target_keys))
         if not combinations:
             if any(not candidates for _,_,candidates in requested):
                 missing=[target for target,_,candidates in requested if not candidates]
@@ -302,24 +690,33 @@ class IntakeFlow:
             return {'kind':'field_gap','name':request.group('name'),'targets':targets,
                 'missing':targets,'reason':'目录无法通过姓名字段和已登记患者关联同时定位全部请求字段；未生成部分字段查询。'}
         combinations.sort(key=lambda item:item[0])
-        _,selected,table,name_field,join_table=combinations[0]
+        _,selected,table,name_field,join_table,name_table,name_key,target_keys=combinations[0]
         # Preserve the user's requested order while avoiding duplicate projections.
         selected_fields=list({field['id']:field for field in selected}.values())
+        requested_field_ids={field['id'] for field in selected_fields}
+        identity_fields=[field for field in selected_fields
+            if str(field.get('name','')).casefold()=='patient_id'
+            and field.get('parent_id') in {name_table['id'],table['id']}]
+        identifier_field=identity_fields[0] if identity_fields else name_key
+        if not identifier_field or str(identifier_field.get('name','')).casefold()!='patient_id':
+            return {'kind':'field_gap','name':request.group('name'),'targets':targets,
+                'missing':['患者唯一标识'],'reason':'目录无法定位已确认的患者唯一标识字段；为避免同名记录混淆，未生成查询。'}
+        identifier_auto_added=identifier_field['id'] not in requested_field_ids
+        if identifier_auto_added:selected_fields.append(identifier_field)
         person_name=request.group('name')
         safe_name=person_name.replace("'","''")
         quote=lambda value:'"'+str(value).replace('"','""')+'"'
         table_name=table.get('table') or table.get('name')
         if join_table:
-            left=next((field for field in fields if field.get('parent_id')==table.get('id')
-                and str(field.get('name','')).casefold()=='patient_id'),None)
-            right=next((field for field in fields if field.get('parent_id')==join_table.get('id')
-                and str(field.get('name','')).casefold()=='patient_id'),None)
-            if not left or not right:
+            join_key=target_keys.get(table.get('id'))
+            if not join_key or not name_key:
                 return {'kind':'field_gap','name':person_name,'targets':targets,'missing':targets,
                     'reason':'目录未能唯一确认姓名表与输出表的patient_id关联；未生成查询。'}
-            sql=(f"SELECT {', '.join('t.'+quote(field.get('name')) for field in selected_fields)} "
+            aliases={name_table['id']:'p',table['id']:'t'}
+            projections=[aliases[field['parent_id']]+'.'+quote(field.get('name')) for field in selected_fields]
+            sql=(f"SELECT {', '.join(projections)} "
                  f"FROM {quote(join_table.get('table') or join_table.get('name'))} p "
-                 f"JOIN {quote(table_name)} t ON p.{quote(right.get('name'))} = t.{quote(left.get('name'))} "
+                 f"JOIN {quote(table_name)} t ON p.{quote(name_key.get('name'))} = t.{quote(join_key.get('name'))} "
                  f"WHERE p.{quote(name_field.get('name'))} = '{safe_name}' LIMIT 200")
         else:
             sql=(f"SELECT {', '.join(quote(field.get('name')) for field in selected_fields)} "
@@ -327,32 +724,55 @@ class IntakeFlow:
 
         output_labels=[]
         for target,_,candidates in requested:
-            field=next((item for item in selected if item in candidates),None)
-            output_labels.append(f'“{target}”→{table.get("name")}.{field.get("name")}')
+            matched=[item for item in selected if item in candidates]
+            output_labels.append(f'“{target}”→'+', '.join(
+                f'{field.get("table")}.{field.get("name")}' for field in matched))
         reason='目录规则已匹配全部请求字段：'+'；'.join(output_labels)+'；按姓名精确筛选。'
+        if identifier_auto_added:
+            reason+=('并自动返回 '+str(identifier_field.get('table') or name_table.get('name'))+
+                '.patient_id 以区分同名患者。')
         resources=[]
         def add_resource(item,why):
             if item and not any(value['id']==item['id'] for value in resources):
                 resources.append({'id':item['id'],'reason':why})
         add_resource(table,reason)
-        for field in selected_fields:add_resource(field,reason)
+        if name_table.get('id')!=table.get('id'):
+            add_resource(name_table,'用于姓名精确筛选及patient_id等值关联。')
+        for field in selected_fields:
+            why=('患者姓名查询自动输出的唯一标识，用于区分同名患者。'
+                if identifier_auto_added and field['id']==identifier_field['id'] else reason)
+            add_resource(field,why)
         add_resource(name_field,'仅用于姓名精确筛选，不会作为输出字段。')
         join_fields=[]
         if join_table:
-            add_resource(join_table,'按目录中patient_id等值关联到姓名字段所属表。')
-            for field in fields:
-                if field.get('parent_id') in (table.get('id'),join_table.get('id')) and str(field.get('name','')).casefold()=='patient_id':
-                    join_fields.append(field)
-                    add_resource(field,'仅用于已登记表之间的patient_id关联，不作为额外输出。')
+            join_fields=[name_key,target_keys.get(table.get('id'))]
+            for field in join_fields:
+                if field:add_resource(field,'仅用于已登记表之间的patient_id关联，不作为额外输出。')
+        semantic_bindings=[]
+        for target,_,target_candidates in requested:
+            selected_for_target=[item for item in selected if item in target_candidates]
+            for selected_field in selected_for_target:
+                semantic_bindings.append({'phrase':target,'meaning':selected_field.get('meaning',''),
+                    'aliases':selected_field.get('aliases',[]),'field':selected_field,
+                    'role':'output','allow_alternatives':not bool(field_selections),
+                    'candidate_fields':target_candidates if not field_selections else [selected_field]})
+        if identifier_auto_added:
+            semantic_bindings.append({'phrase':'患者唯一标识（自动加入）',
+                'meaning':'用于区分同名患者的patient_id；来自已确认的姓名表或其已登记关联表',
+                'aliases':['患者ID','患者编号','patient_id'],'role':'output',
+                'selection_locked':True,'field':identifier_field})
         return {'kind':'field_value','name':person_name,'table':table,'field':selected_fields[0],
             'fields':selected_fields,'name_field':name_field,'sql':sql,'target_phrase':'、'.join(targets),
-            'join_table':join_table,'join_fields':join_fields,'resources':resources,'reason':reason}
+            'targets':targets,'semantic_bindings':semantic_bindings,
+            'join_table':join_table,'join_fields':join_fields,'resources':resources,'reason':reason,
+            'identifier_field':identifier_field,'identifier_auto_added':identifier_auto_added}
 
-    def _person_field_lookup(self,text,catalog,draft=None):
+    def _person_field_lookup(self,text,catalog,draft=None,field_selections=None):
         """Resolve a person's requested output field from catalog names and semantics."""
-        multi=self._person_multi_field_lookup(text,catalog,draft)
+        multi=self._person_multi_field_lookup(text,catalog,draft,field_selections)
         if multi:return multi
-        text=str(text or '')
+        full_text=str(text or '')
+        text=full_text.split('\n用户针对字段映射的补充说明：',1)[0]
         aliases={'性别':('gender','sex'),'gender':('gender','sex'),'sex':('gender','sex'),
                  '科室':('dept','department'),'就诊科室':('dept','department'),
                  '部门':('dept','department'),'department':('department','dept'),
@@ -370,7 +790,7 @@ class IntakeFlow:
         table_by_id={row.get('id'):row for row in tables}
         source_labels={'emr':('电子病历系统','电子病历','病历文书','病案库'),'his':('医院信息系统','HIS'),
             'lis':('检验信息系统','LIS'),'pacs':('影像归档系统','PACS'),'iot':('院内监测设备','IoT')}
-        request_fold=text.casefold()
+        request_fold=full_text.casefold()
         def explicitly_requested(table):
             source=str(table.get('source_id') or '').casefold()
             hints=[source,table.get('name',''),table.get('table',''),*source_labels.get(source,())]
@@ -471,6 +891,18 @@ class IntakeFlow:
         # Prefer direct metadata matches, then the model's explicit field/table match,
         # and finally the platform's HIS catalog when the evidence is otherwise equal.
         # An available catalog source outranks an unavailable model recommendation.
+        if target_phrase and any(name in ('dept','department') for name in aliases.get(target_phrase.casefold(),())):
+            candidates=[item for item in matches if item[3]==requested_name and item[4]==target_phrase]
+            context_markers=('就诊','门诊','住院','诊疗','医嘱','处方','检验','化验')
+            described_context=any(marker in full_text for marker in context_markers)
+            explicit_table=any(explicitly_requested(item[1]) for item in candidates)
+            distinct={(item[1].get('id'),item[0].get('id')) for item in candidates}
+            if len(distinct)>1 and not described_context and not explicit_table:
+                options='、'.join(sorted({f'{item[1].get("name")}.{item[0].get("name")}' for item in candidates}))
+                candidate_rows=list({item[0].get('id'):item[0] for item in candidates}.values())
+                return {'kind':'field_gap','name':requested_name,'targets':[target_phrase],
+                    'missing':[target_phrase],'candidates_by_target':{target_phrase:candidate_rows},
+                    'reason':f'“{target_phrase}”在多个业务字段中都有匹配（{options}）。请明确具体业务口径或来源表；未生成查询。'}
         matches.sort(key=lambda item:(not explicitly_requested(item[1]),
             self._source_connection_status(item[1])!='connected',not item[5],not bool(item[2]),
             item[1].get('source_id')!='his',str(item[1].get('name','')),
@@ -511,20 +943,60 @@ class IntakeFlow:
             return {'kind':'catalog_candidate','name':person_name,'table':table,'field':field,
                 'name_field':None,'join_table':join_table,'target_phrase':phrase,
                 'reason':f"已匹配最接近目录字段 {table.get('name')}.{field.get('name')}；该表没有可用的姓名字段或已确认患者关联，暂不能生成查询。"}
+        identity_table=join_table or table
+        identifier_field=(field if str(field.get('name','')).casefold()=='patient_id' else
+            next((row for row in fields if row.get('parent_id')==identity_table.get('id')
+                and str(row.get('name','')).casefold()=='patient_id'),None))
+        if not identifier_field:
+            return {'kind':'field_gap','name':person_name,'targets':[phrase],
+                'missing':['患者唯一标识'],'reason':'目录无法定位已确认的患者唯一标识字段；为避免同名记录混淆，未生成查询。'}
+        output_fields=[field]
+        identifier_auto_added=identifier_field['id']!=field['id']
+        if identifier_auto_added:output_fields.append(identifier_field)
         safe_name=person_name.replace("'","''")
         quote=lambda value:'"'+str(value).replace('"','""')+'"'
         if join_table:
             left=next(f for f in fields if f.get('parent_id')==table.get('id') and str(f.get('name','')).casefold()=='patient_id')
             right=next(f for f in fields if f.get('parent_id')==join_table.get('id') and str(f.get('name','')).casefold()=='patient_id')
-            sql=(f"SELECT t.{quote(field.get('name'))} FROM {quote(join_table.get('table') or join_table.get('name'))} p "
+            projections=[]
+            for output_field in output_fields:
+                alias='p' if output_field.get('parent_id')==join_table.get('id') else 't'
+                projections.append(alias+'.'+quote(output_field.get('name')))
+            sql=(f"SELECT {', '.join(projections)} FROM {quote(join_table.get('table') or join_table.get('name'))} p "
                  f"JOIN {quote(table.get('table') or table.get('name'))} t ON p.{quote(right.get('name'))} = t.{quote(left.get('name'))} "
                  f"WHERE p.{quote(name_field.get('name'))} = '{safe_name}' LIMIT 200")
         else:
-            sql=f"SELECT {quote(field.get('name'))} FROM {quote(table.get('table') or table.get('name'))} WHERE {quote(name_field.get('name'))} = '{safe_name}' LIMIT 200"
+            projections=', '.join(quote(item.get('name')) for item in output_fields)
+            sql=f"SELECT {projections} FROM {quote(table.get('table') or table.get('name'))} WHERE {quote(name_field.get('name'))} = '{safe_name}' LIMIT 200"
+        normalized_phrase=self._semantic_text(phrase)
+        matching_fields=[]
+        for candidate in fields:
+            if candidate.get('parent_id') not in table_by_id:continue
+            terms=[candidate.get('name',''),candidate.get('field_label',''),
+                *candidate.get('aliases',[])]
+            baseline=candidate.get('semantic_baseline')
+            if isinstance(baseline,dict):terms.extend(value for value in baseline.values() if isinstance(value,str))
+            elif isinstance(baseline,str):terms.append(baseline)
+            if any(normalized_phrase and normalized_phrase==self._semantic_text(term) for term in terms):
+                matching_fields.append(candidate)
+        if explicitly_requested(table):
+            matching_fields=[candidate for candidate in matching_fields if candidate.get('parent_id')==table.get('id')]
+        candidate_fields=[field,*[candidate for candidate in matching_fields if candidate.get('id')!=field.get('id')]]
+        semantic_bindings=[{'phrase':phrase,'meaning':field.get('meaning',''),
+            'aliases':field.get('aliases',[]),'role':'output','field':field,
+            'allow_alternatives':len(candidate_fields)>1,'candidate_fields':candidate_fields}]
+        if identifier_auto_added:
+            semantic_bindings.append({'phrase':'患者唯一标识（自动加入）',
+                'meaning':'用于区分同名患者的patient_id；来自已确认的姓名表或其已登记关联表',
+                'aliases':['患者ID','患者编号','patient_id'],'role':'output',
+                'selection_locked':True,'field':identifier_field})
         return {'kind':'field_value','name':person_name,'table':table,'field':field,
+            'fields':output_fields,'semantic_bindings':semantic_bindings,
+            'identifier_field':identifier_field,'identifier_auto_added':identifier_auto_added,
             'name_field':name_field,'sql':sql,'target_phrase':phrase,
             'join_table':join_table,
-            'reason':f"目录字段匹配“{phrase}”→ {table.get('name')}.{field.get('name')}；按姓名精确筛选，只输出该字段。"}
+            'reason':f"目录字段匹配“{phrase}”→ {table.get('name')}.{field.get('name')}；按姓名精确筛选"+
+                ('并自动返回patient_id以区分同名患者。' if identifier_auto_added else '。')}
 
     def _admission_time_lookup(self, text, catalog):
         match=re.search(r'(?:查询|查找|搜索|检索|获取|找出|查看)\s*([\u4e00-\u9fff]{2,4}?)\s*(?:的\s*)?入院时间',
@@ -661,9 +1133,18 @@ class IntakeFlow:
         return self.store.save('intake_flow',flow['id'],{**flow,**changes},flow['version'],actor,
             '按字段目录自动修正入院时间查询草案；等待人工确认必要调整')
 
-    def _complete_query_intent(self, text, draft, catalog):
+    def _complete_query_intent(self, text, draft, catalog, field_selections=None):
         query_intent=bool(re.search(r'查询|查找|搜索|检索|获取|找出|查看|统计|分析',str(text or '')))
-        lookup=self._person_id_lookup(text,catalog) or self._person_field_lookup(text,catalog,draft)
+        # Parse multi-attribute requests before the simple ID-only shortcut, whose
+        # regex intentionally accepts a prefix such as “唐军的ID和科室”.
+        lookup=self._person_field_lookup(text,catalog,draft,field_selections) or self._person_id_lookup(text,catalog)
+        if field_selections:
+            draft.pop('field_selection_error',None)
+            draft['field_selection_attempt']={str(key):value if isinstance(value,list) else [value]
+                for key,value in field_selections.items() if key and value}
+        else:
+            draft.pop('field_selection_attempt',None)
+            draft.pop('field_selection_error',None)
         if lookup:query_intent=True
         if not query_intent and not lookup:return draft,None
         proposed={item.get('capability'):dict(item) for item in draft.get('capability_steps',[])
@@ -677,8 +1158,43 @@ class IntakeFlow:
         draft['capability_steps']=list(proposed.values())
         if lookup and lookup.get('kind')=='field_gap':
             note=lookup.get('reason') or '目录没有同时匹配到所有请求字段；未生成部分字段查询。'
+            relationship_gap=bool(re.search(r'患者关联|姓名字段|patient_id关联',note,re.I))
+            if field_selections or relationship_gap:
+                draft['field_selection_error']=note
             draft['query_draft']=None;draft['execution_constraints']={}
             draft['resource_recommendations']=[]
+            # Persist the deterministic extraction for person requests even when
+            # the model omitted field_intents. This keeps the saved interpretation
+            # consistent with the field bindings shown to the user.
+            intents=list(draft.get('field_intents') or [])
+            known={
+                'id':('患者身份编号',['患者编号','患者ID','患者号'],'患者身份编号'),
+                '患者id':('患者身份编号',['患者编号','患者ID','患者号'],'患者身份编号'),
+                'patientid':('患者身份编号',['患者编号','患者ID','患者号'],'患者身份编号'),
+                'patient_id':('患者身份编号',['患者编号','患者ID','患者号'],'患者身份编号'),
+                '患者编号':('患者身份编号',['患者ID','患者号','patient_id'],'患者身份编号'),
+                '科室':('诊疗业务记录所属科室；需明确具体业务口径',['诊疗科室','就诊科室','department','dept'],
+                        '诊疗业务记录所属科室；需明确具体业务口径'),
+                '就诊科室':('就诊记录所属诊疗科室',['科室','department','dept'],'就诊记录所属诊疗科室'),
+                '医嘱科室':('医嘱或处方记录所属科室',['科室','department','dept'],'医嘱或处方记录所属科室'),
+                '性别':('患者性别',['gender','sex'],'患者性别'),
+                '生日':('患者出生日期',['出生日期','birth_date','date_of_birth'],'患者出生日期'),
+                '出生日期':('患者出生日期',['生日','birth_date','date_of_birth'],'患者出生日期'),
+            }
+            normalize=lambda value:re.sub(r'[\s_-]+','',str(value or '')).casefold()
+            for target in lookup.get('targets') or []:
+                normalized=normalize(target)
+                def covers_target(item):
+                    return any(normalized and (normalize(term)==normalized
+                        or normalize(term).endswith('的'+normalized))
+                        for term in [item.get('phrase',''),*item.get('aliases',[])])
+                present=any(covers_target(item) for item in intents)
+                if present:continue
+                aliases,meaning=known.get(normalized,('', '', ''))[1:] if normalized in known else ([], '')
+                intents.append({'phrase':target,'meaning':meaning,'aliases':aliases,'role':'output'})
+            if intents:draft['field_intents']=intents
+            draft['uncertain_fields']=[item for item in draft.get('uncertain_fields',[])
+                if '模型未能按项输出字段语义' not in str(item)]
             draft['uncertain_fields']=list(dict.fromkeys((draft.get('uncertain_fields') or [])+[note]))
             proposed['catalog_search']['reason']=note
             proposed['connected_source_discovery']['reason']='全部目标字段匹配前不选择或连接数据源。'
@@ -718,6 +1234,7 @@ class IntakeFlow:
             proposed['data_query']['reason']='字段候选已找到，但患者姓名无法通过当前已确认的目录关系定位；不会猜测关联或生成SQL。'
             draft['capability_steps']=list(proposed.values())
         elif lookup:
+            draft.pop('field_selection_error',None)
             table=lookup['table'];field=lookup['field'];name_field=lookup['name_field']
             output_fields=lookup.get('fields') or [field]
             output_names=[item.get('meaning') or item.get('name') for item in output_fields]
@@ -742,7 +1259,12 @@ class IntakeFlow:
             draft['resource_recommendations']=recommendations
             proposed['catalog_search']['reason']=lookup['reason']
             proposed['connected_source_discovery']['reason']=f"检查 {table.get('name')} 表所属 {table.get('source_id') or '已连接'} 数据源；已连接来源直接沿用。"
-            proposed['data_query']['reason']=f"按姓名精确匹配并返回 {', '.join(table.get('name','')+'.'+item.get('name','') for item in output_fields)}。"
+            output_locations=[]
+            for item in output_fields:
+                owner=next((row for row in catalog if row.get('kind')=='table'
+                    and row.get('id')==item.get('parent_id')),None)
+                output_locations.append(f"{(owner or {}).get('name') or item.get('table') or table.get('name','')}.{item.get('name','')}")
+            proposed['data_query']['reason']=f"按姓名精确匹配并返回 {', '.join(output_locations)}。"
             draft['capability_steps']=list(proposed.values())
         return draft,lookup
 
@@ -938,17 +1460,22 @@ class IntakeFlow:
                 and row.get('parent_id') in (table['id'],join_table['id'])]
             add_resource(join_table,'按目录中patient_id等值关联，用于定位目标患者。')
             for row in join_fields:add_resource(row,'仅用于已登记表之间的patient_id关联，不作为额外输出。')
-        lookup_record={'kind':'field_value','table_id':table['id'],'table_name':table.get('name'),
-            'source_id':table.get('source_id'),'field_id':field['id'],'field_name':field.get('name'),
-            'field_meaning':field.get('meaning'),'name_field_id':name_field['id'],
+        classification_target=next((item for item in output_fields if field_classification(item)=='unknown'),field)
+        classification_table=next((item for item in catalog if item.get('kind')=='table'
+            and item.get('id')==classification_target.get('parent_id')),table)
+        lookup_record={'kind':'field_value','table_id':classification_table['id'],'table_name':classification_table.get('name'),
+            'source_id':classification_target.get('source_id'),'field_id':classification_target['id'],
+            'field_name':classification_target.get('name'),'field_meaning':classification_target.get('meaning'),
+            'name_field_id':name_field['id'],
             'field_ids':[item['id'] for item in output_fields],
             'output_fields':[{'field_id':item['id'],'field_name':item.get('name'),
                 'table_id':item.get('parent_id'),'table_name':item.get('table'),
                 'classification':field_classification(item)} for item in output_fields],
             'name_field_name':name_field.get('name'),'name':lookup['name'],
             'target_phrase':lookup['target_phrase'],'reason':lookup['reason'],
-            'classification':field.get('classification'),
-            'classification_basis':field.get('classification_basis') or basis,
+            'classification':classification_target.get('classification'),
+            'classification_basis':classification_target.get('classification_basis') or
+                inferences.get(classification_target['id'],(None,''))[1],
             'join_table_id':join_table.get('id') if join_table else None,
             'join_field_ids':[row['id'] for row in join_fields]}
         steps=[
@@ -1054,9 +1581,12 @@ class IntakeFlow:
             return {**flow,'job_state':job.get('state'),'query_error':job.get('error')}
         steps=[]
         lookup=flow.get('field_lookup') or {}
-        output_fields=[lookup.get('field_name') or '已确认目录字段']
+        output_fields=[item.get('field_name') for item in lookup.get('output_fields',[])
+                       if item.get('field_name')]
+        if not output_fields:output_fields=[lookup.get('field_name') or '已确认目录字段']
         if flow.get('output_preference')=='catalog_field_with_patient_id':
-            output_fields.append(lookup.get('identifier_field_name') or 'patient_id')
+            identifier_name=lookup.get('identifier_field_name') or 'patient_id'
+            if identifier_name not in output_fields:output_fields.append(identifier_name)
         output_summary='本次只交付：'+'、'.join(output_fields)+'。'
         detail={'query_queued':'受控查询已进入队列，等待本地执行器。'+output_summary,
                 'query_running':'本地执行器正在按已确认方案查询。'+output_summary,
@@ -1084,7 +1614,8 @@ class IntakeFlow:
         return [{'id':row['id'],'name':row.get('name') or row['id'],'columns':row.get('columns',[]),
                  'types':row.get('types',[])} for row in definitions(username)]
 
-    def propose(self, demand_id, text, actor, model_client, external_catalog=()):
+    def propose(self, demand_id, text, actor, model_client, external_catalog=(), field_selections=None,
+                preparsed_draft=None):
         demand=self.store.require('demand',demand_id)
         if demand.get('created_by')!=actor and actor!='demo-platform':raise DomainError('无权修改他人需求',403)
         catalog=self._catalog_metadata(external_catalog)
@@ -1106,11 +1637,121 @@ class IntakeFlow:
                 {'capability':'trend_analysis','reason':'匹配时间与指数值字段后分析时间序列。','inputs':['微信指数']}],
                 resource_recommendations=[],query_draft=None,uncertain_fields=[gap_note])
             model_name='platform-catalog-gap-rule'
+        elif preparsed_draft is not None:
+            draft=deepcopy(preparsed_draft)
+            model_name='field-selection-rule-resolution'
         else:
             draft=model_client.extract(text,catalog)
-        draft,person_lookup=self._complete_query_intent(text,draft,catalog)
+        draft,person_lookup=self._complete_query_intent(text,draft,catalog,field_selections)
+        if not draft.get('capability_steps'):
+            # Capability proposals are model hints. A structurally incomplete
+            # response must not prevent the platform from producing a reviewable
+            # draft; start with deterministic catalog discovery and keep the
+            # existing field/source checks as the gates for later query steps.
+            draft['capability_steps']=[{'capability':'catalog_search',
+                'reason':'模型未提供可识别的能力步骤；平台先按登记目录检索，并由字段匹配规则补齐后续步骤。',
+                'inputs':[]}]
         if not rule_gap:
             draft=self._filter_unrelated_wechat_index_resources(text,draft,catalog)
+        field_bindings=([] if rule_gap else self._semantic_field_bindings(
+            text,draft,catalog,person_lookup,field_selections))
+        clarification_questions=[item['question'] for item in field_bindings if item.get('question')]
+        model_mapping_gaps=[str(item).strip() for item in (draft.get('uncertain_fields') or [])
+            if isinstance(item,str) and item.strip() and re.search(
+                r'字段|含义|口径|匹配|歧义|不确定|无法|缺少|未能|待确认|需确认|未找到',item)
+                and not item.strip().startswith('执行范围默认使用匹配表')] if not rule_gap else []
+        for gap in model_mapping_gaps:
+            normalized_gap=self._semantic_text(gap)
+            person_alias_mapping=bool(person_lookup and person_lookup.get('kind') in
+                ('field_gap','field_value'))
+            if person_lookup and person_lookup.get('kind')=='field_gap' and draft.get('field_selection_error')==gap:
+                # A missing patient join path is a catalog relationship blocker,
+                # not a request to redefine one of the already matched fields.
+                continue
+            if person_alias_mapping and '模型未能按项输出字段语义' in gap:
+                # Person attributes are parsed deterministically from the request
+                # and independently bound below; the model's missing extraction
+                # cannot erase or duplicate those explicit targets.
+                continue
+            definitions_already_visible=bool(re.search(
+                r'字段定义|definition_status|definition_version',gap,re.I)
+                and any(candidate.get('definition_status')!='confirmed'
+                        for binding in field_bindings for candidate in binding.get('candidates',[])))
+            if definitions_already_visible:
+                # Keep this model note in the demand summary, while avoiding an
+                # extra generic clarification card: the specific field cards
+                # already show which candidates have unconfirmed definitions.
+                continue
+            already_asked=any(normalized_gap and normalized_gap in self._semantic_text(item.get('question'))
+                for item in field_bindings)
+            already_bound=any(item.get('status')=='suggested' and normalized_gap and
+                self._semantic_text(item.get('phrase')) in normalized_gap for item in field_bindings)
+            already_covered=any(item.get('status')!='suggested' and normalized_gap and
+                self._semantic_text(item.get('phrase')) in normalized_gap for item in field_bindings)
+            if not already_asked and not already_bound and not already_covered:
+                field_bindings.append({'intent_id':f'field-review-{len(field_bindings)+1}',
+                    'phrase':'待确认的字段问题','meaning':gap,'role':'unknown','status':'model_missing',
+                    'question':f'模型仍有字段疑点：“{gap}”。请补充业务含义或明确字段口径。',
+                    'suggested_field_id':None,'selected_field_id':None,'candidates':[]})
+                clarification_questions.append(field_bindings[-1]['question'])
+        if field_bindings:
+            recommendations=list(draft.get('resource_recommendations') or [])
+            recommendation_ids={item.get('id') for item in recommendations}
+            catalog_by_id={item['id']:item for item in catalog}
+            for binding in field_bindings:
+                candidates=binding.get('candidates',[])
+                if binding.get('status')=='suggested':
+                    candidates=[item for item in candidates
+                        if item.get('field_id')==binding.get('suggested_field_id')][:1]
+                    reason_suffix='字段定义已在字段库确认；本次采用最优推荐，可在上方选择相近字段。'
+                elif binding.get('status')=='ambiguous':
+                    reason_suffix='系统首选已默认勾选；你可调整相近字段选择。'
+                elif binding.get('status')=='definition_unconfirmed':
+                    reason_suffix='候选字段定义尚未确认。'
+                else:
+                    reason_suffix='语义证据不足，作为备选展示并需人工确认。'
+                for candidate in candidates:
+                    reason=(f'字段匹配：需求“{binding["phrase"]}”→ '
+                            f'{candidate["table_name"]}.{candidate["field_name"]}；{reason_suffix}')
+                    for resource_id in (candidate.get('table_id'),candidate.get('field_id')):
+                        if resource_id not in catalog_by_id:continue
+                        if resource_id in recommendation_ids:
+                            existing=next((item for item in recommendations if item.get('id')==resource_id),None)
+                            if existing and not existing.get('reason','').startswith('字段匹配：'):
+                                existing['reason']=reason
+                            continue
+                        recommendations.append({'id':resource_id,'reason':reason})
+                        recommendation_ids.add(resource_id)
+            draft['resource_recommendations']=recommendations
+            if clarification_questions:
+                draft['query_draft']=None
+                draft['execution_constraints']={}
+                unresolved=[item for item in field_bindings if item.get('status')!='suggested']
+                def already_explained(item):
+                    note=self._semantic_text(item)
+                    if ('模型未能按项输出字段语义' in str(item)
+                            and person_lookup and person_lookup.get('kind')=='field_gap'):
+                        return True
+                    if (re.search(r'字段定义|definition_status|definition_version',str(item),re.I)
+                            and any(candidate.get('definition_status')!='confirmed'
+                                    for binding in unresolved for candidate in binding.get('candidates',[]))):
+                        return True
+                    return any(self._semantic_text(binding.get('phrase','')) in note
+                        or (binding.get('question') and self._semantic_text(binding['question']) in note)
+                        for binding in unresolved if self._semantic_text(binding.get('phrase','')))
+                draft['uncertain_fields']=[item for item in draft.get('uncertain_fields',[])
+                                            if not already_explained(item)]
+        relationship_gap=bool(person_lookup and person_lookup.get('kind')=='field_gap'
+            and re.search(r'患者关联|姓名字段|patient_id关联',str(person_lookup.get('reason','')),re.I))
+        if (not rule_gap and field_bindings and draft.get('query_draft') is None
+                and not clarification_questions and not relationship_gap):
+            question='字段已找到，但没有可校验的查询草案；请补充查询范围、筛选条件和统计口径。'
+            field_bindings.append({'intent_id':f'query-plan-{len(field_bindings)+1}',
+                'phrase':'查询范围与执行方式','meaning':'字段已匹配，但缺少可核对查询草案',
+                'role':'unknown','status':'sql_missing','question':question,
+                'suggested_field_id':None,'selected_field_id':None,'candidates':[]})
+            clarification_questions=[question]
+            draft['execution_constraints']={}
         today=datetime.now(ZoneInfo('Asia/Shanghai')).date()
         assumptions=[]
         if draft.get('deadline'):
@@ -1186,23 +1827,36 @@ class IntakeFlow:
         for step in steps:
             if step['capability']=='catalog_search':
                 step['candidates']=resources
-                step['status']='matched' if resources else 'gap'
-                step['detail']='本地模型仅依据登记的表/字段/服务元数据推荐；待人工确认，未读取源数据行。' if resources else '当前登记目录中没有找到与需求匹配的候选项。'
+                has_field_candidates=any(binding.get('candidates') for binding in field_bindings)
+                step['status']='matched' if resources or has_field_candidates else 'gap'
+                step['detail']=('已按字段库返回关联表和字段候选；存在待澄清项时尚未选定数据源，未读取源数据行。'
+                    if has_field_candidates else
+                    '本地模型仅依据登记的表/字段/服务元数据推荐；待人工确认，未读取源数据行。'
+                    if resources else '当前登记目录中没有找到与需求匹配的候选项。')
             elif step['capability']=='connected_source_discovery':
-                step['status']='matched' if resources else 'gap'
+                has_field_candidates=any(binding.get('candidates') for binding in field_bindings)
+                step['status']='matched' if resources else 'proposed' if has_field_candidates else 'gap'
                 step['detail']=('等待人工确认目录候选；确认后按所选表所属数据源检查连接。已连接的医疗数据源直接继续，只有尚未连接的外部来源才需要连接；不会读取源数据行。'
-                    if resources else '目录没有找到与需求主题匹配的数据表或字段。请先登记并扫描实际的微信指数数据源，再重新检索；现有医疗表不会被当作替代来源。')
+                    if resources else '字段候选已返回；待先澄清业务口径并选定来源，再检查该来源连接状态。'
+                    if has_field_candidates else '当前尚未找到匹配的数据表或字段；登记并扫描相应数据源结构后再检索。')
             elif step['capability'] in ('data_query','trend_analysis'):
                 step['status']='gap' if draft.get('catalog_match_resolution') else 'waiting_spec' if resources else 'gap'
                 step['detail']=('已返回最接近的目录表和字段，但患者姓名关联未确认；不能生成查询SQL或方案。'
                     if draft.get('catalog_match_resolution') else '需完成资源匹配并人工确认任务规格后，才能建立并运行查询方案。'
-                    if resources else '尚无匹配的微信指数数据表和字段；完成目录登记与扫描后重新检索，才可编制查询。')
+                    if resources else '尚未选定全部请求字段对应的数据表；完成字段澄清和来源确认后才能编制查询。')
+        if clarification_questions:
+            for step in steps:
+                if step['capability'] in ('data_query','trend_analysis'):
+                    step['status']='gap'
+                    step['detail']='字段语义尚未全部确认；请先回答字段澄清问题并重新匹配，当前不生成或执行查询。'
         field_lookup_record=None
         if person_lookup and person_lookup.get('kind')=='field_value':
             from execution.security.output_policy import field_classification
             output_fields=person_lookup.get('fields') or [person_lookup['field']]
-            field_lookup_record={'kind':'field_value','table_id':person_lookup['table']['id'],
-                'table_name':person_lookup['table'].get('name'),'source_id':person_lookup['table'].get('source_id'),
+            primary_output_table=next((row for row in catalog if row.get('kind')=='table'
+                and row.get('id')==person_lookup['field'].get('parent_id')),person_lookup['table'])
+            field_lookup_record={'kind':'field_value','table_id':primary_output_table['id'],
+                'table_name':primary_output_table.get('name'),'source_id':person_lookup['field'].get('source_id'),
                 'field_id':person_lookup['field']['id'],'field_name':person_lookup['field'].get('name'),
                 'field_meaning':person_lookup['field'].get('meaning'),
                 'field_ids':[item['id'] for item in output_fields],
@@ -1218,7 +1872,8 @@ class IntakeFlow:
         record=self.store.save('intake_flow',new_id('FLOW'),{
             'demand_id':demand_id,'demand_version':demand['version'],'created_by':actor,
             'request_text':text,'model':model_name,'draft':draft,'steps':steps,
-            'resources':resources,'query_draft':draft.get('query_draft'),'query_validation':sql_validation,
+            'resources':resources,'field_bindings':field_bindings,'clarification_questions':clarification_questions,
+            'query_draft':draft.get('query_draft'),'query_validation':sql_validation,
             'state':'awaiting_chain_confirmation',
             'confirmation':None,'execution_authorized':False,
             'auto_prepared_spec':is_pseudonym_lookup,'auto_prepare_fixed_plan':is_pseudonym_lookup,
@@ -1243,6 +1898,8 @@ class IntakeFlow:
             if body.get('confirmed') is not True:raise DomainError('需明确确认完整链路')
             note=str(body.get('note','')).strip()
             if not note:raise DomainError('请记录链路确认说明')
+            if any(item.get('status')!='suggested' for item in flow.get('field_bindings',[])):
+                raise DomainError('字段语义仍有缺口；请先回答页面中的澄清问题并重新匹配，不能确认或生成查询',409)
             candidate_ids={candidate.get('id') for step in flow.get('steps',[])
                            for candidate in step.get('candidates',[]) if candidate.get('id')}
             reviewed_ids=body.get('reviewed_resource_ids')
@@ -1254,6 +1911,8 @@ class IntakeFlow:
             if set(reviewed_ids)!=candidate_ids or not set(accepted_ids)<=candidate_ids:
                 raise DomainError('目录候选确认内容与当前链路不一致，请刷新后重试',409)
             accepted_ids=set(accepted_ids)
+            unaccepted_fields={item.get('suggested_field_id') for item in flow.get('field_bindings',[])
+                               if item.get('suggested_field_id')} - accepted_ids
             steps=[]
             blocked=False
             for step in flow['steps']:
@@ -1286,6 +1945,11 @@ class IntakeFlow:
                 elif item['status']=='waiting_connection':item['status']='waiting_authorization'
                 elif item['status']=='waiting_spec':item['status']='waiting_manual_spec_confirmation'
                 steps.append(item)
+            if unaccepted_fields:
+                blocked=True
+                for step in steps:
+                    if step.get('capability') in ('data_query','trend_analysis'):
+                        step.update(status='blocked',detail='你未确认全部语义匹配字段；未建立任务规格或查询。请重新生成链路并核对字段对应关系。')
             resources=[{**resource,'review_status':'human_confirmed'} for resource in flow.get('resources',[])
                        if resource.get('id') in accepted_ids]
             state='completed'
@@ -1329,8 +1993,11 @@ class IntakeFlow:
                     else:
                         state='attention'
                         if data_step:data_step.update(status='blocked',detail='至少一个字段分类不允许直接输出，或数据源当前不可用；请调整分类或输出方式。')
+            field_bindings=[{**item,'review_status':'human_confirmed'
+                if item.get('suggested_field_id') and item.get('suggested_field_id') in accepted_ids else 'not_accepted'}
+                for item in flow.get('field_bindings',[])]
             return self.store.save('intake_flow',flow_id,{**flow,'steps':steps,'resources':resources,'state':state,
-                'field_lookup':field_lookup,
+                'field_lookup':field_lookup,'field_bindings':field_bindings,
                 'confirmation':{'actor':actor,'note':note,'confirmed':True,
                     'reviewed_resource_ids':sorted(candidate_ids),
                     'accepted_resource_ids':sorted(accepted_ids)},
@@ -1532,12 +2199,10 @@ class IntakeFlow:
         if (table.get('kind')!='table' or field.get('kind')!='field'
                 or field.get('parent_id')!=table['id'] or name_field.get('kind')!='field'):
             raise DomainError('已确认查询绑定的表或字段与当前目录不一致',409)
-        if any(item.get('kind')!='field' or item.get('parent_id')!=table['id'] for item in output_fields):
-            raise DomainError('多字段查询的输出字段必须属于同一张已确认目录表',409)
         required=[table,*output_fields,name_field];join_table=None;join_field_ids=[]
         if name_field.get('parent_id')!=table['id']:
             join_table=self.store.require('object',name_field.get('parent_id',''))
-            if join_table.get('kind')!='table':
+            if join_table.get('kind')!='table' or join_table.get('status')!='active':
                 raise DomainError('姓名字段所属目录对象不是已登记数据表，不能自动补齐关联',409)
             def patient_keys(parent_id):
                 return [item for item in self.store.list('object') if item.get('kind')=='field'
@@ -1551,6 +2216,10 @@ class IntakeFlow:
                 raise DomainError('跨来源患者表关联尚未在目录中确认，不能生成固定方案',409)
             join_field_ids=[left[0]['id'],right[0]['id']]
             required.extend([join_table,*left,*right])
+        allowed_output_tables={table['id']}|({join_table['id']} if join_table else set())
+        if any(item.get('kind')!='field' or item.get('status')!='active'
+               or item.get('parent_id') not in allowed_output_tables for item in output_fields):
+            raise DomainError('多字段查询的输出字段必须属于已确认主表或其姓名关联表',409)
         from execution.query.intake_plan import field_query_shape
         prior={item.get('id'):item for item in flow.get('resources',[])}
         if any(prior.get(item['id'],{}).get('review_status')=='human_rejected' for item in required):
@@ -1623,8 +2292,10 @@ class IntakeFlow:
                     f"已建立 {shape['table'].get('name')} 固定方案草案；按姓名精确筛选并输出 {'、'.join(output_names)}。"
                     '未读取源数据行。个人标识需平台逐方案授权；其他敏感字段仍按各自分类审核。'))
             steps.append(item)
+        classification_labels={'identifier':'个人标识','health':'健康信息','public':'公开','internal':'内部'}
         description='输出 '+ '、'.join(
-            f"{item.get('name')}（分类：{item.get('classification')}）" for item in output_fields)
+            f"{item.get('name')}（分类：{classification_labels.get(classification,classification)}）"
+            for item,classification in zip(output_fields,output_classifications))
         return self.store.save('intake_flow',flow['id'],{**flow,'steps':steps,
             'state':'awaiting_plan_confirmation','spec_id':specification['id'],
             'spec_version':specification['version'],'execution_plan_id':plan['id'],

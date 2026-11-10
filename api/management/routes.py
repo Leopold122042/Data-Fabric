@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
 from datetime import datetime, timedelta, timezone
+from copy import deepcopy
+import re
 from management.store import DomainError,new_id
 from platform_core.access import require_resource,require_action,can_read_management,can_read_execution,management_record
 
@@ -435,9 +437,129 @@ def create_router(runtime,identity):
         demand_id=body.get('demand_id');own('demand',demand_id,user)
         from management.intake.ollama import OllamaIntake
         external_catalog=intake_flow.external_catalog(request)
-        flow=intake_flow.propose(demand_id,body.get('text',''),user['id'],OllamaIntake(),external_catalog)
+        request_text=body.get('text','')
+        preparsed_draft=None
+        if body.get('reuse_saved_draft') is True:
+            prior=max((item for item in m.store.list('intake_flow')
+                if item.get('demand_id')==demand_id and item.get('request_text')==request_text
+                and isinstance(item.get('draft'),dict)),key=lambda item:item.get('updated_at',''),default=None)
+            preparsed_draft=prior.get('draft') if prior else None
+        flow=intake_flow.propose(demand_id,request_text,user['id'],OllamaIntake(),external_catalog,
+            preparsed_draft=preparsed_draft)
         return {'flow':flow,'stage':'awaiting_chain_confirmation',
                 'note':'仅生成待确认链路；未生成任务规格、未执行查询、未触发服务、未授予权限。'}
+
+    @router.post('/intake/flows/{flow_id}/clarify')
+    async def clarify_intake_flow(flow_id:str,request:Request):
+        user=who(request,action='demand.understand')
+        flow=m.store.require('intake_flow',flow_id);own('demand',flow['demand_id'],user)
+        body=await request.json()
+        if body.get('expected_version')!=flow.get('version'):
+            raise DomainError('需求链路已更新，请刷新后再回答',409)
+        if flow.get('state')!='awaiting_chain_confirmation':
+            raise DomainError('当前链路不在字段澄清阶段，请重新检索目录后再补充',409)
+        answers=body.get('answers')
+        if not isinstance(answers,list) or not answers or len(answers)>20:
+            raise DomainError('请逐项确认字段候选或填写澄清说明')
+        all_bindings={item.get('intent_id'):item for item in flow.get('field_bindings',[])
+                      if item.get('intent_id')}
+        pending={intent_id:item for intent_id,item in all_bindings.items()
+                 if item.get('status')!='suggested'}
+        answerable={intent_id:item for intent_id,item in all_bindings.items()
+                    if item.get('status')!='suggested'
+                    or (len(item.get('candidates',[]))>1 and not item.get('selection_locked'))}
+        answered=set();field_selections={};details=[];has_free_text_answer=False
+        candidate_by_id={candidate.get('field_id'):candidate
+            for item in answerable.values() for candidate in item.get('candidates',[])}
+        for answer in answers:
+            if not isinstance(answer,dict) or not isinstance(answer.get('intent_id'),str):
+                raise DomainError('每条回答需包含有效的字段编号')
+            intent_id=answer['intent_id']
+            if intent_id not in answerable:
+                raise DomainError('回答的问题已变化，请刷新后重新填写',409)
+            if intent_id in answered:
+                raise DomainError('同一字段不能重复提交，请刷新后重试')
+            answered.add(intent_id)
+            binding=answerable[intent_id]
+            candidate_ids={item.get('field_id') for item in binding.get('candidates',[])
+                           if item.get('field_id')}
+            selected=answer.get('selected_field_ids',[])
+            if not isinstance(selected,list) or len(selected)>5 or any(not isinstance(value,str) for value in selected):
+                raise DomainError('字段候选选择格式无效，请刷新后重新选择')
+            if len(set(selected))!=len(selected):
+                raise DomainError('字段候选不能重复选择')
+            if binding.get('selection_locked'):
+                locked_id=binding.get('suggested_field_id')
+                if selected and selected!=[locked_id]:
+                    raise DomainError('该患者唯一标识由目录规则固定加入，不能改选其他字段')
+                selected=[locked_id] if locked_id else []
+            if candidate_ids:
+                if not selected:
+                    raise DomainError(f'请至少勾选一个“{binding.get("phrase") or "字段"}”候选')
+                if not set(selected)<=candidate_ids:
+                    raise DomainError('所选字段不属于当前候选，请刷新后重新选择',409)
+                phrase=binding.get('phrase') or '字段'
+                field_selections.setdefault(phrase,[])
+                field_selections[phrase]=list(dict.fromkeys(field_selections[phrase]+selected))
+                labels=[candidate_by_id[field_id] for field_id in selected]
+                details.append(f'需求字段“{phrase}”用户选定：'+'、'.join(
+                    f'{item.get("table_name") or item.get("table")}.{item.get("field_name")}'
+                    for item in labels)+'；只按所选字段匹配本次需求。')
+            answer_text=answer.get('answer','')
+            if not isinstance(answer_text,str) or len(answer_text)>1000:
+                raise DomainError('补充说明须为不超过1000字的文本')
+            answer_text=answer_text.strip()
+            requires_text=(not candidate_ids or binding.get('status') in
+                           ('sql_missing','model_missing','missing'))
+            if requires_text and not answer_text:
+                phrase=binding.get('phrase') or '字段'
+                if binding.get('status')=='sql_missing':
+                    raise DomainError(f'字段“{phrase}”已匹配；请补充本次查询的筛选条件、统计口径和输出方式')
+                if binding.get('status')=='model_missing':
+                    raise DomainError('请说明本次查询需要返回、筛选、分组或统计什么')
+                raise DomainError(f'请补充“{phrase}”的业务含义、数据来源或实际字段名称')
+            if answer_text:
+                has_free_text_answer=True
+                details.append(f'{binding.get("phrase") or "字段"}：{answer_text}')
+        missing=set(pending)-answered
+        if missing:raise DomainError('请回答所有待澄清字段后再继续')
+        clarified_text=flow.get('request_text','')
+        if details:
+            clarified_text+='\n用户针对字段映射的补充说明：'+'；'.join(details)
+        preparsed_draft=None
+        person_request=bool(re.search(r'[\u4e00-\u9fff]{2,4}\s*的\s*.+',flow.get('request_text','')))
+        reusable_statuses={'ambiguous','sql_missing','model_missing'}
+        if field_selections and person_request and all(
+                item.get('status') in reusable_statuses for item in pending.values()):
+            answers_by_id={item.get('intent_id'):item for item in answers if isinstance(item,dict)}
+            reusable=True
+            draft_copy=deepcopy(flow.get('draft') or {})
+            acknowledged_gaps=[]
+            for intent_id,binding in pending.items():
+                answer_text=str((answers_by_id.get(intent_id) or {}).get('answer','')).strip()
+                if binding.get('status')=='sql_missing' and not re.search(r'输出|返回',answer_text):
+                    reusable=False
+                    break
+                if binding.get('status')=='model_missing':
+                    if not re.search(r'(?:没有|无).{0,12}(?:额外|其他)',answer_text):
+                        reusable=False
+                        break
+                    acknowledged_gaps.append(binding.get('meaning') or binding.get('question') or '')
+            if reusable:
+                def compact(value):
+                    return ''.join(str(value or '').casefold().split())
+                draft_copy['uncertain_fields']=[gap for gap in draft_copy.get('uncertain_fields',[])
+                    if not any(compact(note) and compact(note) in compact(gap)
+                               for note in acknowledged_gaps)]
+                preparsed_draft=draft_copy
+        from management.intake.ollama import OllamaIntake
+        external_catalog=intake_flow.external_catalog(request)
+        next_flow=intake_flow.propose(flow['demand_id'],clarified_text,user['id'],OllamaIntake(),
+            external_catalog,field_selections=field_selections,
+            preparsed_draft=(preparsed_draft or
+                (flow.get('draft') if field_selections and not has_free_text_answer else None)))
+        return {'flow':next_flow,'stage':'awaiting_chain_confirmation',
+                'note':'已按勾选结果固定字段映射并重新检查目录和关联条件；若字段组合不能安全关联，会明确说明且不会生成部分查询。'}
 
     @router.post('/intake/flows/{flow_id}/confirm')
     async def confirm_flow(flow_id:str,request:Request):
@@ -509,7 +631,14 @@ def create_router(runtime,identity):
             updated_field=m.catalog.annotate(field['id'],{'expected_version':field['version'],
                 'classification':classification,
                 'classification_basis':'人工确认：用户确认字段分类为'+classification+'；字段名和含义不足以自动判断。'},user['id'])
-            allowed_output=classification in ('公开','内部','健康信息','个人标识')
+            from execution.security.output_policy import field_classification
+            output_fields=[]
+            for item in lookup.get('output_fields',[]):
+                current=m.store.require('object',item['field_id'])
+                output_fields.append({**item,'classification':field_classification(current)})
+            unresolved=[item for item in output_fields if item.get('classification')=='unknown']
+            allowed_output=all(item.get('classification') in ('public','internal','health','identifier')
+                               for item in output_fields) and bool(output_fields)
             validation=flow.get('query_validation') or {}
             expected_outputs=set(lookup.get('field_ids') or [field['id']])
             confirmed_specs=[spec for spec in m.store.list('spec')
@@ -519,29 +648,43 @@ def create_router(runtime,identity):
                 and (spec.get('specification') or {}).get('query_draft')==validation.get('normalized_sql')]
             confirmed_spec=max(confirmed_specs,key=lambda row:(row.get('version',0),row.get('updated_at','')),
                 default=None)
-            plan_ready=bool(allowed_output and confirmed_spec)
+            plan_ready=bool(allowed_output and not unresolved and confirmed_spec)
+            next_lookup={**lookup,'output_fields':output_fields}
+            if unresolved:
+                target=unresolved[0]
+                target_field=m.store.require('object',target['field_id'])
+                table_obj=m.store.require('object',target_field['parent_id'])
+                next_lookup.update(field_id=target_field['id'],field_name=target_field.get('name'),
+                    table_id=table_obj['id'],table_name=table_obj.get('name'),
+                    classification='待确认',classification_basis=None)
+            else:
+                next_lookup.update(classification=classification,
+                    classification_basis=updated_field.get('classification_basis'))
             steps=[]
             for step in flow.get('steps',[]):
                 item=dict(step)
                 if item.get('capability')=='data_query':
                     item.update(status='awaiting_execution_adapter' if plan_ready else
+                        'waiting_field_classification' if unresolved else
                         'waiting_manual_spec_confirmation' if allowed_output else 'blocked',
                         detail=('字段分类已人工确认；继续按已确认SQL和目录关联准备固定方案。'
-                            if plan_ready else '字段分类已由平台方登记；请核对当前窗口预填的查询范围与输出字段。'
-                            if allowed_output else '平台登记为“'+classification+'”；当前规则不允许直接输出此字段，请调整输出方式。'))
+                            if plan_ready else '已确认一个字段分类；还需逐项确认：'+ '、'.join(item.get('field_name','') for item in unresolved)
+                            if unresolved else '所有输出字段分类已登记；请核对预填的查询范围和字段。'
+                            if allowed_output else '至少一个输出字段被登记为敏感分类，当前不能直接交付原值。请调整输出字段或定义受控脱敏方案。'))
                 steps.append(item)
             next_flow=m.store.save('intake_flow',flow_id,{**flow,'steps':steps,
                 'state':'awaiting_execution_plan' if plan_ready else
+                    'waiting_field_classification' if unresolved else
                     'waiting_manual_spec_confirmation' if allowed_output else 'attention',
                 'spec_id':confirmed_spec['id'] if plan_ready else flow.get('spec_id'),
                 'spec_version':confirmed_spec['version'] if plan_ready else flow.get('spec_version'),
                 'resources':[{**resource,'review_status':'human_confirmed'} for resource in flow.get('resources',[])]
                     if plan_ready else flow.get('resources',[]),
-                'field_lookup':{**lookup,'classification':classification,
-                    'classification_basis':updated_field.get('classification_basis')},
+                'field_lookup':next_lookup,
                 'classification_review':{'field_id':field['id'],'field_name':field.get('name'),
                     'classification':classification,'classification_basis':updated_field.get('classification_basis'),
-                    'decision':'confirmed','actor':user['id'],
+                    'decision':'confirmed','remaining_field_ids':[item['field_id'] for item in unresolved],
+                    'actor':user['id'],
                     'at':datetime.now(timezone.utc).isoformat()}},flow['version'],user['id'],
                 '平台方确认普通查询输出字段分类为'+classification)
         if plan_ready:
@@ -564,148 +707,6 @@ def create_router(runtime,identity):
         view=runtime.execution.store.require('view',result['execution_view_id'])
         return {'flow':result,'plan':plan,'view':view,
                 'note':'新规格和待确认方案已留痕；仅创建目录逻辑视图与固定方案，未读取源数据行、未执行查询、未授予权限。'}
-
-    @router.post('/intake/flows/{flow_id}/add-patient-identifier')
-    async def add_patient_identifier(flow_id:str,request:Request):
-        user=who(request,roles=('platform',),action='plan.create')
-        flow=m.store.require('intake_flow',flow_id);own('demand',flow['demand_id'],user)
-        body=await request.json()
-        if body.get('expected_version')!=flow['version']:
-            raise DomainError('流程版本已变化，请刷新后重试',409)
-        if body.get('confirmed') is not True or body.get('identifier_output')!='raw':
-            raise DomainError('需明确确认本次新增原始patient_id输出')
-        if flow.get('state')!='query_completed' or flow.get('output_preference')!='catalog_field':
-            raise DomainError('当前流程没有可扩展的已完成目录字段查询',409)
-        old_plan=runtime.execution.get(flow.get('execution_plan_id',''),flow.get('execution_plan_version'))
-        runtime.execution.current(old_plan)
-        prior_grant=runtime.execution.store.get('grant',flow.get('grant_id','')) if flow.get('grant_id') else None
-        specification=m.store.require('spec',flow.get('spec_id',''),flow.get('spec_version'))
-        if not specification.get('confirmed') or not specification.get('query_draft_confirmed'):
-            raise DomainError('原查询规格未确认，不能追加输出字段',409)
-        old_view=runtime.execution.store.require('view',flow.get('execution_view_id',''))
-        if len(old_view.get('output_fields',[]))!=1:
-            raise DomainError('当前固定方案不是单一目录字段查询',409)
-        diagnosis_field=m.store.require('object',old_view['output_fields'][0])
-        from execution.security.output_policy import field_classification, infer_catalog_classification
-        if field_classification(diagnosis_field)!='health':
-            raise DomainError('当前唯一输出字段不是已识别的健康信息字段',409)
-        filter_fields=(specification.get('specification',{}).get('execution_constraints') or {}).get('scope',{}).get('filters',[])
-        if len(filter_fields)!=1:
-            raise DomainError('仅支持在原有单一精确查找范围内追加患者标识',409)
-        name_field=m.store.require('object',filter_fields[0]['field'])
-        patient_table=m.store.require('object',name_field.get('parent_id',''))
-        patient_ids=[m.store.require('object',field_id) for field_id in old_view.get('fields',[])
-            if (m.store.require('object',field_id).get('source_id'),m.store.require('object',field_id).get('table'),
-                m.store.require('object',field_id).get('name'))==
-               (patient_table.get('source_id'),patient_table.get('table'),'patient_id')]
-        if len(patient_ids)!=1:
-            raise DomainError('目录中无法唯一定位姓名表的patient_id字段',409)
-        patient_id=patient_ids[0]
-        if not any(patient_id['id'] in pair for pair in old_view.get('joins',[])):
-            raise DomainError('患者标识字段未通过目录登记的patient_id关联连接到诊断表',403)
-        classification,basis=infer_catalog_classification(patient_id)
-        if classification!='identifier':
-            raise DomainError('目录规则无法确认该字段为患者标识',403)
-        if patient_id.get('classification') in (None,'','待确认'):
-            patient_id=m.catalog.annotate(patient_id['id'],{'expected_version':patient_id['version'],
-                'classification':'个人标识','classification_basis':basis},user['id'])
-        elif field_classification(patient_id)!='identifier':
-            raise DomainError('患者标识目录分类与字段名规则不一致，请先复核目录',409)
-
-        from execution.query.intake_plan import create_field_plan
-        from management.intake.flow import validate_query_draft
-        import sqlglot
-        from sqlglot import exp
-        spec_body=dict(specification['specification']);constraints=dict(spec_body.get('execution_constraints') or {})
-        constraints.pop('field_output',None)
-        output_ids=[diagnosis_field['id'],patient_id['id']]
-        constraints['field_outputs']=output_ids
-        spec_body['execution_constraints']=constraints
-        tree=sqlglot.parse_one(spec_body.get('query_draft',''),read='duckdb')
-        sql_tables=list(tree.find_all(exp.Table))
-        aliases={}
-        for table_object_id in {diagnosis_field.get('parent_id'),patient_table['id']}:
-            table_object=m.store.require('object',table_object_id)
-            found=[table for table in sql_tables if table.name.casefold()==str(table_object.get('table') or table_object.get('name')).casefold()]
-            if len(found)!=1:raise DomainError('已确认查询中的关联表与当前目录版本不匹配',409)
-            aliases[table_object_id]=found[0].alias_or_name
-        projection=[]
-        for field in (diagnosis_field,patient_id):
-            table_object=m.store.require('object',field['parent_id'])
-            projection.append(exp.column(field['name'],table=aliases[table_object['id']]))
-        tree.set('expressions',projection)
-        sql=tree.sql(dialect='duckdb')
-        validation=validate_query_draft(sql,intake_flow._catalog_metadata())
-        if validation.get('status')!='valid_pending_human_confirmation':
-            raise DomainError('新增患者标识后的SQL未通过目录规则校验：'+str(validation.get('errors') or []),409)
-        spec_body['query_draft']=validation['normalized_sql']
-        demand=m.store.require('demand',flow['demand_id'])
-        revised_spec=m.store.save('spec',specification['id'],{**specification,
-            'demand_version':demand['version']+1,'specification':spec_body,
-            'confirmed_by':user['id'],
-            'confirmation_note':(specification.get('confirmation_note','')+
-                '；平台方确认按原精确匹配范围新增原始patient_id标识输出。'),
-            'confirmed':True,'execution_authorized':False},specification['version'],user['id'],
-            '平台方确认新增目录patient_id输出字段并修订规格')
-        demand=m.store.save('demand',demand['id'],{**demand,'state':'confirmed',
-            'spec_id':revised_spec['id'],'spec_version':revised_spec['version']},demand['version'],user['id'],
-            '平台方确认在原需求范围内新增患者标识输出')
-        if prior_grant and prior_grant.get('status')=='active':
-            runtime.execution.security.revoke(prior_grant['id'],user['id'])
-
-        resources=list(flow.get('resources',[]))
-        table_objects={patient_table['id']:patient_table,
-                       diagnosis_field['parent_id']:m.store.require('object',diagnosis_field['parent_id'])}
-        for table_object in table_objects.values():
-            if not any(item.get('id')==table_object['id'] for item in resources):
-                resources.append({'id':table_object['id'],'name':table_object.get('name'),
-                    'source_id':table_object.get('source_id'),'table':table_object.get('table') or table_object.get('name'),
-                    'kind':'table','review_status':'human_confirmed','reason':'沿用原已确认目录关联'})
-        revised_flow={**flow,'resources':resources,'spec_id':revised_spec['id'],
-            'spec_version':revised_spec['version'],'demand_version':demand['version'],
-            'query_draft':spec_body['query_draft'],'query_validation':validation,
-            'draft':{**flow.get('draft',{}),'query_draft':spec_body['query_draft'],
-                'execution_constraints':constraints,
-                'object_scope':(flow.get('draft',{}).get('object_scope','')+
-                    '；增加目录患者标识patient_id用于区分命中记录。')},
-            'output_preference':'catalog_field_with_patient_id',
-            'field_lookup':{**(flow.get('field_lookup') or {}),'identifier_field_id':patient_id['id'],
-                'identifier_field_name':patient_id['name'],'identifier_classification':'个人标识',
-                'identifier_classification_basis':patient_id.get('classification_basis') or basis},
-            'execution_authorized':False,'grant_id':None,'authorization_request':None,
-            'authorization_decision':None,'plan_confirmed_by':None,'plan_confirmed_version':None}
-        view,plan,shape=create_field_plan(runtime,revised_flow,revised_spec,user['id'])
-        steps=[]
-        for step in flow.get('steps',[]):
-            item=dict(step)
-            if item.get('capability')=='data_query':
-                item.update(status='awaiting_plan_confirmation',detail=(
-                    f"已在原姓名精确筛选和目录patient_id关联范围内增加原始patient_id及{diagnosis_field['name']}字段。"
-                    '原始患者标识需绑定本方案由平台逐字段批准；未读取源数据行。'))
-            steps.append(item)
-        prior_runs=list(flow.get('prior_executions',[]))
-        prior_runs.append({'plan_id':old_plan['id'],'plan_version':old_plan['version'],
-            'job_id':flow.get('job_id'),'delivery_id':flow.get('delivery_id'),
-            'grant_id':flow.get('grant_id'),'completed_at':flow.get('execution_submitted_at')})
-        preview={'name':plan['name'],'plan_id':plan['id'],'version':plan['version'],
-            'source_id':shape['table'].get('source_id'),
-            'table':'patient + '+str(m.store.require('object',diagnosis_field['parent_id']).get('table')
-                or m.store.require('object',diagnosis_field['parent_id']).get('name')),
-            'filters':shape['filters'],'filter_names':shape['filter_names'],
-            'output_columns':[diagnosis_field['name'],patient_id['name']],
-            'output_description':f"按原姓名精确匹配返回{diagnosis_field['name']}与原始patient_id；仅本固定方案、用途及授权范围内受控查看。",
-            'output_mode':'object','reads_source_rows':False,
-            'health_output_authorization_required':True,'identifier_output_authorization_required':True}
-        saved=m.store.save('intake_flow',flow_id,{**revised_flow,'steps':steps,
-            'state':'awaiting_plan_confirmation','execution_plan_id':plan['id'],
-            'execution_plan_version':plan['version'],'execution_view_id':view['id'],
-            'execution_plan_preview':preview,'execution_authorized':False,'grant_id':None,
-            'authorization_request':None,'authorization_decision':None,'prior_executions':prior_runs,
-            'job_id':None,'job_state':None,'delivery_id':None,'query_error':None,
-            'delivery_result':None,'delivery_result_read_at':None},flow['version'],user['id'],
-            '平台方按明确请求新增原始patient_id输出，生成新规格和待确认固定方案')
-        return {'flow':saved,'plan':plan,'view':view,
-            'note':'已按原筛选范围新增目录patient_id字段并生成新方案。患者标识已记录为个人标识；新方案尚未授权或执行。'}
 
     @router.post('/intake/flows/{flow_id}/confirm-execution-plan')
     async def confirm_intake_execution_plan(flow_id:str,request:Request):
