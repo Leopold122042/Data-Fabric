@@ -24,8 +24,8 @@ export const navigationGroups=[
    ['偏差校准','/static/management/reconciliation.html','case'],
    ['评价复测','/static/management/feedback.html','feedback'],
    ['风险监测','/static/platform/security.html','risk'],
-   ['合作约定','/static/execution/index.html?tab=contract','contract'],
-   ['设施管理','/static/execution/index.html?tab=facility','facility']
+   ['合作约定','/static/execution/contracts.html','contract'],
+   ['设施管理','/static/execution/facilities.html','facility']
  ]],
  ['运行与设置',[
    ['元数据事件','/static/platform/events.html','event'],
@@ -33,7 +33,7 @@ export const navigationGroups=[
    ['平台说明','/static/platform/about.html','about']
  ]]
 ];
-const pageResources={'field-library':'object','work-orders':'work_order','intake':'demand','services':'service','catalog':'object','semantic':'concept','reconciliation':'case','feedback':'feedback','connections':'connection','resources':'object','graph':'concept','query':'view','patients':'patient','events':'event','rules':'rule','security':'risk','about':'about','workspace':'overview'};
+const pageResources={'field-library':'object','work-orders':'work_order','intake':'demand','services':'service','catalog':'object','semantic':'concept','reconciliation':'case','feedback':'feedback','connections':'connection','resources':'object','graph':'concept','query':'view','patients':'patient','events':'event','rules':'rule','security':'risk','about':'about','workspace':'overview','contracts':'contract','facilities':'facility'};
 export function level(snapshot,resource){const value=snapshot?.resources?.[resource];return ['read','write'].includes(value)?value:'none';}
 export function canRead(snapshot,resource){return level(snapshot,resource)!=='none';}
 export function pageResource(url){const u=new URL(url,'http://local');if(u.pathname==='/static/execution/index.html')return u.searchParams.get('tab')||'plan';const name=u.pathname.split('/').pop().replace(/\.html$/,'');return pageResources[name]||null;}
@@ -95,4 +95,5 @@ export const executionActions={
  '读取结果（重新核验授权）':['delivery.read',true], '读取授权 API 引用':['delivery.reference',true], '校验凭证':['delivery.verify',true], '下载已授权结果':['delivery.download',true], '清除平台结果副本':['delivery.destroy',true],
  '登记触发器':['trigger.create'], '停用触发器':['trigger.disable',true], '登记合作约定':['contract.create'], '以当前身份确认':['contract.accept',true], '登记本地设施':['facility.create'], '发送心跳':['facility.heartbeat',true]
 };
-export function visibleExecutionTabs(snapshot){return Object.entries(executionLabels).filter(([key])=>canRead(snapshot,key));}
+const registryOnlyTabs=new Set(['contract','facility']);
+export function visibleExecutionTabs(snapshot){return Object.entries(executionLabels).filter(([key])=>!registryOnlyTabs.has(key)&&canRead(snapshot,key));}

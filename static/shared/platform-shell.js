@@ -15,7 +15,7 @@
  const sidebar=document.querySelector('.mf-sidebar');if(!sidebar)return;
  const intakeDock=document.querySelector('#intake-flow-dock');
  const access=await import('/static/shared/access.js');
- const {visibleNavigation}=await import('/static/shared/access-model.js?v=ui-demo-1');
+ const {visibleNavigation}=await import('/static/shared/access-model.js?v=ui-demo-3');
  const {icon}=await import('/static/shared/icons.js');
  access.bindRole();
  sidebar.replaceChildren();sidebar.classList.add('platform-sidebar');sidebar.setAttribute('aria-label','平台导航');
@@ -35,7 +35,8 @@
 
  const navHost=intakeDock?document.createElement('div'):sidebar;
  if(intakeDock){navHost.className='platform-nav-groups';sidebar.append(navHost);}
- const hrefFor=target=>target.startsWith('/')?target:'/static/execution/index.html?tab='+target;
+ const registryPages={contract:'/static/execution/contracts.html',facility:'/static/execution/facilities.html'};
+ const hrefFor=target=>registryPages[target]||(target.startsWith('/')?target:'/static/execution/index.html?tab='+target);
  function navLink(label,target,resource){
   const a=document.createElement('a');a.href=hrefFor(target);a.dataset.resource=resource;a.textContent=label;return a;
  }
