@@ -13,8 +13,8 @@ if errorlevel 1 (
 )
 "%MEDFABRIC_PYTHON%" initialize_data.py
 if errorlevel 1 goto :failed
-start "" http://127.0.0.1:8322/
-"%MEDFABRIC_PYTHON%" -m uvicorn app:app --host 127.0.0.1 --port 8322
+start "" http://127.0.0.1:8321/
+"%MEDFABRIC_PYTHON%" -m uvicorn app:app --host 127.0.0.1 --port 8321
 if errorlevel 1 goto :failed
 pause
 exit /b 0
