@@ -10,7 +10,27 @@ export function ready(){
 }
 export function allowed(key,record=null){return actionAllowed(snapshot,key,record);}
 export function readable(resource){return canRead(snapshot,resource);}
-export function bindRole(){const select=document.querySelector('#role');if(!select)return;select.value=role();for(const option of select.options)if(roleNames[option.value])option.textContent=roleNames[option.value];const label=select.closest('label');if(label)for(const child of label.childNodes)if(child.nodeType===Node.TEXT_NODE&&child.textContent.includes('身份'))child.textContent='当前身份 ';const identity=document.querySelector('#identity');if(identity)identity.textContent='本机身份 · 本地权限已启用';select.onchange=()=>{localStorage.setItem('mf-demo-role',select.value);location.reload();};}
+export function bindRole(){
+ const select=document.querySelector('#role');if(!select)return;
+ select.value=role();
+ for(const option of select.options)if(roleNames[option.value])option.textContent=roleNames[option.value];
+ const label=select.closest('label');if(label)for(const child of label.childNodes)if(child.nodeType===Node.TEXT_NODE&&child.textContent.includes('身份'))child.textContent='当前身份 ';
+ const identity=document.querySelector('#identity');if(identity)identity.textContent='本机身份 · 本地权限已启用';
+ const configuredPortal=globalThis.MEDFABRIC_USER_PORTAL_URL;
+ const userPortal=configuredPortal||`${location.protocol}//${location.hostname}:8321/static/portal/index.html?page=home`;
+ select.onchange=()=>{
+  const nextRole=select.value;
+  localStorage.setItem('mf-demo-role',nextRole);
+  if(nextRole==='requester'){
+   const target=new URL(userPortal,location.href);
+   target.searchParams.set('page','home');
+   target.searchParams.set('role','requester');
+   location.assign(target.href);
+   return;
+  }
+  location.reload();
+ };
+}
 export function showAccess(resource){
  const content=document.querySelector('.mf-content');if(!content)return;
  content.dataset.access=level(snapshot,resource);

@@ -14,7 +14,7 @@
  if((path==='/'||path==='/static/index.html')&&!location.hash){location.replace('/static/workspace.html');return;}
  const sidebar=document.querySelector('.mf-sidebar');if(!sidebar)return;
  const intakeDock=document.querySelector('#intake-flow-dock');
- const access=await import('/static/shared/access.js');
+ const access=await import('/static/shared/access.js?v=user-portal-redirect-2');
  const {visibleNavigation}=await import('/static/shared/access-model.js?v=ui-demo-3');
  const {icon}=await import('/static/shared/icons.js');
  access.bindRole();
