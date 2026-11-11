@@ -1,4 +1,4 @@
-import {headers,bindRole,ready,readable,pageResource} from '/static/shared/access.js';
+import {headers,bindRole,ready,readable,pageResource} from '/static/shared/access.js?v=identity-20261111';
 import {recordPreview} from '/static/shared/record-model.js';
 export const $=s=>document.querySelector(s);
 export function element(tag,text='',className=''){const n=document.createElement(tag);n.textContent=text;if(className)n.className=className;return n;}

@@ -1,4 +1,4 @@
-import {api,message} from './ui.js';
+import {api,message} from './ui.js?v=identity-20261111';
 
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;};
 const ROLE={output:'输出',filter:'筛选',group:'分组',time:'时间',join:'关联',metric:'指标',unknown:'待确认'};

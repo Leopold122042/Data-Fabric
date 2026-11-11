@@ -1,6 +1,6 @@
-import {executionActions as actionRules} from '/static/shared/access-model.js?v=ui-demo-3';
-import {enterPage,headers,allowed} from '/static/shared/access.js?v=registry-pages-1';
-import {form,$,esc} from '/static/management/ui.js?v=registry-pages-1';
+import {executionActions as actionRules} from '/static/shared/access-model.js?v=identity-20261111';
+import {enterPage,headers,allowed} from '/static/shared/access.js?v=identity-20261111';
+import {form,$,esc} from '/static/management/ui.js?v=identity-20261111';
 
 const mode=location.pathname.endsWith('/contracts.html')?'contract':'facility';
 const config={
@@ -108,7 +108,7 @@ async function load(){
 }
 async function main(){
  if(!await enterPage(mode))return;
- $('#page-title').textContent=config.title;$('#page-help').textContent=config.help;document.title=config.title+' · MedFabric';
+ $('#page-title').textContent=config.title;$('#page-help').textContent=config.help;document.title=config.title+' · 数据编织平台';
  $('#search').oninput=renderList;$('#refresh').onclick=()=>load().catch(error=>message(error.message));
  buildActions();await load();
 }

@@ -1,4 +1,4 @@
-import {api,action,list,need,show,form,edit,history,init,$} from './ui.js';
+import {api,action,list,need,show,form,edit,history,init,$} from './ui.js?v=identity-20261111';
 async function main(){
 if(!await init('数据目录与血缘','扫描本地源及已纳入的外部表结构，登记结构、业务说明、责任人和限制；改名需人工确认，保留对象编号。'))return;
 const load=()=>list('object');$('#refresh').onclick=()=>load().catch(e=>show(e.message));

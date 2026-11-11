@@ -1,7 +1,7 @@
 /* Pure presentation rules. The server remains authoritative for every request. */
 export const roleNames={platform:'平台方 / 数据服务中心',provider:'供给方 / 医院数据中心',requester:'需求方 / 临床研究中心',auditor:'审计方 / 数据合规岗'};
 export const navigationGroups=[
- ['工作台',[['总览','/static/workspace.html','overview']]],
+ ['工作台',[['驾驶舱总览','/static/portal/cockpit.html','overview']]],
  ['数据资产',[
    ['外部数据接入','/static/platform/connections.html','connection'],
    ['资源目录','/static/platform/resources.html','object'],

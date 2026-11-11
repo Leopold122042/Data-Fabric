@@ -1,5 +1,5 @@
-import {enterPage,currentAccess,denyPage} from '/static/shared/access.js';
-import {api,element,table,link,status} from './common.js';
+import {enterPage,currentAccess,denyPage} from '/static/shared/access.js?v=identity-20261111';
+import {api,element,table,link,status} from './common.js?v=identity-20261111';
 if(await enterPage('overview')){
  if(currentAccess().principal.role!=='platform')denyPage('医疗数据统计目前仅对平台方开放，请通过自己的需求和授权结果查看数据。');
  else{

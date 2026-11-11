@@ -368,7 +368,7 @@ body.mf-app.dashboard-page .dashboard-icon { background:#EAF5F5; }
   body.mf-app .demo-role-pill select,
   body.mf-app.dashboard-page .demo-role-pill select { width:150px; min-width:0; max-width:48vw; }
   body.mf-app.ui-refresh-demo .platform-sidebar { position:relative!important; height:auto; max-height:none; border-bottom:1px solid #213B4E; }
-  body.mf-app.ui-refresh-demo .platform-sidebar-foot { display:none; }
+  body.mf-app.ui-refresh-demo .platform-sidebar-foot { display:block; padding:10px; }
   body.mf-app .mf-topbar,
   body.mf-app.dashboard-page .mf-topbar { padding:0 16px; }
   body.mf-app.ui-refresh-demo .mf-content { padding:20px 14px 28px; }
@@ -376,3 +376,6 @@ body.mf-app.dashboard-page .dashboard-icon { background:#EAF5F5; }
   body.mf-app.ui-refresh-demo .demo-toolbar-filters>input { flex-basis:100%; }
   body.mf-app.ui-refresh-demo .demo-toolbar-actions { flex-wrap:wrap; justify-content:flex-start; }
 }
+
+.platform-user-entry{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid #42606f;border-radius:8px;color:#e0f3ee!important;margin-bottom:12px;transition:background .15s}
+.platform-user-entry:hover,.platform-user-entry:focus-visible{background:#25495a;outline:2px solid #8db9bd;outline-offset:2px}

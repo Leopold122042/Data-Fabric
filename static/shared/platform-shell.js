@@ -3,7 +3,7 @@
  document.body.classList.add('ui-refresh-demo');
  const demoStyle=document.createElement('link');
  demoStyle.rel='stylesheet';
- demoStyle.href='/static/shared/demo-refresh.css?v=ui-demo-1';
+ demoStyle.href='/static/shared/demo-refresh.css?v=identity-20261111';
  document.head.append(demoStyle);
  const motionStyle=document.createElement('link');
  motionStyle.rel='stylesheet';
@@ -14,8 +14,8 @@
  if((path==='/'||path==='/static/index.html')&&!location.hash){location.replace('/static/portal/index.html');return;}
  const sidebar=document.querySelector('.mf-sidebar');if(!sidebar)return;
  const intakeDock=document.querySelector('#intake-flow-dock');
- const access=await import('/static/shared/access.js');
- const {visibleNavigation}=await import('/static/shared/access-model.js?v=ui-demo-3');
+ const access=await import('/static/shared/access.js?v=identity-20261111');
+ const {visibleNavigation}=await import('/static/shared/access-model.js?v=identity-20261111');
  const {icon}=await import('/static/shared/icons.js');
  access.bindRole();
  sidebar.replaceChildren();sidebar.classList.add('platform-sidebar');sidebar.setAttribute('aria-label','平台导航');
@@ -45,7 +45,7 @@
  for(const [name,items] of groups){
   if(name==='工作台'&&items.length===1){
    const [label,target,resource]=items[0];
-   const workbench=navLink('工作台',target,resource);
+   const workbench=navLink('驾驶舱总览','/static/portal/cockpit.html',resource);
    workbench.className='platform-nav-root';
    workbench.prepend(icon(groupIcons[name]));
    navHost.append(workbench);
@@ -67,7 +67,7 @@
  const foot=document.createElement('div');foot.className='platform-sidebar-foot';
  const demoBadge=document.createElement('span');demoBadge.className='platform-demo-badge';demoBadge.textContent='管理工作区';
  const demoCopy=document.createElement('small');demoCopy.textContent='数据资产 · 需求交付 · 安全治理';
- foot.append(demoBadge,demoCopy);sidebar.append(foot);
+ const userLink=navLink('用户工作台','/static/portal/index.html','overview');userLink.className='platform-user-entry';userLink.prepend(icon('users'));foot.append(userLink,demoBadge,demoCopy);sidebar.append(foot);
 
  function highlight(){
   const current=new URL(location.href);

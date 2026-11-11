@@ -1,5 +1,5 @@
-import {enterPage,headers,currentAccess} from './shared/access.js';
-import {dashboardRoles} from './shared/dashboard-guide.js';
+import {enterPage,headers,currentAccess} from './shared/access.js?v=identity-20261111';
+import {dashboardRoles} from './shared/dashboard-guide.js?v=identity-20261111';
 import {icon} from './shared/icons.js';
 import {format,statusName,eventName,distribution,orderURL,executionURL} from './dashboard-model.js';
 import {node,link,iconBox,action,badge,panel,empty,row,metric,bars,stages,authorizationChart} from './dashboard-components.js?v=20261102';

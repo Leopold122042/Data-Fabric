@@ -1,5 +1,5 @@
-import {api,init,$,esc,form,message,show} from './ui.js';
-import {allowed} from '/static/shared/access.js';
+import {api,init,$,esc,form,message,show} from './ui.js?v=identity-20261111';
+import {allowed} from '/static/shared/access.js?v=identity-20261111';
 const labels={draft:'待确认',confirmed:'已确认',review_required:'待复核',retired:'已停用'};
 let rows=[],selected=null;
 async function main(){

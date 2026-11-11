@@ -1,4 +1,4 @@
-import {$,api,element,button,table,status,link} from './common.js';
+import {$,api,element,button,table,status,link} from './common.js?v=identity-20261111';
 const host=element('section','','mf-panel resource-detail');host.id='external-governance';host.append(element('h2','外部数据检测与访问授权'),element('p','选择来源表建立检测基线。定期核对内容和结构；结构变化后需重新签发读取授权。检测仅在当前云盘连接有效时运行。'));
 $('#tab-external').before(host);
 const controls=element('div','','management-toolbar'),select=element('select');select.multiple=true;select.size=6;select.setAttribute('aria-label','治理来源表');select.style.width='100%';host.append(select,controls);const interval=element('input');interval.type='number';interval.min=60;interval.max=86400;interval.value=300;interval.setAttribute('aria-label','检测间隔秒');const summary=element('p'),grantBox=element('div'),changes=element('div');host.append(summary,grantBox,changes);

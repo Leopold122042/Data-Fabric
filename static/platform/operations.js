@@ -1,7 +1,7 @@
-import {enterPage,allowed,readable} from '/static/shared/access.js';
-import {$,api,element,link,button,table,record,status} from './common.js';
-import {permissionRoles,roleGuidance,permissionSections} from '/static/shared/permission-guide.js';
-import {dashboardRoles,dashboardPrinciples,dashboardVisualRules} from '/static/shared/dashboard-guide.js?v=20261102';
+import {enterPage,allowed,readable} from '/static/shared/access.js?v=identity-20261111';
+import {$,api,element,link,button,table,record,status} from './common.js?v=identity-20261111';
+import {permissionRoles,roleGuidance,permissionSections} from '/static/shared/permission-guide.js?v=identity-20261111';
+import {dashboardRoles,dashboardPrinciples,dashboardVisualRules} from '/static/shared/dashboard-guide.js?v=identity-20261111';
 async function main(){
 if(!await enterPage())return;
 const name=location.pathname.split('/').pop().split('.')[0],body=$('#page-body'),actions=$('#page-actions');

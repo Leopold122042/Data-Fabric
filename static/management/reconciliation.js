@@ -1,4 +1,4 @@
-import {api,action,list,need,show,form,init,$,tabs} from './ui.js';
+import {api,action,list,need,show,form,init,$,tabs} from './ui.js?v=identity-20261111';
 async function main(){
 if(!await init('设计运行校准','按对象、实际加载版本和环境配对。缺失运行证据显示未配对；关闭偏差必须提供后续复测证据。'))return;let kind='case';const load=()=>list(kind);$('#refresh').onclick=load;tabs([['case','偏差工单'],['pair','配对结果']],async v=>{kind=v;await load();});
 action('执行对账',async()=>{show(await api('/reconciliation/run',{}));await load();});action('健康指标',async()=>show(await api('/reconciliation/metrics'),'最近30天指标与口径'));

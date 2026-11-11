@@ -1,5 +1,5 @@
-import {api,action,list,need,show,form,edit,init,$,tabs} from './ui.js';
-import {currentAccess} from '/static/shared/access.js';
+import {api,action,list,need,show,form,edit,init,$,tabs} from './ui.js?v=identity-20261111';
+import {currentAccess} from '/static/shared/access.js?v=identity-20261111';
 async function main(){
 if(!await init('评价与改进复测','评价关联运行证据。选择指定服务时，请仅填写该服务的质量情况；跨供给方任务的整体评价不会展开给各服务供给方。同范围复测保留改善和未改善结果。'))return;let kind='feedback';const load=()=>list(kind);$('#refresh').onclick=load;tabs([['feedback','用户评价'],['improvement','改进复测'],['metric_definition','指标口径']],async v=>{kind=v;await load();});
 action('查看运行证据',async()=>show(await api('/runs'),'可引用的运行记录'));

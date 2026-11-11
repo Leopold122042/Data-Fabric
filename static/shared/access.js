@@ -1,4 +1,5 @@
-import {actionAllowed,canRead,level,pageResource,roleNames} from './access-model.js';
+import {roleDestination} from './role-navigation.js?v=identity-20261111';
+import {actionAllowed,canRead,level,pageResource,roleNames} from './access-model.js?v=identity-20261111';
 export {actionAllowed,canRead,level,pageResource,roleNames};
 let snapshot={principal:null,resources:{},actions:{}},pending;
 export const currentAccess=()=>snapshot;
@@ -10,12 +11,12 @@ export function ready(){
 }
 export function allowed(key,record=null){return actionAllowed(snapshot,key,record);}
 export function readable(resource){return canRead(snapshot,resource);}
-export function bindRole(){const select=document.querySelector('#role');if(!select)return;select.value=role();for(const option of select.options)if(roleNames[option.value])option.textContent=roleNames[option.value];const label=select.closest('label');if(label)for(const child of label.childNodes)if(child.nodeType===Node.TEXT_NODE&&child.textContent.includes('身份'))child.textContent='当前身份 ';const identity=document.querySelector('#identity');if(identity)identity.textContent='本机身份 · 本地权限已启用';select.onchange=()=>{localStorage.setItem('mf-demo-role',select.value);location.reload();};}
+export function bindRole(){const select=document.querySelector('#role');if(!select)return;select.value=role();for(const option of select.options)if(roleNames[option.value])option.textContent=roleNames[option.value];const label=select.closest('label');if(label)for(const child of label.childNodes)if(child.nodeType===Node.TEXT_NODE&&child.textContent.includes('身份'))child.textContent='当前身份 ';const identity=document.querySelector('#identity');if(identity&&!location.pathname.startsWith('/static/portal/'))identity.textContent='本机身份 · 本地权限已启用';select.onchange=async()=>{select.disabled=true;try{await switchRole(select.value);}catch(error){select.value=role();alert(error.message);}finally{select.disabled=false;}};}
 export function showAccess(resource){
  const content=document.querySelector('.mf-content');if(!content)return;
  content.dataset.access=level(snapshot,resource);
  document.querySelector('#access-status')?.remove();
- const identity=document.querySelector('#identity');if(identity)identity.textContent='本机身份 · 本地权限已启用';
+ const identity=document.querySelector('#identity');if(identity&&!location.pathname.startsWith('/static/portal/'))identity.textContent='本机身份 · 本地权限已启用';
 }
 export function denyPage(message='当前身份不能查看此目录，请从左侧选择可访问的目录。'){
  const content=document.querySelector('.mf-content');if(!content)return false;
@@ -26,3 +27,18 @@ export async function enterPage(resource=pageResource(location.href)){
  if(resource&&!readable(resource))return denyPage();
  if(resource)showAccess(resource);return true;
 }
+
+// Resolve the new permissions before committing the identity and loading any data.
+export async function switchRole(next){
+ if(!Object.hasOwn(roleNames,next))throw Error('未知身份');
+ const response=await fetch('/api/access',{headers:{'X-Demo-Role':next},cache:'no-store'});
+ const permissions=await response.json();
+ if(!response.ok||permissions.principal?.role!==next||!permissions.resources||!permissions.actions)
+  throw Error('无法确认新身份的权限，请重试');
+ const destination=roleDestination(location.href,permissions);
+ localStorage.setItem('mf-demo-role',next);
+ location.assign(destination);
+}
+if(typeof window!=='undefined')window.addEventListener('storage',event=>{
+ if(event.key==='mf-demo-role')location.reload();
+});

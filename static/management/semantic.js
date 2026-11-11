@@ -1,6 +1,6 @@
-import {allowed} from '/static/shared/access.js';
-import {element,table,button} from '/static/platform/common.js';
-import {api,action,list,need,show,form,edit,history,init,$,tabs} from './ui.js';
+import {allowed} from '/static/shared/access.js?v=identity-20261111';
+import {element,table,button} from '/static/platform/common.js?v=identity-20261111';
+import {api,action,list,need,show,form,edit,history,init,$,tabs} from './ui.js?v=identity-20261111';
 async function main(){
 if(!await init('概念与映射','候选匹配仅提供建议，类型冲突会直接否决。复杂映射保存结构化定义，执行时使用已确认的映射版本。'))return;let kind='concept';
 const load=()=>list(kind);$('#refresh').onclick=()=>load();tabs([['concept','业务概念'],['mapping','映射记录'],['mapping_rule','复用规则']],async v=>{kind=v;await load();});

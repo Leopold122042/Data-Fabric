@@ -1,5 +1,5 @@
-import {enterPage,currentAccess,readable,allowed} from '/static/shared/access.js';
-import {$,api,element,link,button,table,status} from '/static/platform/common.js';
+import {enterPage,currentAccess,readable,allowed} from '/static/shared/access.js?v=identity-20261111';
+import {$,api,element,link,button,table,status} from '/static/platform/common.js?v=identity-20261111';
 import {label,modeNames,attention,filterOrders,recordUrl,orderedTimeline,messagePayload} from './work-order-model.js';
 
 const base='/api/management/work-orders';

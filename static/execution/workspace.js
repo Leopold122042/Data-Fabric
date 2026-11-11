@@ -1,11 +1,11 @@
-import {executionLabels as labels,executionActions as actionRules,visibleExecutionTabs} from '/static/shared/access-model.js?v=execution-tabs-20261111';
-import {enterPage,headers,allowed,readable,currentAccess,showAccess} from '/static/shared/access.js';
-import {action,form,show as showJson,$,esc} from '/static/management/ui.js';
-import {record as renderRecord} from '/static/platform/common.js';
+import {executionLabels as labels,executionActions as actionRules,visibleExecutionTabs} from '/static/shared/access-model.js?v=identity-20261111';
+import {enterPage,headers,allowed,readable,currentAccess,showAccess} from '/static/shared/access.js?v=identity-20261111';
+import {action,form,show as showJson,$,esc} from '/static/management/ui.js?v=identity-20261111';
+import {record as renderRecord} from '/static/platform/common.js?v=identity-20261111';
 async function main(){
 if(!await enterPage())return;
 let kind=new URLSearchParams(location.search).get('tab')||'plan',chosen=null,records=[];
-if(['contract','facility'].includes(kind)){location.replace('/static/execution/'+(kind==='contract'?'contracts':'facilities')+'.html');return;}
+if(['contract','facility'].includes(kind)){const target=new URL(location.href);target.pathname='/static/execution/'+(kind==='contract'?'contracts':'facilities')+'.html';target.searchParams.delete('tab');location.replace(target.pathname+target.search+target.hash);return;}
 
 const statusNames={draft:'待确认',confirmed:'已确认',paused:'已暂停',invalidated:'已失效',queued:'排队中',running:'执行中',success:'成功',failed:'失败',blocked:'已阻断',cancelled:'已取消',active:'有效',revoked:'已撤销',available:'结果就绪',destroyed:'平台副本已清除'};
 function show(value,title='详情'){
