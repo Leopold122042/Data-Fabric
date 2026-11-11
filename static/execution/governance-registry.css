@@ -1,0 +1,18 @@
+/* Standalone registry pages: only the selected governance object is shown. */
+.execution-registry-page .registry-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin:0 0 14px}
+.execution-registry-page .registry-kicker{margin:0 0 7px;color:#0F8F82;font-size:11px;font-weight:700;letter-spacing:.16em}
+.execution-registry-page .registry-heading h1{margin:0 0 8px;color:#172B3A;font-size:32px;letter-spacing:-.8px}
+.execution-registry-page .registry-heading p{margin:0;max-width:760px;color:#52697A;line-height:1.7}
+.execution-registry-page .registry-summary{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.execution-registry-page .registry-summary span{padding:7px 11px;border:1px solid #DDE5EC;border-radius:999px;background:#FFF;color:#52697A;font-size:12px}
+.execution-registry-page .registry-record-id{margin-top:4px;color:#718798;font:11px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace}
+.execution-registry-page .registry-muted{color:#718798;font-size:12px}
+.execution-registry-page .registry-status{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:650;white-space:nowrap}
+.execution-registry-page .registry-status.is-ok{background:#E8F7F1;color:#13795B}
+.execution-registry-page .registry-status.is-pending{background:#FFF6E6;color:#A15C00}
+.execution-registry-page .management-layout{grid-template-columns:minmax(0,1.45fr) minmax(300px,.75fr)}
+.execution-registry-page .mf-table-wrap{overflow-x:auto}
+.execution-registry-page #status{margin-bottom:0}
+.execution-registry-page #actions{margin:14px 0}
+.execution-registry-page .record-grid{gap:9px 18px}
+@media(max-width:950px){.execution-registry-page .management-layout{grid-template-columns:1fr}.execution-registry-page .registry-heading h1{font-size:28px}}

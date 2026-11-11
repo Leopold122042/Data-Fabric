@@ -1,10 +1,11 @@
-import {executionLabels as labels,executionActions as actionRules,visibleExecutionTabs} from '/static/shared/access-model.js';
+import {executionLabels as labels,executionActions as actionRules,visibleExecutionTabs} from '/static/shared/access-model.js?v=execution-tabs-20261111';
 import {enterPage,headers,allowed,readable,currentAccess,showAccess} from '/static/shared/access.js';
 import {action,form,show as showJson,$,esc} from '/static/management/ui.js';
 import {record as renderRecord} from '/static/platform/common.js';
 async function main(){
 if(!await enterPage())return;
 let kind=new URLSearchParams(location.search).get('tab')||'plan',chosen=null,records=[];
+if(['contract','facility'].includes(kind)){location.replace('/static/execution/'+(kind==='contract'?'contracts':'facilities')+'.html');return;}
 
 const statusNames={draft:'待确认',confirmed:'已确认',paused:'已暂停',invalidated:'已失效',queued:'排队中',running:'执行中',success:'成功',failed:'失败',blocked:'已阻断',cancelled:'已取消',active:'有效',revoked:'已撤销',available:'结果就绪',destroyed:'平台副本已清除'};
 function show(value,title='详情'){
@@ -48,7 +49,7 @@ function render(){
 
 if(!labels[kind])kind='plan';
 async function selectTab(key,preserveSelection=false){if(!readable(key))return;kind=key;chosen=null;const u=new URL(location.href);u.searchParams.set('tab',kind);if(!preserveSelection)u.searchParams.delete('selected');history.replaceState(null,'',u);$('#page-title').textContent=labels[kind];document.title=labels[kind]+' · 数据编织平台';$('#actions').replaceChildren();actions();document.querySelectorAll('#subtabs button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.kind===kind)));window.dispatchEvent(new Event('platform-navigation'));await load();}
-for(const [key,label] of visibleExecutionTabs(currentAccess())){const b=document.createElement('button');b.type='button';b.className='mf-button';b.textContent=label;b.dataset.kind=key;b.onclick=()=>selectTab(key).catch(e=>message(e.message));$('#subtabs').append(b);}
+for(const [key,label] of visibleExecutionTabs(currentAccess()).filter(([key])=>!['contract','facility'].includes(key))){const b=document.createElement('button');b.type='button';b.className='mf-button';b.textContent=label;b.dataset.kind=key;b.onclick=()=>selectTab(key).catch(e=>message(e.message));$('#subtabs').append(b);}
 
 function actions(){
  if(kind==='plan'){
