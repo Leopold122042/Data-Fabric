@@ -9,7 +9,7 @@ try {
  const labels={platform:'平台管理员',requester:'业务用户',provider:'数据供给方',auditor:'审计人员'};
  document.querySelector('#identity').textContent=labels[role()]||'当前用户';
  document.querySelector('#avatar').textContent=(labels[role()]||'用户')[0];
- document.querySelector('#admin-link').hidden=!['platform','auditor'].includes(role());
+ document.querySelector('#admin-link').hidden=false;
  document.querySelector('#connection').textContent='工作空间已连接';
  await import('/static/dashboard.js');
  document.title='驾驶舱总览 · 数据编织平台';

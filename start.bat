@@ -5,7 +5,7 @@ cd /d "%~dp0"
 set "MEDFABRIC_PYTHON=python"
 if exist ".venv\Scripts\python.exe" set "MEDFABRIC_PYTHON=.venv\Scripts\python.exe"
 echo Using Python: %MEDFABRIC_PYTHON%
-"%MEDFABRIC_PYTHON%" -c "import fastapi,uvicorn,duckdb,sqlglot,pyarrow,requests,openpyxl,xlrd"
+"%MEDFABRIC_PYTHON%" -c "import fastapi,uvicorn,duckdb,sqlglot,pyarrow,requests,openpyxl,xlrd; from zoneinfo import ZoneInfo; ZoneInfo('Asia/Shanghai')"
 if errorlevel 1 (
     echo.
     echo Install dependencies using the selected Python:
