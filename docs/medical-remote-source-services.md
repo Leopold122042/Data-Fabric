@@ -1,17 +1,17 @@
 # 六源医疗数据与查询服务
 
-版本：0.1.12。六个来源均为项目生成的合成医疗演示数据：HIS、LIS、PACS、EMR、IoT、临床业务协同库。
+版本：0.1.13。六个来源均为项目生成的合成医疗演示数据：HIS、LIS、PACS、EMR、IoT、临床业务协同库。
 
 ## 存放位置
 
 | 来源 | 远端位置 | 数据对象 |
 |---|---|---|
-| HIS | 南大云盘 `MedFabric/medical-demo-sources/v0.1.12/his.db` | 患者、就诊、医嘱 |
-| EMR | 南大云盘 `MedFabric/medical-demo-sources/v0.1.12/emr.jsonl` | 125 份文书，每行一个 JSON 对象 |
-| LIS | GitHub `medical-demo-sources/v0.1.12/lis.db` | 检验申请、检验结果 |
-| PACS | GitHub `medical-demo-sources/v0.1.12/pacs.db` | 影像检查索引 |
-| IoT | GitHub `medical-demo-sources/v0.1.12/iot.db` | 设备、生命体征 |
-| 临床协同 | GitHub `medical-demo-sources/v0.1.12/clinical_operations.sqlite` | 慢病随访、科研队列、影像时效、检验报告 |
+| HIS | 南大云盘 `MedFabric/medical-demo-sources/v0.1.13/his.db` | 患者、就诊、医嘱 |
+| EMR | 南大云盘 `MedFabric/medical-demo-sources/v0.1.13/emr.jsonl` | 125 份文书，每行一个 JSON 对象 |
+| LIS | GitHub `medical-demo-sources/v0.1.13/lis.db` | 检验申请、检验结果 |
+| PACS | GitHub `medical-demo-sources/v0.1.13/pacs.db` | 影像检查索引 |
+| IoT | GitHub `medical-demo-sources/v0.1.13/iot.db` | 设备、生命体征 |
+| 临床协同 | GitHub `medical-demo-sources/v0.1.13/clinical_operations.sqlite` | 慢病随访、科研队列、影像时效、检验报告 |
 
 GitHub 仓库 `Leopold122042/Data-Fabric` 当前为公开仓库，因此其中只放项目生成的合成数据；HIS 和 EMR 放在南大云盘。GitHub 路径按版本冻结，更新数据时创建新版本目录并同步服务配置。
 

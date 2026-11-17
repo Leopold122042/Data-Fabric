@@ -1,6 +1,7 @@
 """External connectors are isolated per browser session; credentials are request-only."""
 import copy
 import hashlib
+import json
 import os
 import sqlite3
 import tempfile
