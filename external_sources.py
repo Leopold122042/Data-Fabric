@@ -102,6 +102,47 @@ def fetch(url, method='GET', username='', token='', body=None):
         raise SourceError('远程连接失败，请检查网络、证书与源端状态。') from None
 
 
+def upload_box_file(path, payload, username, token):
+    """Create missing WebDAV folders and upload one bounded file without redirects."""
+    _, requests, _, certifi = dependencies()
+    if not username.strip() or not token:
+        raise SourceError('请先连接南大云盘。')
+    if not isinstance(payload, bytes) or len(payload) > MAX_BYTES:
+        raise SourceError('上传文件必须为字节内容且不超过 20 MB。')
+    path = path.strip().strip('/')
+    if not path or any(p in ('', '.', '..') for p in path.split('/')):
+        raise SourceError('上传路径无效。')
+    auth=(username.strip(),token)
+    headers={'Accept':'application/octet-stream'}
+
+    def request(method, url, data=None):
+        try:
+            response=requests.request(method,url,auth=auth,headers=headers,data=data,
+                                      verify=certifi.where(),timeout=(10,40),
+                                      allow_redirects=False)
+            return response
+        except requests.RequestException:
+            raise SourceError('南大云盘连接失败，请检查网络、令牌与源端状态。') from None
+
+    pieces=path.split('/')
+    for index in range(1,len(pieces)):
+        folder='/'.join(pieces[:index])
+        response=request('MKCOL',box_url(folder).rstrip('/')+'/')
+        status=response.status_code
+        response.close()
+        if status not in (200,201,204,405):
+            hint={401:'南大云盘认证失败，请重新连接',403:'没有在目标目录创建文件夹的权限',409:'南大云盘目录结构冲突'}
+            raise SourceError(hint.get(status,f'南大云盘创建目录失败（HTTP {status}）。'))
+
+    response=request('PUT',box_url(path),payload)
+    status=response.status_code
+    response.close()
+    if status not in (200,201,204):
+        hint={401:'南大云盘认证失败，请重新连接',403:'没有在目标目录上传文件的权限',404:'南大云盘目标目录不存在'}
+        raise SourceError(hint.get(status,f'南大云盘上传失败（HTTP {status}）。'))
+    return {'path':path,'bytes':len(payload),'status':status}
+
+
 def list_directory(path, username, token):
     url = box_url(path).rstrip('/') + '/'
     payload = fetch(url, 'PROPFIND', username, token,

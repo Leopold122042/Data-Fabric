@@ -1,1 +1,94 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>查询中心 · 数据编织平台</title><link rel="stylesheet" href="/static/workspace.css"><link rel="stylesheet" href="/static/management/module.css"><link rel="stylesheet" href="/static/shared/platform-shell.css"><link rel="stylesheet" href="/static/platform/platform.css"><script defer src="/static/shared/platform-shell.js?v=identity-20261111"></script></head><body class="mf-app"><div class="mf-shell"><aside class="mf-sidebar" aria-label="平台导航"></aside><main class="mf-main"><header class="mf-topbar"><b>数据编织平台 / 查询中心</b><label>演示身份 <select id="role"><option value="platform">平台方</option><option value="provider">供给方</option><option value="requester">需求方</option><option value="auditor">审计方</option></select></label></header><div class="mf-content"><h1>查询中心</h1><p id="page-status" role="status"></p><p class="page-lead">选择数据范围进入查询。云盘数据按当前会话读取，本地受控查询通过已确认方案执行。</p><div class="platform-cards"><a href="/static/platform/resources.html?origin=cloud"><h2>云盘数据查询</h2><p>搜索已保存的来源表或统一虚拟表，按字段、条件和 SQL 查询；需要有效云盘连接。</p></a><a href="/static/execution/index.html?tab=view"><h2>本地逻辑查询</h2><p>选择目录字段与概念映射，建立跨表查询视图，通过方案授权后执行。</p></a><a href="/static/platform/patients.html"><h2>患者全景</h2><p>按患者查阅本地医疗来源的就诊、检验、影像、病历与体征。</p></a></div><section class="mf-panel"><div class="mf-panel-body"><h2>查询结果与审计</h2><p>云盘查询留下独立运行证据；本地方案结果在授权有效期内读取。</p><div class="platform-journey"><a href="/static/execution/index.html?tab=run">运行证据</a><a href="/static/execution/index.html?tab=delivery">结果与凭证</a></div></div></section></div></main></div><script type="module" src="/static/platform/common.js?v=identity-20261111"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>查询中心 · 数据编织平台</title>
+  <link rel="stylesheet" href="/static/workspace.css">
+  <link rel="stylesheet" href="/static/management/module.css">
+  <link rel="stylesheet" href="/static/shared/platform-shell.css">
+  <link rel="stylesheet" href="/static/platform/platform.css">
+  <script defer src="/static/shared/platform-shell.js?v=identity-20261111"></script>
+</head>
+<body class="mf-app">
+  <div class="mf-shell">
+    <aside class="mf-sidebar" aria-label="平台导航"></aside>
+    <main class="mf-main">
+      <header class="mf-topbar">
+        <b>数据编织平台 / 查询中心</b>
+        <label>演示身份
+          <select id="role">
+            <option value="platform">平台方</option>
+            <option value="provider">供给方</option>
+            <option value="requester">需求方</option>
+            <option value="auditor">审计方</option>
+          </select>
+        </label>
+      </header>
+      <div class="mf-content">
+        <h1>查询中心</h1>
+        <p id="page-status" role="status"></p>
+        <p class="page-lead">选择数据范围进入查询。云盘数据按当前会话读取，本地受控查询通过已确认方案执行。</p>
+        <div class="platform-cards">
+          <a href="/static/platform/resources.html?origin=cloud">
+            <h2>云盘数据查询</h2>
+            <p>搜索已保存的来源表或统一虚拟表，按字段、条件和 SQL 查询；需要有效云盘连接。</p>
+          </a>
+          <a href="/static/execution/index.html?tab=view">
+            <h2>本地逻辑查询</h2>
+            <p>选择目录字段与概念映射，建立跨表查询视图，通过方案授权后执行。</p>
+          </a>
+          <a href="/static/platform/patients.html">
+            <h2>患者全景</h2>
+            <p>按患者查阅本地医疗来源的就诊、检验、影像、病历与体征。</p>
+          </a>
+        </div>
+
+        <section class="mf-panel" id="medical-remote-query">
+          <div class="mf-panel-body">
+            <h2>六源医疗数据服务</h2>
+            <p>调用已登记的 <code>SVC-MEDICAL-REMOTE-QUERY</code>。每次执行从所选 GitHub / 南大云盘源文件重新读取，在本次请求内存中联邦计算；结果带来源路径、文件摘要和服务耗时。</p>
+            <p>HIS、EMR 需先在数据接入页连接南大云盘；LIS、PACS、IoT 与临床协同数据从公开 GitHub 分支读取。本服务只对该公开源使用合成数据。</p>
+            <div class="platform-journey"><a href="/static/platform/connections.html">连接南大云盘并上传 HIS / EMR</a></div>
+            <fieldset id="medical-source-choices">
+              <legend>本次读取的数据源</legend>
+              <label><input type="checkbox" value="his" checked>HIS</label>
+              <label><input type="checkbox" value="lis" checked>LIS</label>
+              <label><input type="checkbox" value="pacs" checked>PACS</label>
+              <label><input type="checkbox" value="emr">EMR</label>
+              <label><input type="checkbox" value="iot">IoT</label>
+              <label><input type="checkbox" value="operations">临床协同</label>
+            </fieldset>
+            <label for="medicalRemoteSql">只读 SQL</label>
+            <textarea id="medicalRemoteSql" rows="7" style="width:100%;font-family:monospace">SELECT p.patient_id, p.name, v.dept, v.diagnosis_name,
+       (SELECT COUNT(*) FROM lis.test_order t WHERE t.patient_id = p.patient_id) AS lab_orders,
+       (SELECT COUNT(*) FROM pacs.study s WHERE s.patient_id = p.patient_id) AS imaging_studies
+FROM his.patient p
+LEFT JOIN his.visit v ON v.patient_id = p.patient_id
+WHERE p.name LIKE '%唐军%'
+ORDER BY p.patient_id, v.visit_id
+LIMIT 200;</textarea>
+            <button id="medicalRemoteRun" class="act" type="button">调用多源查询服务</button>
+            <p id="medicalRemoteStatus" role="status"></p>
+            <div id="medicalRemoteEvidence"></div>
+            <div id="medicalRemoteResults" class="mf-table-wrap"></div>
+          </div>
+        </section>
+
+        <section class="mf-panel">
+          <div class="mf-panel-body">
+            <h2>查询结果与审计</h2>
+            <p>云盘查询留下独立运行证据；本地方案结果在授权有效期内读取。</p>
+            <div class="platform-journey">
+              <a href="/static/execution/index.html?tab=run">运行证据</a>
+              <a href="/static/execution/index.html?tab=delivery">结果与凭证</a>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script type="module" src="/static/platform/common.js?v=identity-20261111"></script>
+  <script type="module" src="/static/platform/medical-query.js?v=medical-sources-0.1.10"></script>
+</body>
+</html>

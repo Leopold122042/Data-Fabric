@@ -1,4 +1,4 @@
-import {guideHtml} from './topic2-guide.js?v=018';
+import {guideHtml} from './topic2-guide.js?v=019';
 import {caseIntro,caseContent} from './topic2-case.js?v=case-017';
 import {renderTopicFour} from './topic4.js?v=topic4-r2-20261113';
 import {renderKnowledgeGraph} from './topic1.js?v=topic1-graph-r6-20261117';
@@ -97,7 +97,7 @@ function sourcesStage(){return `<div class="stage-content">${header(1,'多源接
 <article class="source-card"><div class="source-top"><h3>科研协作平台</h3><span class="source-tag">科研</span></div><p>临床科研中心 · 已登记</p><div class="source-objects">study_subject · study_visit</div></article></div>
 <div class="object-constraints" aria-label="数据对象约束"><span class="constraint-chip">主体 <strong>临床科研中心</strong></span><span class="constraint-chip">用途 <strong>肺炎病例队列统计</strong></span><span class="constraint-chip">有效期 <strong>2027-03-31</strong></span></div>
 <p class="section-label">统一目录与对象血缘</p><div class="lineage-strip"><div class="lineage-node"><small>源对象</small><strong>HIS / diagnosis_record</strong></div><span class="lineage-arrow">→</span><div class="lineage-node"><small>统一目录对象</small><strong>OBJ-HOSP-001 · 诊断记录</strong></div><span class="lineage-arrow">→</span><div class="lineage-node"><small>下游逻辑视图</small><strong>LV-PNEUMONIA-MONTHLY</strong></div></div>
-${state.sourceChanged?'<div class="change-alert"><strong>已检测到源端变化：</strong>医保 claim_item 新增字段 settlement_group；已保留旧目录版本并标记待评估下游影响。</div>':'<div class="change-alert success">目录快照稳定 · 血缘关系可追踪 · 主体 / 用途 / 期限约束已随对象登记。</div>'}
+${state.sourceChanged?'<div class="change-alert"><strong>已检测到源端变化：</strong>医保 claim_header.amount 的金额单位由元改为分；已保留旧目录版本并标记待评估下游影响。</div>':'<div class="change-alert success">目录快照稳定 · 血缘关系可追踪 · 主体 / 用途 / 期限约束已随对象登记。</div>'}
 <div class="stage-actions"><button class="action-button primary" data-action="source-change">${state.sourceChanged?'再次注入源端变化':'模拟注入源端字段变化'}</button><button class="action-button" data-action="go-feedback">查看变化处置阶段</button></div>${platformLinks([['接入与资源目录','/static/platform/resources.html'],['元数据维护','/static/management/catalog.html']])}</div>`;}
 function semanticStage(){return `<div class="stage-content">${header(2,'语义建模与关联','同一诊断在不同系统中使用不同编码；综合多项匹配证据生成统一业务概念。')}
 <div class="semantic-grid"><div><p class="section-label">同一诊断 · 异构编码示例</p><div class="code-match-list">
@@ -116,7 +116,7 @@ function workflowRows(){return `<ol class="workflow-list" id="workflow-steps">${
 function orchestrationStage(){return `<div class="stage-content">${header(4,'编排与智能调度','需求确认后生成读取、关联、计算、脱敏交付步骤；未就绪时等待，失败时按原步骤重试。')}
 <div class="workflow-head"><div><strong>本次回答共 4 个步骤</strong><br><small>${state.workflow.complete?`流程完成 · 演示总耗时 ${state.workflow.elapsed} ms`:state.workflow.running?'流程运行中 · 展示节点状态和演示耗时':'等待确认需求并生成执行计划'}</small></div><div class="workflow-controls"><select id="workflow-mode" aria-label="选择执行演示场景"><option value="normal" ${state.workflow.mode==='normal'?'selected':''}>正常完成</option><option value="wait" ${state.workflow.mode==='wait'?'selected':''}>源数据未就绪后恢复</option><option value="retry" ${state.workflow.mode==='retry'?'selected':''}>中间步骤失败后重试</option></select><button class="action-button primary" id="run-workflow" data-action="run-workflow" ${state.workflow.running?'disabled':''}>${state.workflow.running?'执行中…':'确认需求并编排'}</button></div></div>
 ${workflowRows()}<p class="report-disclosure">步骤状态和耗时在本页使用合成演示；实际执行、等待和重试记录请打开平台运行流程。</p>${platformLinks([['方案与执行流程','/static/execution/index.html?tab=workflow'],['运行证据','/static/execution/index.html?tab=run']])}</div>`;}
-const feedbackLabels=['注入源端变更','检测语义偏差','定位下游视图','局部调整规则','回写目录版本'];
+const feedbackLabels=['注入源端变更','检测语义偏差','定位下游视图','局部调整规则','保存适配草案'];
 function feedbackStage(){const f=state.feedback;return `<div class="stage-content">${header(5,'多技术协同与运行反馈','从源端变化触发语义校验和血缘影响分析，再局部调整、版本回写，并查询全程证据。')}
 <div class="feedback-flow" aria-label="变更反馈步骤">${feedbackLabels.map((label,index)=>{const done=index<f.phase||(f.complete&&index<5),current=f.running&&index===f.phase;return `<div class="feedback-node ${done?'done':''} ${current?'current':''}"><small>0${index+1} · ${done?'完成':current?'处理中':'待执行'}</small><strong>${esc(label)}</strong></div>`;}).join('')}</div>
 <p class="report-disclosure">反馈链路使用本地合成事件演示。完成后可展开访问、拦截、处置与计量记录。</p>
@@ -125,7 +125,7 @@ ${state.evidenceVisible?renderEvidence():`<div class="evidence-empty">查询证�
 ${platformLinks([['元数据事件','/static/platform/events.html'],['偏差校准','/static/management/reconciliation.html'],['运行证据','/static/execution/index.html?tab=run']])}</div>`;}
 function renderEvidence(){if(!state.events.length)return '<div class="evidence-empty">目前没有本地演示事件。先运行访问校验、执行编排或变更处置，再查询证据链。</div>';return `<table class="evidence-table"><thead><tr><th>时间</th><th>类型</th><th>事件</th><th>结果</th></tr></thead><tbody>${state.events.map(event=>`<tr><td>${esc(event.time)}</td><td><span class="event-tag ${event.kind==='拦截'?'block':event.kind==='变更'?'change':event.kind==='放行'?'ok':''}">${esc(event.kind)}</span></td><td>${esc(event.detail)}</td><td>${esc(event.result)}</td></tr>`).join('')}</tbody></table>`;}
 function stageHtml(){return({sources:sourcesStage,semantics:semanticStage,virtual:virtualStage,orchestration:orchestrationStage,feedback:feedbackStage}[state.stage]||sourcesStage)();}
-function renderStage(){refreshGuide();const panel=$('#stage-panel');if(!panel)return;panel.innerHTML=stageHtml()+caseContent(state.stage,state)+`<div class="case-navigation"><button class="action-button" data-action="case-prev" ${state.stage==='sources'?'disabled':''}>上一步</button><span>阶段 ${stages.findIndex(s=>s.id===state.stage)+1} / 5</span><button class="action-button primary" data-action="case-next" ${state.stage==='feedback'?'disabled':''}>下一步</button></div>`;panel.onclick=handleAction;panel.oninput=event=>{if(event.target.id==='contract-text')state.contractText=event.target.value;};panel.onchange=event=>{if(event.target.id==='workflow-mode')state.workflow.mode=event.target.value;if(event.target.id==='sensitivity')state.sensitivity=event.target.value;};renderObjectRail();}
+function renderStage(){refreshGuide();const panel=$('#stage-panel');if(!panel)return;panel.innerHTML=stageHtml()+caseContent(state.stage,state)+`<div class="case-navigation"><button class="action-button" data-action="case-prev" ${state.stage==='sources'?'disabled':''}>上一步</button><span>阶段 ${stages.findIndex(s=>s.id===state.stage)+1} / 5</span><button class="action-button primary" data-action="case-next" ${state.stage==='feedback'?'disabled':''}>下一步</button></div>`;panel.onclick=handleAction;panel.oninput=event=>{if(event.target.id==='contract-text'){state.contractText=event.target.value;state.policy=null;state.policyResult=null;state.accessChecks={};state.workflow.complete=false;state.completedModes.clear();state.feedback.complete=false;refreshGuide();const preview=$('.policy-preview');if(preview)preview.innerHTML='<h3>合同已修改</h3><p>请重新生成策略并检查合规访问。</p>';}};panel.onchange=event=>{if(event.target.id==='workflow-mode')state.workflow.mode=event.target.value;if(event.target.id==='sensitivity')state.sensitivity=event.target.value;};renderObjectRail();}
 function objectDetails(item){const related={data:'多源接入',concept:'语义关联',view:'逻辑集成与合约',plan:'编排与调度',evidence:'运行反馈与证据'}[item.id];return `<div class="object-detail"><span class="detail-kind">${esc(item.kind)}</span><h3>${esc(item.name)}</h3><code>${esc(item.ref)}</code><p>${esc(item.summary)}</p><div class="object-props">${item.props().map(([label,value])=>`<div class="object-prop"><span>${esc(label)}</span><b>${esc(value)}</b></div>`).join('')}</div><div class="object-props"><div class="object-prop"><span>关联阶段</span><b>${esc(related)}</b></div><div class="object-prop"><span>对象版本</span><b>${item.id==='data'&&state.sourceChanged?'v1.5':'v1.4'}</b></div></div></div>`;}
 function renderObjectRail(){const rail=$('#object-rail');if(!rail)return;rail.innerHTML=`<div class="rail-heading"><strong>贯穿全程的五类中间对象</strong><small>在五段演示间持续保留 · 点击查看对象详情</small></div><div class="object-list">${objects.map((item,index)=>`<button class="object-tab ${state.activeObject===item.id?'active':''}" type="button" data-object="${item.id}" aria-pressed="${state.activeObject===item.id}"><span class="object-number">0${index+1}</span><span><strong>${esc(item.kind)}</strong><small>${esc(item.ref)}</small></span><em>查看</em></button>`).join('')}</div>${objectDetails(objects.find(item=>item.id===state.activeObject)||objects[0])}<div class="rail-note">五类对象名称按当前报告内容拟定，可按课题报告中的正式术语调整。</div>`;rail.onclick=event=>{const button=event.target.closest('[data-object]');if(!button)return;state.activeObject=button.dataset.object;renderObjectRail();};}
 function parseContract(text){
@@ -149,22 +149,23 @@ function handleAction(event){
  if(action==='register-case'){state.catalogRegistered=true;logEvent('登记','医院、医保、科研3个合成数据对象，72条记录','约束与目录快照已登记到本页');renderStage();return;}
  if(action==='case-prev'||action==='case-next'){const index=stages.findIndex(s=>s.id===state.stage);state.stage=stages[Math.max(0,Math.min(4,index+(action==='case-next'?1:-1)))].id;renderTopicTwo();return;}
  if(action==='source-change'){
-  state.sourceChanged=true;logEvent('变更','医保 claim_item 检测到 settlement_group 新字段','新目录快照已标记，旧版本保留');renderTopicTwo();return;
+  state.sourceChanged=true;logEvent('变更','医保 claim_header.amount 检测到金额单位变化（元→分）','新目录快照已标记，旧版本保留');renderTopicTwo();return;
  }
  if(action==='go-feedback'){state.stage='feedback';renderTopicTwo();return;}
  if(action==='semantic-match'){if(!state.catalogRegistered){alert('请先登记本案例目录快照。');return;}state.semanticMatched=true;logEvent('语义','HIS / 医保 / 科研诊断编码匹配到 diagnosis.pneumonia','多证据候选映射已生成');renderStage();return;}
  if(action==='select-object'){state.activeObject=button.dataset.object;renderObjectRail();return;}
  if(action==='compile-policy'){
+  if(!state.semanticMatched){alert('请先运行语义匹配，再编制合同策略。');return;}
   state.contractText=$('#contract-text')?.value||state.contractText;const policy=parseContract(state.contractText);
   if(!policy){state.policyResult={allowed:false,title:'条款信息不足',reason:'请补齐受托主体、使用用途和有效期至（YYYY-MM-DD），再生成策略草案。'};renderStage();return;}
-  state.policy=policy;state.policyResult=null;state.accessChecks={};logEvent('策略','合同条款转换为主体 / 用途 / 期限 / 输出边界策略草案','本地演示草案');renderStage();return;
+  state.policy=policy;state.policyResult=null;state.accessChecks={};state.completedModes.clear();state.workflow.complete=false;state.feedback.complete=false;logEvent('策略','合同条款转换为主体 / 用途 / 期限 / 输出边界策略草案','本地演示草案');renderStage();return;
  }
  if(['access-allow','access-purpose','access-expired'].includes(action)){
   state.contractText=$('#contract-text')?.value||state.contractText;testAccess(action==='access-allow'?'allow':action==='access-purpose'?'purpose':'expired');renderStage();return;
  }
  if(action==='route'){state.sensitivity=$('#sensitivity')?.value||state.sensitivity;state.routeResult=routeFor(state.sensitivity);state.routeChecks.add(state.sensitivity);renderStage();return;}
- if(action==='run-workflow'){if(!state.semanticMatched||!state.policy||!state.policyResult?.allowed){alert('请先在语义关联阶段运行匹配，并在逻辑集成阶段生成策略、通过合规访问检查。');return;}const mode=$('#workflow-mode')?.value||'normal';startWorkflow(mode);return;}
- if(action==='run-feedback'){if(!state.workflow.complete){alert('请先在编排与调度阶段完成一次执行，再演示源端变更与结果复核。');return;}startFeedback();return;}
+ if(action==='run-workflow'){if(state.workflow.running||state.feedback.running)return;if(!state.semanticMatched||!state.policy||!state.policyResult?.allowed){alert('请先在语义关联阶段运行匹配，并在逻辑集成阶段生成策略、通过合规访问检查。');return;}const mode=$('#workflow-mode')?.value||'normal';startWorkflow(mode);return;}
+ if(action==='run-feedback'){if(state.workflow.running)return;if(!state.workflow.complete){alert('请先在编排与调度阶段完成一次执行，再演示源端变更与结果复核。');return;}startFeedback();return;}
  if(action==='query-evidence'){state.evidenceVisible=true;logEvent('查询','读取本页演示证据链','已汇总访问、拦截、处置与计量记录');renderStage();return;}
 }
 function updateWorkflow(){

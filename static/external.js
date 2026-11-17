@@ -245,6 +245,19 @@
     el('extUser').focus();
   }
   el('extCloudConnect').onclick=()=>openCloudLogin();
+  async function uploadMedicalSources(){
+    if(!cloudConnected){openCloudLogin(uploadMedicalSources);return;}
+    el('extMedicalUploadStatus').textContent='正在上传 HIS 与 EMR…';
+    try{
+      const result=await api('medical/upload',{});
+      el('extMedicalUploadStatus').textContent=`已保存到 ${result.folder}：${result.uploaded.map(x=>`${x.path.split('/').pop()} ${Math.ceil(x.bytes/1024)} KB`).join(' · ')}；EMR ${result.emr_documents} 份。`;
+      status('HIS 与 EMR 已写入南大云盘。');
+    }catch(error){
+      el('extMedicalUploadStatus').textContent='上传未完成：'+error.message;
+      throw error;
+    }
+  }
+  if(el('extMedicalUpload'))el('extMedicalUpload').onclick=()=>action(uploadMedicalSources);
   el('extLoginCancel').onclick=()=>el('extLoginDialog').close();
   el('extLoginDialog').addEventListener('cancel',event=>{if(busy)event.preventDefault();});
   el('extLoginDialog').addEventListener('close',()=>{pendingCloudAction=null;el('extToken').value='';if(!cloudConnected)status('已取消连接，目录和查询条件已保留。');});

@@ -52,7 +52,7 @@ async def authorize(request,stage='before'):
     path=request.url.path
     query_paths={'/api/external/query','/api/external/virtual/query','/api/external/discovery/query','/api/external/discovery/collection-query'}
     actor=request.app.state.identity.principal(request)
-    admin_paths={'/api/external/github/load','/api/external/box/load','/api/external/discovery/start','/api/external/discovery/step','/api/external/discovery/collection-membership'}
+    admin_paths={'/api/external/github/load','/api/external/box/load','/api/external/discovery/start','/api/external/discovery/step','/api/external/discovery/collection-membership','/api/external/medical/upload'}
     if path in admin_paths and actor['role']!='platform':raise HTTPException(403,'仅平台方可维护外部数据源')
     if path not in query_paths:return
     # The legacy arbitrary session query has no stable resource binding. Fail closed.

@@ -1,17 +1,22 @@
 """External connectors are isolated per browser session; credentials are request-only."""
 import copy
 import hashlib
+import os
+import sqlite3
+import tempfile
 from external_rar import inspect_rar, inspect_zip
 import secrets
 import threading
 import time
 from urllib.parse import urlsplit
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 from external_sources import (LogicalSession, SourceError, DEFAULT_GITHUB, DEFAULT_EXCEL,
-                              github_url, box_url, fetch, list_directory, parse_file, file_extension)
+                              github_url, box_url, fetch, list_directory, parse_file, file_extension,
+                              upload_box_file)
 
 class PrivateInputRoute(APIRoute):
     def get_route_handler(self):
@@ -38,6 +43,7 @@ router = APIRouter(prefix='/api/external', tags=['外部数据接入'], route_cl
 _sessions = {}
 _lock = threading.Lock()
 COOKIE = 'medfabric_external'
+SERVICE_COOKIE = 'medfabric_medical_service'
 TTL = 1800
 
 class ArchiveSelection(BaseModel):
@@ -85,7 +91,25 @@ def session(request, response):
         value.touched = now
         response.set_cookie(COOKIE,key,httponly=True,samesite='strict',
                             secure=request.url.scheme=='https',max_age=TTL,path='/api/external')
+        response.set_cookie(SERVICE_COOKIE,key,httponly=True,samesite='strict',
+                            secure=request.url.scheme=='https',max_age=TTL,path='/api/data-services')
         return value
+
+
+def medical_service_session(request):
+    """Resolve a live WebDAV session for same-browser governed service calls."""
+    key=request.cookies.get(SERVICE_COOKIE)
+    if not key:return None
+    with _lock:
+        current=_sessions.get(key)
+        if current is None:return None
+        now=time.monotonic()
+        if now-current.touched>TTL:
+            current.close()
+            del _sessions[key]
+            return None
+        current.touched=now
+        return current
 
 
 def perform(callback):
@@ -160,6 +184,7 @@ def box_disconnect(request: Request, response: Response):
         current.scan_job=None
         current.virtual_files.clear()
     result=current.replace('box','',[])
+    response.delete_cookie(SERVICE_COOKIE,path='/api/data-services')
     return {**result,'connected':False}
 
 
@@ -220,6 +245,7 @@ def clear(request: Request, response: Response):
                 value.close()
                 del _sessions[key]
     response.delete_cookie(COOKIE,path='/api/external')
+    response.delete_cookie(SERVICE_COOKIE,path='/api/data-services')
     return {'message':'当前会话的逻辑表已释放。'}
 
 
@@ -369,3 +395,68 @@ def platform_connection_status(request:Request,response:Response):
         if current is not None and time.monotonic()-current.touched>TTL:current=None
     if current is None:return {'connected':False}
     with current.virtual_lock:return {'connected':bool(current.cloud_credentials)}
+
+
+@router.post('/medical/upload')
+def upload_medical_sources(request:Request,response:Response):
+    """Copy the local synthetic HIS and EMR sources into the user's NJU cloud."""
+    principal=request.app.state.identity.principal(request)
+    if principal['role']!='platform':raise HTTPException(403,'仅平台方可上传本地演示数据源')
+    current=session(request,response)
+    with current.virtual_lock:
+        username,token=cloud_auth(current,BoxInput())
+        try:
+            import medsim
+            from initialize_data import validate_data
+            from remote_medical_sources import BOX_ROOT, SOURCES
+            root=Path(medsim.DATA_DIR).resolve()
+            validate_data(root)
+            his_path=root/'his.db'
+            if his_path.is_symlink() or not his_path.is_file():
+                raise SourceError('本机 HIS 数据库不存在或不是普通文件。')
+            # Capture the live SQLite database, including any committed WAL
+            # pages, into a portable standalone snapshot for WebDAV.
+            fd,snapshot_path=tempfile.mkstemp(prefix='medfabric-medical-',suffix='.db')
+            os.close(fd)
+            try:
+                source_db=sqlite3.connect(str(his_path))
+                snapshot_db=sqlite3.connect(snapshot_path)
+                try:
+                    source_db.backup(snapshot_db)
+                    snapshot_db.execute('PRAGMA journal_mode=DELETE')
+                finally:
+                    snapshot_db.close()
+                    source_db.close()
+                his_payload=Path(snapshot_path).read_bytes()
+            finally:
+                try:os.unlink(snapshot_path)
+                except FileNotFoundError:pass
+            emr_dir=root/'emr'
+            records=[]
+            expected=set(SOURCES['emr']['tables']['dossiers'])
+            for path in sorted(emr_dir.glob('*.json')):
+                if path.is_symlink() or not path.is_file():
+                    raise SourceError('EMR 目录中包含不支持的文件类型。')
+                item=json.loads(path.read_text(encoding='utf-8'))
+                if not isinstance(item,dict) or set(item)!=expected:
+                    raise SourceError('EMR 文件字段与已登记结构不一致；未上传。')
+                records.append(item)
+            if not records:
+                raise SourceError('本机 EMR 目录没有 JSON 病历文件。')
+            emr_payload=(''.join(json.dumps(r,ensure_ascii=False,separators=(',',':'))+'\n' for r in records)).encode('utf-8')
+            if len(his_payload)>20*1024*1024 or len(emr_payload)>20*1024*1024:
+                raise SourceError('本机医疗数据超过单文件 20 MB 上传限制。')
+            uploaded=[]
+            for name,payload in (('his.db',his_payload),('emr.jsonl',emr_payload)):
+                location=f'{BOX_ROOT}/{name}'
+                uploaded.append({**upload_box_file(location,payload,username,token),
+                                 'sha256':hashlib.sha256(payload).hexdigest()})
+            return {'complete':True,'folder':BOX_ROOT,'uploaded':uploaded,
+                    'emr_documents':len(records),
+                    'message':'HIS 与 EMR 已保存到南大云盘；平台服务调用时将重新读取源文件。'}
+        except HTTPException:
+            raise
+        except SourceError as exc:
+            raise HTTPException(400,str(exc)) from None
+        except Exception:
+            raise HTTPException(400,'准备本地演示数据上传失败；未返回任何记录内容。') from None

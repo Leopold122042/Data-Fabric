@@ -122,12 +122,33 @@ class ExecutionHandlers:
         views = self.vlayer.logical_views() if self.vlayer else []
         return {'sources': [{k: s[k] for k in ('id', 'name', 'kind')} | {**self.engine.stats[s['id']]} for s in medsim.SOURCE_DEFS], 'entity_types': list(payload['entity_types'].keys()), 'logical_views_count': len(views), 'meta_events_total': len(BUS.events)}
 
-    def _dispatch(self, sid: str, params):
+    def _dispatch(self, sid: str, params, request=None):
         from platform_core.storage import DomainError
         definition = self.management.store.get('service', sid)
         if definition is None or definition.get('lifecycle') not in ('published', 'trial'):
             raise DomainError('服务未发布或已失效', 409)
-        return self._execute_handler(definition.get('handler_id') or sid, params)
+        handler=definition.get('handler_id') or sid
+        if handler=='SVC-MEDICAL-REMOTE-QUERY':
+            from remote_medical_sources import query
+            from external_api import medical_service_session
+            current=medical_service_session(request) if request is not None else None
+            credentials=current.cloud_credentials if current else None
+            return query((params or {}).get('sql'),(params or {}).get('source_ids'),credentials)
+        return self._execute_handler(handler, params)
+
+    def _mask_remote_query_result(self, result):
+        """Apply field-name masking to tabular rows before governed delivery."""
+        if not isinstance(result,dict) or not isinstance(result.get('columns'),list) or not isinstance(result.get('rows'),list):
+            return self.gov.mask_payload(result)
+        columns=result['columns']
+        masked_rows=[]
+        for row in result['rows']:
+            masked_rows.append([self.gov.mask_value(columns[i] if i<len(columns) else '',value)
+                                for i,value in enumerate(row)])
+        safe={key:value for key,value in result.items() if key!='rows'}
+        safe=self.gov.mask_payload(safe)
+        safe['rows']=masked_rows
+        return safe
 
     def _execute_handler(self, sid, params):
         # Private raw handler. Call only after the caller's authorization/validation gate.
@@ -235,7 +256,7 @@ class ExecutionHandlers:
         body = await request.json() if await request.body() else {}
         t0 = time.perf_counter()
         try:
-            result = self._dispatch(sid, body)
+            result = self._dispatch(sid, body, request)
             err = None
         except KeyError:
             return {'error': '未知服务：%s' % sid}
@@ -270,7 +291,7 @@ class ExecutionHandlers:
             return {'service_id': sid, 'error': '调用未授权：%s' % auth['reason'], 'security': auth}
         t0 = time.perf_counter()
         try:
-            result = self._dispatch(sid, params)
+            result = self._dispatch(sid, params, request)
             err = None
         except KeyError:
             return {'service_id': sid, 'error': '未知服务：%s' % sid, 'security': auth}
@@ -279,7 +300,7 @@ class ExecutionHandlers:
         ms = round((time.perf_counter() - t0) * 1000, 2)
         wf = self._federation_waterfall(sid, result) if err is None else None
         if auth['masked']:
-            result = self.gov.mask_payload(result)
+            result = self._mask_remote_query_result(result) if sid=='SVC-MEDICAL-REMOTE-QUERY' else self.gov.mask_payload(result)
         flow_id = (body or {}).get('flow_id')
         circulation = self.gov.record_service(sid, latency_ms=ms, success=err is None, actor=str(actor.get('id') or actor.get('name') or actor.get('role') or 'actor'), flow_id=flow_id, masked=auth['masked'], decision=auth['decision'])
         self.publish([{'source_id': 'service-flow', 'etype': 'data_circulation', 'severity': 'info' if err is None else 'warn', 'title': '%s：%s' % ('数据服务流通完成' if err is None else '数据服务执行异常', sid), 'detail': '%s · %s · %s ms' % (auth['decision'], circulation['actor'], ms)}])
@@ -315,13 +336,13 @@ class ExecutionHandlers:
                 call_params.setdefault('patient_id', call_params.get('patient_id', 'P0315'))
             t0 = time.perf_counter()
             try:
-                result = self._dispatch(sid, call_params)
+                result = self._dispatch(sid, call_params, request)
                 err = None
             except Exception as exc:
                 result, err = ({}, str(exc)[:200])
             ms = round((time.perf_counter() - t0) * 1000, 2)
             if auth['masked']:
-                result = self.gov.mask_payload(result)
+                result = self._mask_remote_query_result(result) if sid=='SVC-MEDICAL-REMOTE-QUERY' else self.gov.mask_payload(result)
             flow_rec = self.gov.record_service(sid, latency_ms=ms, success=err is None, actor=str(actor.get('id') or actor.get('role') or 'actor'), flow_id=flow_id, masked=auth['masked'], decision=auth['decision'])
             stages.append({'service_id': sid, 'status': 'success' if err is None else 'failed', 'latency_ms': ms, 'security': auth, 'circulation': flow_rec, 'result': result, 'error': err})
         self.publish([{'source_id': 'service-flow', 'etype': 'service_flow_completed', 'severity': 'info', 'title': '服务组合流完成：%s' % flow['name'], 'detail': ' → '.join(flow['service_ids'])}])

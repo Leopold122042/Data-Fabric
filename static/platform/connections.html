@@ -5,6 +5,13 @@
     <button id="extScanShortcut" type="button" class="act">更新目录与虚拟表</button>
     <p id="extStatus" role="status" aria-live="polite">正在检查连接环境…</p>
   </div>
+  <div class="card" id="medical-source-storage">
+    <h3>六源医疗数据分布</h3>
+    <p>HIS 与 EMR 保存到当前账号的南大云盘；LIS、PACS、IoT 和临床协同库保存在项目 GitHub 的版本化公开目录。GitHub 侧只放本机生成的合成演示数据。</p>
+    <p>云盘上传使用当前页面的 WebDAV 会话，令牌只保存在服务端内存；后续查询会通过数据服务逐次读取选中的源文件。</p>
+    <button id="extMedicalUpload" class="act">上传 HIS 与 EMR 到南大云盘</button>
+    <p id="extMedicalUploadStatus" role="status">尚未上传。GitHub 四源由版本 v0.1.10 的数据目录提供。</p>
+  </div>
   <div class="card virtual-browser external-query-card" id="cloud-query"><label for="externalGrant">访问授权</label><select id="externalGrant"><option value="">请选择当前身份的有效读取授权</option></select><p id="externalGrantStatus" role="status"></p><h3>虚拟表查询</h3>
     <p>选择已保存的虚拟表，输入关键词，在右侧查看数据。结果按来源分组，保留有值的字段。</p>
     <p id="extCloudState" role="status">正在检查云盘会话…</p>
