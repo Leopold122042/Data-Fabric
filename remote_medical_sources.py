@@ -13,7 +13,7 @@ import time
 
 from external_sources import SourceError, box_url, fetch
 
-VERSION = "0.1.11"
+VERSION = "0.1.12"
 GITHUB_BRANCH = "feature/intake-query-reliability"
 GITHUB_ROOT = (
     "https://raw.githubusercontent.com/Leopold122042/Data-Fabric/"

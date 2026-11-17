@@ -240,6 +240,9 @@
     pendingCloudAction=continuation;
     status('请在弹窗中连接云盘；取消后仍可查看目录。');
     el('extLoginError').textContent='';
+    const medicalUpload=continuation===uploadMedicalSources;
+    el('extLoginTitle').textContent=medicalUpload?'连接南大云盘并上传 HIS / EMR':'连接云盘以查询数据';
+    el('extLoginDescription').textContent=medicalUpload?'连接成功后会把当前平台的 HIS 数据库和 EMR 文书保存到你的南大云盘；不要把令牌发到聊天中。':'虚拟表目录已保存。读取实际数据需要云盘授权，连接成功后会继续本次操作。';
     el('extLoginSubmit').textContent=continuation?'连接并继续':'连接云盘';
     if(!el('extLoginDialog').open)el('extLoginDialog').showModal();
     el('extUser').focus();
