@@ -30,6 +30,24 @@ def create_router(runtime, identity):
         return [f for f in store.list('intake_flow') if f.get('demand_id') in demands]
     def brief(flow):
         return {k:flow.get(k) for k in ('id','demand_id','request_text','state','query_mode','updated_at','created_by')}
+
+    @router.get('/services')
+    def services(request:Request):
+        principal=user(request);require_resource(principal,'demand')
+        builtins=[
+            {'id':'fn.age','name':'年龄计算','category':'常用函数','description':'根据出生日期和指定日期计算周岁','status':'可直接使用','input':'出生日期、计算日期'},
+            {'id':'fn.date_range','name':'日期范围','category':'常用函数','description':'把自然语言时间范围转换为可执行的起止日期','status':'可直接使用','input':'时间表达'},
+            {'id':'fn.stats','name':'统计汇总','category':'常用函数','description':'计算数量、均值、最大值、最小值和分布','status':'可直接使用','input':'数值字段'},
+            {'id':'fn.abnormal','name':'异常值判断','category':'常用函数','description':'结合参考范围或规则标记异常记录','status':'可直接使用','input':'结果值、参考范围'},
+            {'id':'model.summary','name':'病历摘要','category':'医疗小模型','description':'从现病史、主诉和治疗计划生成带来源摘要','status':'适配器已就绪，等待真实模型','input':'病历文本'},
+            {'id':'model.lab','name':'检验结果解释','category':'医疗小模型','description':'结合项目、结果值、单位和参考范围解释异常','status':'适配器已就绪，等待真实模型','input':'检验结果'},
+            {'id':'model.risk','name':'风险分层','category':'医疗小模型','description':'根据已授权的结构化指标生成可追溯风险分层','status':'适配器已就绪，等待真实模型','input':'结构化指标'},
+        ]
+        registered=[]
+        for item in runtime.management.store.list('service'):
+            if item.get('lifecycle')=='published' and can_read_management(runtime,'service',item,principal):
+                registered.append({'id':item['id'],'name':item.get('name',item['id']),'category':'已发布数据服务','description':item.get('description',''),'status':'已发布','input':'按服务规格'})
+        return {'services':builtins+registered,'composition':{'enabled':True,'message':'可将数据查询、函数和医疗小模型按顺序组合；每一步保留输入、输出、来源和版本。'}}
     def catalog():
         definitions={r['field_id']:r for r in FieldLibrary(store).items() if r['status']!='retired'}
         objects=[o for o in store.list('object') if o.get('status')=='active']

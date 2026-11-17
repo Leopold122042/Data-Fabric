@@ -1,7 +1,7 @@
 import {ready,currentAccess,role,bindRole} from '/static/shared/access.js?v=identity-20261111';
 import {icon} from '/static/shared/icons.js';
 document.querySelectorAll('[data-icon]').forEach(el=>el.replaceChildren(icon(({spark:'activity',sliders:'layers',settings:'shield'})[el.dataset.icon]||el.dataset.icon)));
-document.querySelector('#page-label').textContent='驾驶舱总览';
+const pageLabel=document.querySelector('#page-label');if(pageLabel)pageLabel.textContent='驾驶舱总览';
 document.querySelector('a[href="/static/portal/cockpit.html"]').classList.add('active');
 document.querySelector('a[href="/static/portal/cockpit.html"]').setAttribute('aria-current','page');
 bindRole();
@@ -12,7 +12,7 @@ try {
  document.querySelector('#avatar').textContent=(labels[role()]||'用户')[0];
  document.querySelector('#admin-link').hidden=false;
  document.querySelector('#connection').textContent='工作空间已连接';
- await import('/static/dashboard.js?v=identity-20261111');
+ await import('/static/dashboard.js?v=20261117-fix4');
  document.title='驾驶舱总览 · 数据编织平台';
  document.querySelector('#refresh').onclick=()=>document.querySelector('#dashboard-refresh').click();
-} catch(error) {document.querySelector('#dashboard-status').textContent=error.message;}
+} catch(error) {const status=document.querySelector('#dashboard-status');if(status)status.textContent=error.stack||error.message;}

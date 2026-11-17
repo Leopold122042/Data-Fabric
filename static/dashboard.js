@@ -5,19 +5,20 @@ import {format,statusName,eventName,distribution,orderURL,executionURL} from './
 import {node,link,iconBox,action,badge,panel,empty,row,metric,bars,stages,authorizationChart} from './dashboard-components.js?v=20261102';
 
 const $=s=>document.querySelector(s),root=$('#dashboard-root');
+const setText=(selector,value)=>{const element=$(selector);if(element)element.textContent=value;};
 const paths={resources:'/static/platform/resources.html',services:'/static/management/services.html',catalog:'/static/management/catalog.html',orders:'/static/management/work-orders.html',events:'/static/platform/events.html',risk:'/static/platform/security.html',medical:'/static/platform/medical-overview.html'};
-function openDetail(title,body){$('#dashboard-dialog-title').textContent=title;$('#dashboard-dialog-body').replaceChildren(body);$('#dashboard-dialog').showModal();}
+function openDetail(title,body){setText('#dashboard-dialog-title',title);$('#dashboard-dialog-body').replaceChildren(body);$('#dashboard-dialog').showModal();}
 function summary(title,lines,url,label='前往完整记录'){
  const body=node('div');for(const text of lines)body.append(node('p',text));if(url)body.append(action(label,url));openDetail(title,body);
 }
-$('#dashboard-close').onclick=()=>$('#dashboard-dialog').close();
-$('#dashboard-dialog').addEventListener('click',e=>{if(e.target!==e.currentTarget)return;const r=e.currentTarget.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.currentTarget.close();});
-$('#dashboard-help').replaceChildren(icon('info'),node('span','指标口径'));
-$('#dashboard-help').onclick=()=>summary('指标口径',[
+if($('#dashboard-close'))$('#dashboard-close').onclick=()=>$('#dashboard-dialog').close();
+if($('#dashboard-dialog'))$('#dashboard-dialog').addEventListener('click',e=>{if(e.target!==e.currentTarget)return;const r=e.currentTarget.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.currentTarget.close();});
+if($('#dashboard-help'))$('#dashboard-help').replaceChildren(icon('info'),node('span','指标口径'));
+if($('#dashboard-help'))$('#dashboard-help').onclick=()=>summary('指标口径',[
  '业务数据为当前快照，各自按人、次、份和点统计。元数据事件为留存窗口，最多 800 条；核验与交付为已保存记录。',
  '首页仅显示当前身份可见的摘要。已有凭证不代表当前可读取结果，读取时重新检验授权。'
 ],'/static/platform/about.html#dashboard-design','完整口径与身份分区');
-$('#dashboard-refresh').replaceChildren(icon('refresh'),node('span','刷新'));
+if($('#dashboard-refresh'))$('#dashboard-refresh').replaceChildren(icon('refresh'),node('span','刷新'));
 const footerLink=$('.dashboard-footer>a');footerLink.replaceChildren(node('span','首页设计说明'),icon('arrow'));footerLink.classList.add('dashboard-footer-link');
 
 function sourceBars(parent,d){
@@ -147,16 +148,16 @@ function renderAuditor(d,grid,metrics){
 }
 let busy=false,lastData=null;
 async function refresh(){
- if(busy)return;busy=true;$('#dashboard-refresh').disabled=true;root.setAttribute('aria-busy','true');
+ if(busy)return;busy=true;if($('#dashboard-refresh'))$('#dashboard-refresh').disabled=true;root.setAttribute('aria-busy','true');
  try{
   const response=await fetch('/api/dashboard',{headers:headers(),cache:'no-store'}),d=await response.json();
   if(!response.ok)throw Error(d.error||'读取总览失败');if(d.role!==currentAccess().principal.role)throw Error('身份已变化，请刷新页面');
-  const config=dashboardRoles.find(x=>x.role===d.role);$('#dashboard-title').textContent=config.title;document.title=config.title+' · 数据编织平台';$('#dashboard-scope').textContent=d.scope+' · '+config.focus;
+  const config=dashboardRoles.find(x=>x.role===d.role);setText('#dashboard-title',config.title);document.title=config.title+' · 数据编织平台';setText('#dashboard-scope',d.scope+' · '+config.focus);
   const metrics=node('section','','dashboard-metrics');metrics.setAttribute('aria-label','核心指标');const grid=node('div','','dashboard-grid '+d.role);
   ({platform:renderPlatform,provider:renderProvider,requester:renderRequester,auditor:renderAuditor}[d.role])(d,grid,metrics);
-  root.replaceChildren(metrics,grid);lastData=d;$('#dashboard-status').textContent=d.errors.join('；');$('#dashboard-status').hidden=!d.errors.length;$('#dashboard-time').textContent='更新于 '+new Date(d.updated_at).toLocaleTimeString('zh-CN',{hour12:false});
- }catch(e){$('#dashboard-status').hidden=false;$('#dashboard-status').textContent=e.message+(lastData?'；保留上次快照。':'；请点击刷新重试。');}
- finally{busy=false;$('#dashboard-refresh').disabled=false;root.setAttribute('aria-busy','false');}
+  root.replaceChildren(metrics,grid);lastData=d;setText('#dashboard-status',d.errors.join('；'));if($('#dashboard-status'))$('#dashboard-status').hidden=!d.errors.length;setText('#dashboard-time','更新于 '+new Date(d.updated_at).toLocaleTimeString('zh-CN',{hour12:false}));
+ }catch(e){if($('#dashboard-status'))$('#dashboard-status').hidden=false;setText('#dashboard-status',e.message+(lastData?'；保留上次快照。':'；请点击刷新重试。'));}
+ finally{busy=false;if($('#dashboard-refresh'))$('#dashboard-refresh').disabled=false;root.setAttribute('aria-busy','false');}
 }
 $('#dashboard-refresh').onclick=refresh;
 if(await enterPage('overview'))await refresh();
