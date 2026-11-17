@@ -8,10 +8,10 @@ bindRole();
 try {
  await ready();
  const labels={platform:'平台管理员',requester:'业务用户',provider:'数据供给方',auditor:'审计人员'};
- document.querySelector('#identity').textContent=labels[role()]||'当前用户';
- document.querySelector('#avatar').textContent=(labels[role()]||'用户')[0];
- document.querySelector('#admin-link').hidden=false;
- document.querySelector('#connection').textContent='工作空间已连接';
+ const identity=document.querySelector('#identity');if(identity)identity.textContent=labels[role()]||'当前用户';
+ const avatar=document.querySelector('#avatar');if(avatar)avatar.textContent=(labels[role()]||'用户')[0];
+ const adminLink=document.querySelector('#admin-link');if(adminLink)adminLink.hidden=false;
+ const connection=document.querySelector('#connection');if(connection)connection.textContent='工作空间已连接';
  await import('/static/dashboard.js?v=20261117-fix4');
  document.title='驾驶舱总览 · 数据编织平台';
  document.querySelector('#refresh').onclick=()=>document.querySelector('#dashboard-refresh').click();
