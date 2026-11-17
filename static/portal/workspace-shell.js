@@ -25,7 +25,7 @@ if(aside){
  aside.setAttribute('aria-label','主导航');
  aside.innerHTML=`
   <a class="brand" data-full-navigation href="/static/portal/index.html">
-   <span class="brand-mark"><i></i><i></i><i></i><i></i></span>
+   <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
    <span>数据编织平台<small>DATA WORKSPACE</small></span>
   </a>
   <nav id="nav" aria-label="工作空间导航">
@@ -34,7 +34,7 @@ if(aside){
      <p class="nav-group-title">${group.label}</p>
      <div class="nav-group-links">
       ${group.links.map(([id,label,url,ico])=>`
-       <a href="${url}" data-page="${id}" data-full-navigation class="${active===id?'active':''}">
+       <a href="${url}" data-page="${id}" data-full-navigation class="${active===id?'active':''}" ${active===id?'aria-current="page"':''}>
         <span data-icon="${ico}"></span>${label}${id==='ask'?'<span class="nav-tag">AI</span>':''}
        </a>
       `).join('')}
