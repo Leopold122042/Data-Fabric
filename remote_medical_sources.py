@@ -13,13 +13,13 @@ import time
 
 from external_sources import SourceError, box_url, fetch
 
-VERSION = "0.1.13"
+VERSION = "0.1.14"
 GITHUB_BRANCH = "feature/intake-query-reliability"
 GITHUB_ROOT = (
     "https://raw.githubusercontent.com/Leopold122042/Data-Fabric/"
     f"{GITHUB_BRANCH}/medical-demo-sources/v{VERSION}"
 )
-BOX_ROOT = f"MedFabric/medical-demo-sources/v{VERSION}"
+BOX_ROOT = f"私人资料库/MedFabric/medical-demo-sources/v{VERSION}"
 MAX_RESULT_ROWS = 200
 QUERY_TIMEOUT_SECONDS = 5
 
