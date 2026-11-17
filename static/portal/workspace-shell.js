@@ -1,4 +1,4 @@
-import {icon} from '/static/shared/icons.js';
+import {icon} from '/static/shared/icons.js?v=0.1.23';
 
 const groups=[
  {label:'工作台',links:[

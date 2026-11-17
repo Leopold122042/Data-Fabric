@@ -1,6 +1,4 @@
 import {ready,currentAccess,role,bindRole} from '/static/shared/access.js?v=identity-20261111';
-import {icon} from '/static/shared/icons.js';
-document.querySelectorAll('[data-icon]').forEach(el=>el.replaceChildren(icon(({spark:'activity',sliders:'layers',settings:'shield'})[el.dataset.icon]||el.dataset.icon)));
 const pageLabel=document.querySelector('#page-label');if(pageLabel)pageLabel.textContent='驾驶舱总览';
 document.querySelector('a[href="/static/portal/cockpit.html"]').classList.add('active');
 document.querySelector('a[href="/static/portal/cockpit.html"]').setAttribute('aria-current','page');
