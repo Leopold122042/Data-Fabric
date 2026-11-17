@@ -13,10 +13,10 @@ For presentation and exploration only
 python -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python initialize_data.py
-.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8321
+MEDFABRIC_DEMO_ALLOW_PRIVATE_NETWORK=1 .venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port 8321
 ```
 
-访问 `http://127.0.0.1:8321/static/management/index.html`。
+本机访问 `http://127.0.0.1:8321/static/management/index.html`。同一局域网其他设备用运行服务电脑的局域网 IP 访问。Windows 的 `start.bat` 和 `run_server.ps1` 默认开启此演示模式。数据授权和执行校验仍然生效，勿暴露到公网。
 Windows 首次安装使用 `python -m venv .venv` 和
 `.venv\Scripts\python.exe -m pip install -r requirements.txt`，然后运行 `start.bat`
 或 `powershell -File run_server.ps1`；两个入口都会先执行安全初始化。
@@ -27,7 +27,7 @@ Windows 首次安装使用 `python -m venv .venv` 和
 
 默认使用本机 `data/`，控制面持久化到 `runtime/`。默认不启动模拟增长；
 两人分别配置 `MEDFABRIC_DATA_DIR` 和 `MEDFABRIC_CONTROL_DIR`，避免共用可写数据库。
-当前身份是本机演示角色。自然语言需求抽取可选用本地 Ollama（默认地址 `http://127.0.0.1:11434`、模型 `cjl-model:latest`）；通过 `MEDFABRIC_OLLAMA_URL`、`MEDFABRIC_OLLAMA_MODEL` 和 `MEDFABRIC_OLLAMA_TIMEOUT` 配置（默认等待 300 秒，模型保留 10 分钟以减少冷启动）。模型名称需与 `ollama list` 完全一致。LLM 只返回待校验草案，不生成规格、不触发调用、不参与授权；规则缺口和人工确认仍由平台处理。真实认证、B 控制和版本化方案接口尚未接入；桌面版已有云盘连接与目录扫描正常保留。
+当前身份是本机演示角色。自然语言需求抽取和查询意图解析支持本地 Ollama，也支持 OpenAI 兼容 Chat Completions。Ollama 使用 `MEDFABRIC_OLLAMA_URL`、`MEDFABRIC_OLLAMA_MODEL` 和 `MEDFABRIC_OLLAMA_TIMEOUT`；远端模型使用 `MEDFABRIC_LLM_PROVIDER=openai_compatible`、`MEDFABRIC_OPENAI_BASE_URL`、`MEDFABRIC_OPENAI_MODEL`、`MEDFABRIC_OPENAI_API_KEY` 和 `MEDFABRIC_OPENAI_TIMEOUT`。密钥应只写在受限的服务器环境文件中。LLM 只返回待校验草案，不生成规格、不触发调用、不参与授权；规则缺口和人工确认仍由平台处理。真实认证、B 控制和版本化方案接口尚未接入；桌面版已有云盘连接与目录扫描正常保留。
 
 需求链路使用两阶段人工把关：先生成并确认能力链路，模型只接收最多 300 条已登记表/字段/服务元数据（不含数据行）并返回候选资源；链路确认后，目录匹配可标记完成，需连接数据源的步骤等待连接/授权，查询步骤等待单独的任务规格确认。只读SQL草案须引用登记目录中的表和字段、明确列出输出列、最多返回200行，并在规格确认时由人工核对。链路与确认记录按版本保存。SQL仅作为随规格版本保存的审阅草案；当前执行平面通过逻辑视图、固定版本方案和独立授权执行，不会直接运行任意SQL。规格确认后，页面明确引导到方案与执行，后续仍需建视图、确认方案、申请授权和提交运行。字段/表结构变更追踪不在当前流程内。
 

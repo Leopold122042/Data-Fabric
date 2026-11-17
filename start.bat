@@ -1,6 +1,7 @@
 @echo off
 setlocal
 if not defined MEDFABRIC_OLLAMA_MODEL set "MEDFABRIC_OLLAMA_MODEL=gemma4:12b"
+if not defined MEDFABRIC_DEMO_ALLOW_PRIVATE_NETWORK set "MEDFABRIC_DEMO_ALLOW_PRIVATE_NETWORK=1"
 cd /d "%~dp0"
 set "MEDFABRIC_PYTHON=python"
 if exist ".venv\Scripts\python.exe" set "MEDFABRIC_PYTHON=.venv\Scripts\python.exe"
@@ -15,7 +16,7 @@ if errorlevel 1 (
 "%MEDFABRIC_PYTHON%" initialize_data.py
 if errorlevel 1 goto :failed
 start "" http://127.0.0.1:8321/
-"%MEDFABRIC_PYTHON%" -m uvicorn app:app --host 127.0.0.1 --port 8321
+"%MEDFABRIC_PYTHON%" -m uvicorn app:app --host 0.0.0.0 --port 8321
 if errorlevel 1 goto :failed
 pause
 exit /b 0

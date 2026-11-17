@@ -1,4 +1,4 @@
-"""Small Ollama client used only for untrusted intake extraction proposals."""
+"""Provider-aware JSON client used for untrusted intake extraction proposals."""
 import json
 import os
 import re
@@ -112,11 +112,89 @@ def _normalize_field_intents(value):
     return normalized
 
 
-class OllamaIntake:
+class IntakeLLM:
+    """Provider-aware JSON client for intake and semantic query parsing."""
     def __init__(self, base_url=None, model=None, timeout=None):
-        self.base_url=(base_url or os.getenv('MEDFABRIC_OLLAMA_URL','http://127.0.0.1:11434')).rstrip('/')
-        self.model=model or os.getenv('MEDFABRIC_OLLAMA_MODEL','cjl-model:latest')
-        self.timeout=float(timeout or os.getenv('MEDFABRIC_OLLAMA_TIMEOUT','300'))
+        provider=os.getenv('MEDFABRIC_LLM_PROVIDER','ollama').strip().casefold()
+        self.provider='openai_compatible' if provider in ('openai','openai_compatible') else provider
+        if self.provider not in ('ollama','openai_compatible'):
+            raise DomainError('未知模型服务商；MEDFABRIC_LLM_PROVIDER 仅支持 ollama 或 openai_compatible',503)
+        if self.provider=='openai_compatible':
+            self.base_url=(base_url or os.getenv('MEDFABRIC_OPENAI_BASE_URL','')).rstrip('/')
+            self.model=model or os.getenv('MEDFABRIC_OPENAI_MODEL','')
+            self.api_key=os.getenv('MEDFABRIC_OPENAI_API_KEY','')
+            self.timeout=float(timeout or os.getenv('MEDFABRIC_OPENAI_TIMEOUT','300'))
+        else:
+            self.base_url=(base_url or os.getenv('MEDFABRIC_OLLAMA_URL','http://127.0.0.1:11434')).rstrip('/')
+            self.model=model or os.getenv('MEDFABRIC_OLLAMA_MODEL','cjl-model:latest')
+            self.api_key=''
+            self.timeout=float(timeout or os.getenv('MEDFABRIC_OLLAMA_TIMEOUT','300'))
+
+    @property
+    def configured(self):
+        return bool(self.model and self.base_url and (self.provider!='openai_compatible' or self.api_key))
+
+    def _endpoint(self):
+        if self.provider=='ollama':
+            return self.base_url+'/api/chat'
+        if self.base_url.endswith('/chat/completions'):
+            return self.base_url
+        if self.base_url.endswith('/v1'):
+            return self.base_url+'/chat/completions'
+        return self.base_url+'/v1/chat/completions'
+
+    def complete_json(self, messages, schema=None, options=None):
+        if not self.configured:
+            if self.provider=='openai_compatible':
+                raise DomainError('OpenAI 兼容模型未配置完整；请设置 MEDFABRIC_OPENAI_BASE_URL、MEDFABRIC_OPENAI_MODEL 和服务器端 MEDFABRIC_OPENAI_API_KEY',503)
+            raise DomainError('Ollama 模型地址或名称未配置',503)
+        if self.provider=='openai_compatible':
+            payload={'model':self.model,'stream':False,'messages':messages,
+                     'response_format':{'type':'json_object'}}
+            if options:
+                payload.update({k:v for k,v in options.items() if k in ('temperature','max_tokens','top_p')})
+            headers={'Content-Type':'application/json','Authorization':'Bearer '+self.api_key}
+        else:
+            payload={'model':self.model,'stream':False,'format':schema or 'json','keep_alive':'10m',
+                     'messages':messages}
+            if options:
+                payload['options']=options
+            headers={'Content-Type':'application/json'}
+        request=urllib.request.Request(self._endpoint(),data=json.dumps(payload,ensure_ascii=False).encode(),headers=headers)
+        try:
+            with urllib.request.urlopen(request,timeout=self.timeout) as response:
+                raw=json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            try:
+                body=json.loads(exc.read())
+                detail=body.get('error',str(exc))
+                if isinstance(detail,dict):detail=detail.get('message') or str(detail)
+            except (ValueError,AttributeError):
+                detail=f'HTTP {exc.code}'
+            detail=str(detail).replace(self.api_key,'[已隐藏]')[:500] if self.api_key else str(detail)[:500]
+            if self.provider=='ollama':
+                if exc.code==404 and 'not found' in detail.lower():
+                    raise DomainError(f'Ollama 中没有模型“{self.model}”。已安装模型请配置 MEDFABRIC_OLLAMA_MODEL（当前可用：调用 /api/tags 查看）',503)
+                raise DomainError(f'Ollama 请求失败（HTTP {exc.code}）：{detail}',502)
+            raise DomainError(f'OpenAI 兼容模型请求失败（HTTP {exc.code}）：{detail}',502)
+        except (urllib.error.URLError,TimeoutError,socket.timeout) as exc:
+            reason=getattr(exc,'reason',exc)
+            if isinstance(reason,(TimeoutError,socket.timeout)) or 'timed out' in str(reason).lower():
+                raise DomainError(f'模型仍在推理，超过等待时间 {self.timeout:g} 秒；请稍后重试，或延长对应服务商的超时配置。',504)
+            service='Ollama' if self.provider=='ollama' else 'OpenAI 兼容接口'
+            raise DomainError(f'无法连接{service}，请检查服务状态和地址：'+str(exc),503)
+        except (ValueError,KeyError) as exc:
+            raise DomainError('模型返回格式无效：'+str(exc),502)
+        try:
+            if self.provider=='ollama':
+                content=raw['message']['content']
+            else:
+                content=raw['choices'][0]['message']['content']
+                if isinstance(content,list):
+                    content=''.join(part.get('text','') for part in content if isinstance(part,dict))
+            return json.loads(content)
+        except (KeyError,IndexError,TypeError,ValueError) as exc:
+            raise DomainError('模型没有返回有效JSON对象',502) from exc
 
     def extract(self, text, catalog=None):
         if not isinstance(text,str) or not text.strip():raise DomainError('请提供自然语言需求')
@@ -161,28 +239,7 @@ class OllamaIntake:
                 '成本字段只在原文明确提出预算、费用或金额约束时填写；原文没有明确提及则必须为null，禁止猜测或补默认值。'
                 '链路只是建议，之后由规则校验和人工确认。输出一个JSON对象，并严格遵循此结构约定：'
                 +json.dumps(schema,ensure_ascii=False)+'\n目录元数据：'+catalog_text+'\n原文：'+text)
-        # Ollama JSON-schema constrained decoding fails to load the vocabulary for
-        # some locally imported GGUF models. Use its compatible JSON mode and
-        # enforce the full application contract below before accepting anything.
-        payload=json.dumps({'model':self.model,'stream':False,'format':'json','keep_alive':'10m',
-            'messages':[{'role':'user','content':prompt}]},ensure_ascii=False).encode()
-        req=urllib.request.Request(self.base_url+'/api/chat',data=payload,headers={'Content-Type':'application/json'})
-        try:
-            with urllib.request.urlopen(req,timeout=self.timeout) as response: raw=json.loads(response.read())
-        except urllib.error.HTTPError as exc:
-            try: detail=json.loads(exc.read()).get('error',str(exc))
-            except (ValueError,AttributeError): detail=str(exc)
-            if exc.code==404 and 'not found' in str(detail).lower():
-                raise DomainError(f'Ollama 中没有模型“{self.model}”。已安装模型请配置 MEDFABRIC_OLLAMA_MODEL（当前可用：调用 /api/tags 查看）',503)
-            raise DomainError(f'Ollama 请求失败（HTTP {exc.code}）：{detail}',502)
-        except (urllib.error.URLError,TimeoutError,socket.timeout) as exc:
-            reason=getattr(exc,'reason',exc)
-            if isinstance(reason,(TimeoutError,socket.timeout)) or 'timed out' in str(reason).lower():
-                raise DomainError(f'Ollama 模型仍在推理，超过等待时间 {self.timeout:g} 秒；请稍后重试，或设置 MEDFABRIC_OLLAMA_TIMEOUT 延长等待时间。',504)
-            raise DomainError('无法连接本地 Ollama，请检查服务状态和地址：'+str(exc),503)
-        except (ValueError,KeyError) as exc:raise DomainError('Ollama 返回格式无效：'+str(exc),502)
-        try: proposal=json.loads(raw['message']['content'])
-        except (KeyError,TypeError,ValueError):raise DomainError('模型没有返回有效JSON草案',502)
+        proposal=self.complete_json([{'role':'user','content':prompt}])
         keys=FIELDS+('field_intents','capability_steps','resource_recommendations','query_draft','uncertain_fields')
         if not isinstance(proposal,dict):
             raise DomainError('模型草案未通过结构校验',502)
@@ -265,3 +322,8 @@ class OllamaIntake:
         return {k:proposal.get(k) for k in FIELDS}|{'field_intents':field_intents,'capability_steps':steps,
             'resource_recommendations':recommendations,'query_draft':query,
             'uncertain_fields':list(dict.fromkeys(proposal.get('uncertain_fields',[])))}
+
+
+# Keep the old import name available to extensions while all platform callsites
+# use the provider-neutral client above.
+OllamaIntake = IntakeLLM

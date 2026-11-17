@@ -77,9 +77,10 @@ def create_router(runtime,identity):
     @router.get('/status')
     def status(request:Request):
         user=who(request)
-        from management.intake.ollama import OllamaIntake, explicitly_mentions_cost
-        ollama=OllamaIntake()
-        return {'principal':user,'environment':m.store.environment,'llm':{'available':True,'provider':'ollama','model':ollama.model,'base_url':ollama.base_url},
+        from management.intake.ollama import IntakeLLM, explicitly_mentions_cost
+        llm=IntakeLLM()
+        return {'principal':user,'environment':m.store.environment,'llm':{'available':llm.configured,'provider':llm.provider,'model':llm.model,'base_url':llm.base_url,
+                    'api_key_configured':bool(llm.api_key)},
                 'plan_snapshots':m.services.plan_reader is not None,'external_identity':False,'execution_control':m.reconciliation.controller is not None,
                 'counts':{k:sum(can_read(k,x,user) for x in m.store.list(k)) for k in ('object','concept','mapping','service','demand','case')},
                 'capabilities':{'sources':['SQLite','CSV','JSON','EMR JSON','WebDAV','GitHub'],'external_sources':'已接入：云盘目录、虚拟表；选中结构可纳入平台目录','standards':'本地schema，未验证国家/行业标准'}}
@@ -435,7 +436,7 @@ def create_router(runtime,identity):
     async def propose_flow(request:Request):
         user=who(request,action='demand.understand');body=await request.json()
         demand_id=body.get('demand_id');own('demand',demand_id,user)
-        from management.intake.ollama import OllamaIntake
+        from management.intake.ollama import IntakeLLM
         external_catalog=intake_flow.external_catalog(request)
         request_text=body.get('text','')
         preparsed_draft=None
@@ -444,7 +445,7 @@ def create_router(runtime,identity):
                 if item.get('demand_id')==demand_id and item.get('request_text')==request_text
                 and isinstance(item.get('draft'),dict)),key=lambda item:item.get('updated_at',''),default=None)
             preparsed_draft=prior.get('draft') if prior else None
-        flow=intake_flow.propose(demand_id,request_text,user['id'],OllamaIntake(),external_catalog,
+        flow=intake_flow.propose(demand_id,request_text,user['id'],IntakeLLM(),external_catalog,
             preparsed_draft=preparsed_draft)
         return {'flow':flow,'stage':'awaiting_chain_confirmation',
                 'note':'仅生成待确认链路；未生成任务规格、未执行查询、未触发服务、未授予权限。'}
@@ -552,9 +553,9 @@ def create_router(runtime,identity):
                     if not any(compact(note) and compact(note) in compact(gap)
                                for note in acknowledged_gaps)]
                 preparsed_draft=draft_copy
-        from management.intake.ollama import OllamaIntake
+        from management.intake.ollama import IntakeLLM
         external_catalog=intake_flow.external_catalog(request)
-        next_flow=intake_flow.propose(flow['demand_id'],clarified_text,user['id'],OllamaIntake(),
+        next_flow=intake_flow.propose(flow['demand_id'],clarified_text,user['id'],IntakeLLM(),
             external_catalog,field_selections=field_selections,
             preparsed_draft=(preparsed_draft or
                 (flow.get('draft') if field_selections and not has_free_text_answer else None)))
@@ -972,15 +973,15 @@ def create_router(runtime,identity):
     @router.post('/intake/understand')
     async def understand(request:Request):
         user=who(request,action='demand.understand');body=await request.json()
-        from management.intake.ollama import OllamaIntake
-        draft=OllamaIntake().extract(body.get('text',''),intake_flow._catalog_metadata())
+        from management.intake.ollama import IntakeLLM
+        draft=IntakeLLM().extract(body.get('text',''),intake_flow._catalog_metadata())
         demand_id=body.get('demand_id')
         if demand_id:
             own('demand',demand_id,user)
             result=m.intake.apply_draft(demand_id,{'expected_version':body.get('expected_version'),'proposal':draft,
-                'model':OllamaIntake().model,'cost_explicit':explicitly_mentions_cost(body.get('text',''))},user['id'])
-            return {**result,'model':OllamaIntake().model,'stage':'draft_only'}
-        return {'draft':draft,'model':OllamaIntake().model,'stage':'draft_only',
+                'model':IntakeLLM().model,'cost_explicit':explicitly_mentions_cost(body.get('text',''))},user['id'])
+            return {**result,'model':IntakeLLM().model,'stage':'draft_only'}
+        return {'draft':draft,'model':IntakeLLM().model,'stage':'draft_only',
                 'note':'仅为待规则校验的抽取草案；未生成规格、未触发调用、未授权'}
 
     @router.get('/runs')

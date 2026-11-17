@@ -4,6 +4,7 @@ __pycache__/
 .venv-external/
 .env
 .env.*
+/2080ti.txt
 
 /private_catalog/
 
