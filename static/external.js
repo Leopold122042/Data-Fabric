@@ -266,10 +266,17 @@
     action(async()=>{
       try {
         el('extLoginError').textContent='正在验证连接…';
-        await api('box/connect',{username:el('extUser').value.trim(),token:el('extToken').value});
+        const connected=await api('box/connect',{username:el('extUser').value.trim(),token:el('extToken').value});
+        cloudConnected=Boolean(connected.connected);
         resetScanDirectory();
         el('extToken').value='';
-        await loadVirtualCatalog();
+        try{await loadVirtualCatalog();}catch(error){
+          cloudConnected=Boolean(connected.connected);
+          el('extCloudState').textContent='南大云盘已连接；旧 CESAI 目录未配置，不影响医疗源文件上传与查询。';
+          el('extCloudDisconnect').hidden=!cloudConnected;
+          el('extCloudConnect').textContent='更换云盘连接';
+          el('extCloudConnect').hidden=false;
+        }
         await loadDiscovered();
         const continuation=pendingCloudAction;
         pendingCloudAction=null;
@@ -533,5 +540,5 @@
   el('extAutoConfirm').onclick=()=>action(()=>autoQuery('confirm'));
   el('extAutoQuery').onclick=()=>action(()=>autoQuery('query'));
   document.querySelector('[data-tab="external"]')?.addEventListener('click',()=>{if(!ready)action(initialize);});
-  if(document.getElementById('tab-external')){const autoConnect=new URLSearchParams(location.search).get('connect')==='1';action(async()=>{await initialize();if(autoConnect&&!cloudConnected)openCloudLogin();});loadGrants();}
+  if(document.getElementById('tab-external')){const params=new URLSearchParams(location.search),autoConnect=params.get('connect')==='1',autoUpload=params.get('upload')==='1';action(async()=>{await initialize();if(autoUpload&&!cloudConnected)openCloudLogin(uploadMedicalSources);else if(autoConnect&&!cloudConnected)openCloudLogin();});loadGrants();}
 })();

@@ -162,7 +162,6 @@ def cloud_auth(current, body):
 def box_connect(body: BoxInput, request: Request, response: Response):
     current=session(request,response)
     def run():
-        from external_virtual import catalog
         if not body.username.strip() or not body.token:
             raise HTTPException(400,'请填写云盘用户名和令牌。')
         with current.virtual_lock:
@@ -170,7 +169,11 @@ def box_connect(body: BoxInput, request: Request, response: Response):
             current.cloud_credentials=None
             current.scan_job=None
             current.virtual_files.clear()
-            list_directory(catalog()['root'],body.username,body.token)
+            from external_virtual import CATALOG_PATH, catalog
+            # The medical source service can use the cloud even when the
+            # optional legacy CESAI workbook catalog has not been configured.
+            root=catalog()['root'] if CATALOG_PATH.is_file() else ''
+            list_directory(root,body.username,body.token)
             current.cloud_credentials=(body.username.strip(),body.token)
         return {'connected':True,'message':'云盘已连接，授权仅在当前会话内存中保留。'}
     return perform(run)
