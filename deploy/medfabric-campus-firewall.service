@@ -1,0 +1,14 @@
+[Unit]
+Description=Restrict MedFabric web port to campus networks
+After=network-pre.target
+Before=medfabric.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/medfabric-campus-firewall.sh
+ExecStop=/usr/local/sbin/medfabric-campus-firewall.sh --remove
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
