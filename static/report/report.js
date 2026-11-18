@@ -1,7 +1,6 @@
 import {guideHtml} from './topic2-guide.js?v=019';
 import {caseIntro,caseContent} from './topic2-case.js?v=case-017';
 import {renderTopicFour} from './topic4.js?v=topic4-r2-20261113';
-import {renderKnowledgeGraph} from './topic1.js?v=topic1-graph-r6-20261117';
 const $=selector=>document.querySelector(selector);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const topics={
@@ -69,6 +68,7 @@ function setTopic(topic){
  });
  $('#topic-content').setAttribute('aria-labelledby',`topic-tab-${topic}`);
  const data=topics[topic];$('#topic-eyebrow').textContent=data.label;$('#topic-title').textContent=data.title;$('#topic-summary').textContent=data.summary;
+ $('.topic-heading').classList.toggle('topic-one-heading',topic==='1');
  document.querySelector('.heading-mark').textContent=topic.padStart(2,'0');
  const url=new URL(location.href);if(topic==='2')url.searchParams.delete('topic');else url.searchParams.set('topic',topic);history.replaceState(null,'',url);
  if(topic==='2')renderTopicTwo();
@@ -78,8 +78,7 @@ function setTopic(topic){
 }
 function renderTopicOne(){
  const links=frameworkLinks.map(link=>`<a class="framework-hotspot" href="${link.href}" target="_blank" rel="noopener" aria-label="${esc(link.label)}，在新标签页打开" title="${esc(link.label)}" style="left:${link.x}%;top:${link.y}%;width:${link.w}%;height:${link.h}%"><span>打开对应功能 ↗</span></a>`).join('');
- $('#topic-content').innerHTML=`<article class="framework-panel"><header class="framework-panel-heading"><div><p class="framework-eyebrow">端到端使用与运行流程</p><h2>医疗数据编织平台总体框架</h2><p>按阶段自下而上阅读。点击任一编号步骤或底部治理约束，可在新标签页打开对应的平台工作区。</p></div><span class="framework-count">12 个流程节点<br>4 个运行阶段</span></header><div class="framework-scroll"><div class="framework-board"><img src="/static/report/images/topic5-framework.png" alt="医疗数据编织平台端到端使用流程：底部为数据准备与语义资产，其上为需求解析与字段语义匹配、方案编译与受控执行，顶部为结果交付与运行反馈。" width="2100" height="1500" loading="eager">${links}</div></div><p class="framework-caption"><span>图 1　医疗数据编织平台使用与运行流程</span><span>实线表示主流程，虚线表示治理反馈</span></p></article><section id="knowledge-graph" class="knowledge-graph" aria-label="字段与逻辑表知识图谱"></section>`;
- renderKnowledgeGraph($('#knowledge-graph'));
+ $('#topic-content').innerHTML=`<article class="framework-panel graphic-only"><div class="framework-scroll"><div class="framework-board"><img src="/static/report/images/topic5-framework.png" alt="医疗数据编织平台总体框架图" width="2100" height="1500" loading="eager">${links}</div></div></article>`;
 }
 function renderTopicTwo(){
  $('#topic-content').innerHTML=`<div id="case-guide">${guideHtml(state)}</div><details class="case-fixture"><summary>查看本次演示案例与数据范围</summary>${caseIntro()}</details><div class="journey-tabs" role="tablist" aria-label="课题二演示阶段">${stages.map((stage,index)=>`<button class="journey-tab ${state.stage===stage.id?'active':''}" role="tab" aria-selected="${state.stage===stage.id}" aria-controls="stage-panel" data-stage="${stage.id}" type="button"><span>${String(index+1).padStart(2,'0')}</span>${esc(stage.label)}</button>`).join('')}</div><div class="demo-layout"><section class="stage-panel" id="stage-panel" role="tabpanel"></section><aside class="object-rail" id="object-rail" aria-label="贯穿全程的中间对象"></aside></div>`;
