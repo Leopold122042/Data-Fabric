@@ -9,7 +9,6 @@ document.querySelectorAll('[data-icon]').forEach(el=>{if(!el.closest('.sidebar')
 const names={home:'总览',ask:'自然语言查询',query:'专业查询',admin:'管理入口'};
 const states={awaiting_chain_confirmation:'待确认查询',waiting_manual_spec_confirmation:'待审核范围',waiting_field_classification:'待确认字段分类',awaiting_execution_plan:'准备查询方案',awaiting_plan_confirmation:'待确认方案',awaiting_authorization_request:'待申请访问',awaiting_platform_authorization:'等待审批',authorization_declined:'申请未通过',awaiting_query_submission:'可以运行',query_queued:'排队中',query_running:'查询中',query_completed:'已完成',query_failed:'查询未完成',attention:'需要处理',waiting_authorization:'等待连接',completed:'已完成'};
 let catalog=[],catalogLoaded=false,flow=null,demand=null,delivery=null,canDownload=false,poll=null,routeGeneration=0,busy=false,toastTimer=null;
-let knowledgeGraphModule=null,knowledgeGraphStylePromise=null;
 let builder={table:'',join:'',fields:[],filters:[],order:'',direction:'desc',limit:100,sqlOverride:null};
 const date=v=>{if(!v)return '—';const d=new Date(v);return Number.isNaN(d.valueOf())?'—':new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(d);};
 const page=()=>new URL(location.href).searchParams.get('page')||'home';
@@ -37,44 +36,9 @@ async function home(gen){
  $('#main').innerHTML=`
   <section class="hero"><div><p class="eyebrow">YOUR DATA, CONNECTED.</p><h1>让数据，回答问题。</h1><p>用自然语言探索，或自主构建查询。你的工作，从这里开始。</p></div><span class="date-tag">${new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(new Date())}</span></section>
   <section class="entry-grid" aria-label="开始查询"><a class="entry ai" href="?page=ask"><span class="entry-symbol">${icon('spark')}</span><div><span class="tiny-label">ASK WITH AI</span><h2>用自然语言提问</h2><p>描述你想了解的内容，让 AI 帮你找到数据。</p></div><span class="arrow">↗</span></a><a class="entry" href="?page=query"><span class="entry-symbol">${icon('sliders')}</span><div><span class="tiny-label">BUILD YOUR QUERY</span><h2>自主构建查询</h2><p>选择数据、字段与条件，掌握每一步。</p></div><span class="arrow">↗</span></a></section>
-  <section class="graph-entry-section" aria-label="数据关系图谱"><button class="graph-entry" id="open-knowledge-graph" type="button" aria-haspopup="dialog" aria-controls="knowledge-graph-dialog"><span class="graph-entry-icon">${icon('network')}</span><span class="graph-entry-copy"><span class="tiny-label">DATA RELATIONSHIP MAP</span><strong>字段与逻辑表知识图谱</strong><small>查看数据表、字段定义和已确认的跨表关联</small></span><span class="graph-entry-action"><span>打开图谱</span><b>↗</b></span></button></section>
   <section class="stats" aria-label="数据资源统计">${[[data.sources,'已连接数据源','database','当前可用的来源'],[data.tables,'可见数据表','table','当前角色可查看的目录'],[data.fields,'目录字段','grid','已登记的可见字段'],[data.query_count,'查询记录','chart',data.scope]].map(([n,l,i,s])=>`<div class="stat"><div class="stat-label">${l}${icon(i)}</div><div class="stat-number">${n.toLocaleString('zh-CN')}</div><small>${esc(s)}</small></div>`).join('')}</section>
   <section class="panel"><div class="panel-head"><div><h2>查询趋势</h2><p>按每条需求最近一次更新统计</p></div><span class="tag">最近 7 天</span></div><div class="chart-wrap">${chart}<div class="chart-labels">${data.trend.map(x=>`<span>${x.date.slice(5).replace('-','/')}</span>`).join('')}</div></div></section>
-  <section class="panel"><div class="panel-head" style="padding-bottom:18px"><div><h2>最近查询</h2><p>继续上次的探索，或查看已有结果</p></div><span class="text-link">最近 ${data.recent.length} 条</span></div>${recentTable(data.recent)}</section>
-  <dialog class="knowledge-graph-dialog" id="knowledge-graph-dialog" aria-label="字段与逻辑表知识图谱"><div class="knowledge-graph-dialog-head"><div><p class="eyebrow">工作台 / 数据关系</p><p class="knowledge-graph-dialog-note">点击逻辑表查看字段定义，点击字段查看已确认的关联候选；此图谱只读取目录元数据。</p></div><button class="button small" id="close-knowledge-graph" type="button">返回总览</button></div><div id="knowledge-graph-host"></div></dialog>`;
- bindKnowledgeGraphEntry();
-}
-
-function loadKnowledgeGraphStyles(){
- if(knowledgeGraphStylePromise)return knowledgeGraphStylePromise;
- knowledgeGraphStylePromise=new Promise((resolve,reject)=>{
-  const link=document.createElement('link');link.rel='stylesheet';link.href='/static/report/topic1.css?v=topic1-graph-r6-20261117';
-  link.onload=resolve;link.onerror=()=>reject(new Error('知识图谱样式暂时无法加载'));
-  document.head.append(link);
- });
- return knowledgeGraphStylePromise;
-}
-
-function bindKnowledgeGraphEntry(){
- const dialog=$('#knowledge-graph-dialog'),trigger=$('#open-knowledge-graph'),host=$('#knowledge-graph-host');
- let rendered=false,loadingGraph=false;
- const openGraph=async()=>{
-  if(!dialog.open)dialog.showModal();
-  if(rendered||loadingGraph)return;
-  loadingGraph=true;host.setAttribute('aria-busy','true');host.innerHTML=loading('正在读取目录和字段定义…');
-  try{
-   await loadKnowledgeGraphStyles();
-   if(!knowledgeGraphModule)knowledgeGraphModule=await import('/static/report/topic1.js?v=topic1-graph-r6-20261117');
-   knowledgeGraphModule.renderKnowledgeGraph(host);rendered=true;
-  }catch(error){
-   host.innerHTML=`<div class="notice error" role="alert">${esc(error.message)}<button class="button small" id="retry-knowledge-graph" type="button">重试</button></div>`;
-   host.querySelector('#retry-knowledge-graph')?.addEventListener('click',()=>{knowledgeGraphStylePromise=null;openGraph();});
-  }finally{loadingGraph=false;host.removeAttribute('aria-busy');}
- };
- trigger.addEventListener('click',openGraph);
- $('#close-knowledge-graph').addEventListener('click',()=>dialog.close());
- dialog.addEventListener('click',event=>{if(event.target===dialog)dialog.close();});
- dialog.addEventListener('close',()=>trigger.focus());
+  <section class="panel"><div class="panel-head" style="padding-bottom:18px"><div><h2>最近查询</h2><p>继续上次的探索，或查看已有结果</p></div><span class="text-link">最近 ${data.recent.length} 条</span></div>${recentTable(data.recent)}</section>`;
 }
 function ask(initial=''){const enabled=allowed('demand.create');$('#main').innerHTML=`<section class="ask-start"><div class="ask-title"><span class="entry-symbol">${icon('spark')}</span><p class="eyebrow">ASK YOUR DATA</p><h1>你想从数据中了解什么？</h1><p>直接描述问题，我们会先确认理解，再查询数据。</p></div><form id="ask-form" class="composer"><textarea id="question" maxlength="4000" aria-label="用自然语言描述查询需求" placeholder="例如：查询唐军的性别和就诊科室…" required ${enabled?'':'disabled'}>${esc(initial)}</textarea><div class="composer-foot"><small>${enabled?'Enter 换行 · Ctrl / ⌘ + Enter 提交':'当前身份不能新建查询，可返回总览查看已有记录。'}</small><button class="button primary" id="ask-submit" ${enabled?'':'disabled'} type="submit">开始查询 ${icon('send')}</button></div></form><div class="examples" aria-label="示例问题">${['查询唐军的性别和就诊科室','查询唐军的出生日期和医保类型','查询唐军的现病史'].map(x=>`<button class="example" type="button">${esc(x)}</button>`).join('')}</div><p class="hint">有不明确的口径时，我们会向你确认。结果仅来自当前已连接的数据源。</p><div id="ask-error" role="alert"></div></section>`;
  document.querySelectorAll('.example').forEach(el=>el.onclick=()=>{$('#question').value=el.textContent;$('#question').focus();});

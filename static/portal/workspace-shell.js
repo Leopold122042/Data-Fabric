@@ -1,4 +1,4 @@
-import {icon} from '/static/shared/icons.js?v=0.1.23';
+import {icon} from '/static/shared/icons.js?v=0.1.25';
 
 const groups=[
  {label:'工作台',links:[
@@ -7,6 +7,7 @@ const groups=[
  ]},
  {label:'数据资源',links:[
   ['services','数据服务','/static/portal/services.html','database'],
+  ['graph','知识图谱','/static/portal/knowledge-graph.html','network'],
  ]},
  {label:'查询方式',links:[
   ['ask','自然语言查询','/static/portal/index.html?page=ask','spark'],
@@ -15,7 +16,7 @@ const groups=[
 ];
 const path=location.pathname;
 const page=new URLSearchParams(location.search).get('page')||'home';
-const active=path.endsWith('/cockpit.html')?'cockpit':path.endsWith('/services.html')?'services':page;
+const active=path.endsWith('/cockpit.html')?'cockpit':path.endsWith('/services.html')?'services':path.endsWith('/knowledge-graph.html')?'graph':page;
 const aside=document.querySelector('.sidebar');
 const role=localStorage.getItem('mf-demo-role')||'platform';
 const roleLabels={platform:'平台管理员',requester:'业务用户',provider:'数据供给方',auditor:'审计人员'};

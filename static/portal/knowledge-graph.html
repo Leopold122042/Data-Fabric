@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light">
+<title>知识图谱 · 数据编织平台</title>
+<link rel="stylesheet" href="/static/portal/portal.css?v=0.1.25">
+<link rel="stylesheet" href="/static/portal/workspace-shell.css?v=0.1.25">
+<link rel="stylesheet" href="/static/report/topic1.css?v=topic1-graph-r6-20261117">
+</head>
+<body><a class="skip" href="#main">跳到主要内容</a>
+<div class="app"><aside class="sidebar" aria-label="主导航">
+<a class="brand" href="/static/portal/index.html"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>数据编织平台<small>DATA WORKSPACE</small></span></a>
+<nav id="nav" aria-label="工作空间导航">
+<div class="nav-group" role="group" aria-label="工作台"><p class="nav-group-title">工作台</p><div class="nav-group-links"><a href="/static/portal/index.html?page=home" data-page="home" data-full-navigation><span data-icon="grid"></span>总览</a><a href="/static/portal/cockpit.html" data-page="cockpit" data-full-navigation><span data-icon="chart"></span>驾驶舱总览</a></div></div>
+<div class="nav-group" role="group" aria-label="数据资源"><p class="nav-group-title">数据资源</p><div class="nav-group-links"><a href="/static/portal/services.html" data-page="services" data-full-navigation><span data-icon="database"></span>数据服务</a><a class="active" href="/static/portal/knowledge-graph.html" data-page="graph" data-full-navigation aria-current="page"><span data-icon="network"></span>知识图谱</a></div></div>
+<div class="nav-group" role="group" aria-label="查询方式"><p class="nav-group-title">查询方式</p><div class="nav-group-links"><a href="/static/portal/index.html?page=ask" data-page="ask" data-full-navigation><span data-icon="spark"></span>自然语言查询<span class="nav-tag">AI</span></a><a href="/static/portal/index.html?page=query" data-page="query" data-full-navigation><span data-icon="sliders"></span>专业查询</a></div></div>
+</nav><div class="sidebar-bottom"><div class="workspace-note"><span class="status-dot"></span>你的数据，清晰可用<p>从一个问题，到一个答案。</p></div><a class="admin-link" href="/static/portal/index.html?page=admin"><span>⚙</span>管理入口<span>↗</span></a><div class="profile"><span class="avatar">用</span><div><strong>平台管理员</strong><small>当前工作空间</small></div></div></div>
+</aside>
+<div class="body">
+<header class="topbar"><div><span class="breadcrumb">工作空间</span><span class="divider">/</span><strong>知识图谱</strong></div><div class="topbar-right">
+<a class="workspace-shortcut" href="/static/report/index.html">课题展示 ↗</a>
+<label class="portal-role">当前身份<select id="role" aria-label="当前身份"><option value="platform">平台方</option><option value="provider">供给方</option><option value="requester">需求方</option><option value="auditor">审计方</option></select></label>
+<span class="connection" id="connection"><span class="status-dot"></span>连接平台</span>
+<button class="icon-button" id="refresh" aria-label="刷新知识图谱" title="刷新"><span data-icon="refresh"></span></button>
+</div></header>
+<main id="main" tabindex="-1">
+<section class="page-heading"><div><p class="eyebrow">DATA RESOURCES / KNOWLEDGE GRAPH</p><h1>知识图谱</h1><p>查看逻辑表、字段定义及已登记的跨表关联候选。</p></div></section>
+<div id="knowledge-graph" class="knowledge-graph" aria-live="polite"></div>
+</main>
+<footer class="page-footer"><span>数据编织平台</span><span>图谱使用目录元数据，不读取业务数据行</span></footer>
+</div></div>
+<script type="module" src="/static/portal/workspace-shell.js?v=0.1.25"></script>
+<script type="module" src="/static/portal/knowledge-graph.js?v=0.1.25"></script>
+</body></html>
