@@ -1,5 +1,5 @@
-import {api,message} from './ui.js?v=identity-20261111';
-import {role,currentAccess} from '/static/shared/access.js?v=identity-20261111';
+import {api,message} from './ui.js?v=0.1.28';
+import {role,currentAccess} from '/static/shared/access.js?v=0.1.28';
 
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;};
 const actionButton=(text,handler)=>{const button=el('button',text,'mf-button mf-button-primary');button.type='button';button.onclick=handler;return button;};

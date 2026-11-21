@@ -1,6 +1,6 @@
-import {ready,headers,bindRole,enterPage,readable,allowed,currentAccess,showAccess} from '/static/shared/access.js?v=identity-20261111';
-import {managementRule,presentation,pageResource,buttonState,paginationState} from '/static/shared/access-model.js?v=identity-20261111';
-import {record as renderRecord} from '/static/platform/common.js?v=identity-20261111';
+import {ready,headers,bindRole,enterPage,readable,allowed,currentAccess,showAccess} from '/static/shared/access.js?v=0.1.28';
+import {managementRule,presentation,pageResource,buttonState,paginationState} from '/static/shared/access-model.js?v=0.1.28';
+import {record as renderRecord} from '/static/platform/common.js?v=0.1.28';
 export const $=s=>document.querySelector(s);
 export const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export let selected=null;

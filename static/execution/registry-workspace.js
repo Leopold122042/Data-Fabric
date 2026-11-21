@@ -1,6 +1,6 @@
-import {executionActions as actionRules} from '/static/shared/access-model.js?v=identity-20261111';
-import {enterPage,headers,allowed} from '/static/shared/access.js?v=identity-20261111';
-import {form,$,esc} from '/static/management/ui.js?v=identity-20261111';
+import {executionActions as actionRules} from '/static/shared/access-model.js?v=0.1.28';
+import {enterPage,headers,allowed} from '/static/shared/access.js?v=0.1.28';
+import {form,$,esc} from '/static/management/ui.js?v=0.1.28';
 
 const mode=location.pathname.endsWith('/contracts.html')?'contract':'facility';
 const config={

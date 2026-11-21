@@ -1,7 +1,7 @@
-import {executionLabels as labels,executionActions as actionRules,visibleExecutionTabs} from '/static/shared/access-model.js?v=identity-20261111';
-import {enterPage,headers,allowed,readable,currentAccess,showAccess} from '/static/shared/access.js?v=identity-20261111';
-import {action,form,show as showJson,$,esc} from '/static/management/ui.js?v=identity-20261111';
-import {record as renderRecord} from '/static/platform/common.js?v=identity-20261111';
+import {executionLabels as labels,executionActions as actionRules,visibleExecutionTabs} from '/static/shared/access-model.js?v=0.1.28';
+import {enterPage,headers,allowed,readable,currentAccess,showAccess} from '/static/shared/access.js?v=0.1.28';
+import {action,form,show as showJson,$,esc} from '/static/management/ui.js?v=0.1.28';
+import {record as renderRecord} from '/static/platform/common.js?v=0.1.28';
 async function main(){
 if(!await enterPage())return;
 let kind=new URLSearchParams(location.search).get('tab')||'plan',chosen=null,records=[];
@@ -21,8 +21,7 @@ function show(value,title='详情'){
  if(preview.childElementCount){$('#detail').hidden=true;const toggle=text('button','查看完整记录');toggle.className='mf-button';toggle.onclick=()=>{$('#detail').hidden=!$('#detail').hidden;toggle.textContent=$('#detail').hidden?'查看完整记录':'收起完整记录';};}
 }
 
-$('#page-title').textContent='执行与受控交付';$('#page-help').textContent='从已确认规格生成方案，确认版本后申请本地授权。任务执行和交付均重新检查授权；运行证据进入偏差校准与评价复测。';
-$('#identity').textContent='本机身份 · 本地权限已启用';
+$('#page-title').textContent='执行与受控交付';$('#page-help').textContent='先核对方案用途、数据范围和执行步骤；一次确认后，平台按当前账户等级登记限期授权并提交，运行阶段再次检查权限。';
 async function api(path,body,base='/api/execution'){const r=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:headers({'Content-Type':'application/json'}),...(body===undefined?{}:{body:JSON.stringify(body)})});const result=await r.json();if(!r.ok)throw Error(result.error||result.detail||'请求失败');return result;}
 function message(value){$('#status').textContent=value;}
 function need(){if(!chosen)throw Error('请先选择一条记录');return chosen;}
@@ -40,6 +39,13 @@ async function load(){
  render();show(chosen||'选择记录查看详情。');refreshButtons();
  message(`已加载 ${records.length} 条${labels[kind]}`+(selectedId&&!chosen?' · 未找到可查看的记录':''));
 }
+
+function confirmRun(plan,retry=false){
+ const nodes=(plan.nodes||[]).map((node,index)=>`${index+1}. ${node.operation==='view'?'逻辑视图':node.operation==='service'?'数据服务':'医疗汇总'}${node.service_id?' · '+node.service_id:''}${node.view_id?' · '+node.view_id:''}`).join('\n')||'执行当前固定方案';
+ const policy=plan.execution_policy||{};
+ const scope=policy.scope?.kind==='lookup'?'按已确认筛选条件查询':policy.scope?.kind==='medical'?'虚构医疗汇总示例':'按已确认方案范围';
+ return confirm(`${retry?'重新执行':'执行'}方案「${plan.name||plan.id}」？\n用途：${plan.purpose||'—'}\n范围：${scope}\n输出：${plan.output_mode==='aggregate'?'汇总':'对象级'} · 最多 ${policy.max_rows??'按方案限制'} 条\n步骤：\n${nodes}\n\n确认后会按当前账户等级登记本次限期授权并进入执行队列。`);
+}
 function render(){
  const q=$('#search').value.toLowerCase();const visible=records.filter(r=>JSON.stringify(r).toLowerCase().includes(q)).sort((a,b)=>b.updated_at.localeCompare(a.updated_at));
  $('#list').innerHTML='<thead><tr><th>名称 / 编号</th><th>状态</th><th>版本 / 时间</th></tr></thead><tbody>'+visible.map(r=>`<tr><td><button class="mf-button mf-link" data-id="${esc(r.id)}">${esc(r.name||r.id)}</button></td><td>${esc(statusNames[r.state?.status||r.state||r.status]||r.state?.status||r.state||r.status||'已登记')}</td><td>v${r.version}<br>${esc(new Date(r.updated_at).toLocaleString())}</td></tr>`).join('')+'</tbody>';
@@ -53,7 +59,7 @@ for(const [key,label] of visibleExecutionTabs(currentAccess()).filter(([key])=>!
 
 function actions(){
  if(kind==='plan'){
-  button('新建医疗汇总方案',async()=>{const p=await api('/plans',{scenario:'medical',name:'门诊年龄与诊断类别汇总'});await load();show(p);message('已生成草案；请确认后授权执行。');});
+  button('新建医疗汇总方案',async()=>{const p=await api('/plans',{scenario:'medical',name:'门诊年龄与诊断类别汇总'});await load();show(p);message('方案已生成；执行时只需确认一次意图。');});
   button('从需求规格生成方案',async()=>{
    const specs=await api('/items/spec',undefined,'/api/management');if(!specs.items.length)throw Error('请先在 需求受理页人工确认规格');
    const choice=await form('选择已确认的任务规格',[['spec_id','任务规格','select',specs.items.map(s=>[s.id,s.id+' · v'+s.version])]],{spec_id:new URLSearchParams(location.search).get('spec')||specs.items[0].id});if(!choice)return;
@@ -65,12 +71,8 @@ function actions(){
     ['nodes','节点定义（留空数组时从规格服务集合生成）','json'],['quality_min_complete','非空单元格比例下限','number',[],1]
    ],{nodes:[],spec_id:selected.id,spec_version:selected.version,output_mode:rules.output_mode,circulation_mode:rules.circulation_modes[0],quality_min_complete:rules.quality_min_complete??1});
   });
-  button('确认当前版本',async()=>{const p=need();show(await api('/plans/'+p.id+'/confirm',{version:p.version}));await load();});
   button('修改方案生成新版本',async()=>{const p=need();const value=await form('修改后需要重新确认和授权',[['name','名称'],['nodes','节点与依赖','json'],['output_mode','输出粒度','select',['aggregate','object']],['circulation_mode','交付方式','select',['controlled_compute','api','download']]],p);if(value){show(await api('/plans',{...p,...value,expected_version:p.version}));await load();}});
-  button('签发本地授权',async()=>{const p=need();await submit('/grants','签发本地方案授权',[
-   ['subject','主体','select',[['demo-platform','平台方'],['demo-requester','需求方']]],['expires_at','到期时间（带时区）'],['mode','允许粒度','select',['aggregate','object']],['contract_id','合作约定ID（可空）']
-  ],{plan_id:p.id,plan_version:p.version,purpose:p.purpose,subject:p.created_by,expires_at:new Date(Date.now()+3600000).toISOString(),mode:p.output_mode});});
-  button('执行当前方案',async()=>{const p=need();const grants=(await api('/items/grant')).items.filter(g=>g.plan_id===p.id&&g.plan_version===p.version&&g.status==='active'&&g.subject===currentAccess().principal.id);if(!grants.length)throw Error('当前版本尚无有效授权');const data=await form('提交执行',[['grant_id','授权','select',grants.map(g=>[g.id,g.id+' · '+g.subject])],['priority','优先级0—9','number',[],0]]);if(data){const job=await api('/plans/'+p.id+'/run',{...data,version:p.version});await selectTab('job');show(job);message('任务已入队，刷新可查看节点与时间线。');}});
+  button('执行当前方案',async()=>{const p=need();if(!confirmRun(p))return;const result=await api('/plans/'+p.id+'/run',{version:p.version,confirmed:true});await selectTab('job');show(result.job||result);message('已按当前账户权限登记限期授权并入队。');});
   button('测试医疗明细导出拒绝',async()=>{await api('/plans/'+need().id+'/detail-export',{});});
   button('测试过期授权拒绝',async()=>{const p=need();if(p.scenario!=='medical')throw Error('请选择医疗汇总方案');const g=await api('/grants',{subject:'demo-platform',purpose:p.purpose,plan_id:p.id,plan_version:p.version,expires_at:new Date(Date.now()-1000).toISOString(),mode:'aggregate'});await api('/plans/'+p.id+'/run',{version:p.version,grant_id:g.id});});
   button('暂停后续节点',async()=>{const p=need();show(await api('/control',{command_id:crypto.randomUUID(),action:'pause',object_id:p.id}));await load();});
@@ -81,7 +83,7 @@ function actions(){
  if(kind==='job'){
   button('查看最新节点和时间线',async()=>{const job=await api('/jobs/'+need().id);chosen=job;show(job);});
   button('取消任务',async()=>{show(await api('/jobs/'+need().id+'/cancel',{}));await load();});
-  button('重试失败任务',async()=>{const j=need();show(await api('/plans/'+j.plan_id+'/run',{version:j.plan_version,grant_id:j.grant_id,retry_of:j.id}));await load();});
+  button('重试失败任务',async()=>{const j=need();const plan=await api('/items/plan');const current=plan.items.find(item=>item.id===j.plan_id);if(!current||!confirmRun(current,true))return;const result=await api('/plans/'+j.plan_id+'/run',{version:j.plan_version,confirmed:true,retry_of:j.id});show(result.job||result);await load();});
   button('查看受控结果',async()=>{const j=need();if(!j.delivery_id)throw Error('该任务没有交付物');show(await api('/deliveries/'+j.delivery_id));});
  }
  if(kind==='grant'&&allowed('grant.create')){const a=document.createElement('a');a.className='mf-button';a.href='/static/platform/connections.html#external-governance';a.textContent='外部数据检测与授权';$('#actions').append(a);}

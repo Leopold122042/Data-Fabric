@@ -114,16 +114,59 @@ def _normalize_field_intents(value):
 
 class IntakeLLM:
     """Provider-aware JSON client for intake and semantic query parsing."""
-    def __init__(self, base_url=None, model=None, timeout=None):
-        provider=os.getenv('MEDFABRIC_LLM_PROVIDER','ollama').strip().casefold()
-        self.provider='openai_compatible' if provider in ('openai','openai_compatible') else provider
-        if self.provider not in ('ollama','openai_compatible'):
-            raise DomainError('未知模型服务商；MEDFABRIC_LLM_PROVIDER 仅支持 ollama 或 openai_compatible',503)
-        if self.provider=='openai_compatible':
+    PROVIDER_NAMES={'qwen':'通义千问','deepseek':'DeepSeek','ollama':'Ollama'}
+
+    @staticmethod
+    def _normalize_provider(provider):
+        value=provider.strip().casefold() if isinstance(provider,str) else ''
+        if value in ('openai','openai_compatible'):
+            return 'qwen'
+        if value in ('qwen','deepseek','ollama'):
+            return value
+        raise DomainError('AI 接口选项无效；请选择已配置的服务商',400)
+
+    @classmethod
+    def default_provider(cls):
+        selected=(os.getenv('MEDFABRIC_NL_DEFAULT_PROVIDER') or
+                  os.getenv('MEDFABRIC_LLM_PROVIDER','ollama'))
+        return cls._normalize_provider(selected)
+
+    @classmethod
+    def provider_options(cls):
+        definitions=[
+            ('qwen','通义千问',os.getenv('MEDFABRIC_OPENAI_MODEL',''),
+             bool(os.getenv('MEDFABRIC_OPENAI_BASE_URL') and os.getenv('MEDFABRIC_OPENAI_MODEL')
+                  and os.getenv('MEDFABRIC_OPENAI_API_KEY'))),
+            ('deepseek','DeepSeek Flash',os.getenv('MEDFABRIC_DEEPSEEK_MODEL',''),
+             bool(os.getenv('MEDFABRIC_DEEPSEEK_BASE_URL') and os.getenv('MEDFABRIC_DEEPSEEK_MODEL')
+                  and os.getenv('MEDFABRIC_DEEPSEEK_API_KEY'))),
+        ]
+        default=cls.default_provider()
+        if default=='ollama':
+            definitions.append(('ollama','本地 Ollama',os.getenv('MEDFABRIC_OLLAMA_MODEL','cjl-model:latest'),
+                                bool(os.getenv('MEDFABRIC_OLLAMA_URL','http://127.0.0.1:11434'))))
+        available=[item[0] for item in definitions if item[3]]
+        if default not in available and available:
+            default=available[0]
+        return {'default':default,'providers':[{'id':provider,'name':name,'model':model,
+                'configured':configured,'default':provider==default}
+                for provider,name,model,configured in definitions]}
+
+    def __init__(self, base_url=None, model=None, timeout=None, provider=None):
+        selected=self._normalize_provider(provider) if provider is not None else self.default_provider()
+        self.provider_id=selected
+        self.provider='ollama' if selected=='ollama' else 'openai_compatible'
+        self.provider_name=self.PROVIDER_NAMES[selected]
+        if selected=='qwen':
             self.base_url=(base_url or os.getenv('MEDFABRIC_OPENAI_BASE_URL','')).rstrip('/')
             self.model=model or os.getenv('MEDFABRIC_OPENAI_MODEL','')
             self.api_key=os.getenv('MEDFABRIC_OPENAI_API_KEY','')
             self.timeout=float(timeout or os.getenv('MEDFABRIC_OPENAI_TIMEOUT','300'))
+        elif selected=='deepseek':
+            self.base_url=(base_url or os.getenv('MEDFABRIC_DEEPSEEK_BASE_URL','')).rstrip('/')
+            self.model=model or os.getenv('MEDFABRIC_DEEPSEEK_MODEL','')
+            self.api_key=os.getenv('MEDFABRIC_DEEPSEEK_API_KEY','')
+            self.timeout=float(timeout or os.getenv('MEDFABRIC_DEEPSEEK_TIMEOUT','300'))
         else:
             self.base_url=(base_url or os.getenv('MEDFABRIC_OLLAMA_URL','http://127.0.0.1:11434')).rstrip('/')
             self.model=model or os.getenv('MEDFABRIC_OLLAMA_MODEL','cjl-model:latest')
@@ -139,6 +182,8 @@ class IntakeLLM:
             return self.base_url+'/api/chat'
         if self.base_url.endswith('/chat/completions'):
             return self.base_url
+        if self.provider_id=='deepseek':
+            return self.base_url+'/chat/completions'
         if self.base_url.endswith('/v1'):
             return self.base_url+'/chat/completions'
         return self.base_url+'/v1/chat/completions'
@@ -146,13 +191,22 @@ class IntakeLLM:
     def complete_json(self, messages, schema=None, options=None):
         if not self.configured:
             if self.provider=='openai_compatible':
-                raise DomainError('OpenAI 兼容模型未配置完整；请设置 MEDFABRIC_OPENAI_BASE_URL、MEDFABRIC_OPENAI_MODEL 和服务器端 MEDFABRIC_OPENAI_API_KEY',503)
+                if self.provider_id=='deepseek':
+                    raise DomainError('DeepSeek 未配置完整；请由管理员设置服务器端 DeepSeek 接口配置',503)
+                raise DomainError('通义千问未配置完整；请由管理员检查服务器端模型接口配置',503)
             raise DomainError('Ollama 模型地址或名称未配置',503)
         if self.provider=='openai_compatible':
             payload={'model':self.model,'stream':False,'messages':messages,
                      'response_format':{'type':'json_object'}}
+            if self.provider_id=='deepseek':
+                payload['thinking']={'type':'disabled'}
+                if not any('json' in str(message.get('content','')).casefold() for message in messages
+                           if isinstance(message,dict)):
+                    payload['messages']=[{'role':'system','content':'Return a valid json object only.'},*messages]
             if options:
-                payload.update({k:v for k,v in options.items() if k in ('temperature','max_tokens','top_p')})
+                option_names={'temperature':'temperature','max_tokens':'max_tokens',
+                              'num_predict':'max_tokens','top_p':'top_p'}
+                payload.update({option_names[k]:v for k,v in options.items() if k in option_names})
             headers={'Content-Type':'application/json','Authorization':'Bearer '+self.api_key}
         else:
             payload={'model':self.model,'stream':False,'format':schema or 'json','keep_alive':'10m',
@@ -176,12 +230,12 @@ class IntakeLLM:
                 if exc.code==404 and 'not found' in detail.lower():
                     raise DomainError(f'Ollama 中没有模型“{self.model}”。已安装模型请配置 MEDFABRIC_OLLAMA_MODEL（当前可用：调用 /api/tags 查看）',503)
                 raise DomainError(f'Ollama 请求失败（HTTP {exc.code}）：{detail}',502)
-            raise DomainError(f'OpenAI 兼容模型请求失败（HTTP {exc.code}）：{detail}',502)
+            raise DomainError(f'{self.provider_name} 请求失败（HTTP {exc.code}）：{detail}',502)
         except (urllib.error.URLError,TimeoutError,socket.timeout) as exc:
             reason=getattr(exc,'reason',exc)
             if isinstance(reason,(TimeoutError,socket.timeout)) or 'timed out' in str(reason).lower():
                 raise DomainError(f'模型仍在推理，超过等待时间 {self.timeout:g} 秒；请稍后重试，或延长对应服务商的超时配置。',504)
-            service='Ollama' if self.provider=='ollama' else 'OpenAI 兼容接口'
+            service=self.provider_name
             raise DomainError(f'无法连接{service}，请检查服务状态和地址：'+str(exc),503)
         except (ValueError,KeyError) as exc:
             raise DomainError('模型返回格式无效：'+str(exc),502)

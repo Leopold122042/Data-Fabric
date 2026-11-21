@@ -1,9 +1,11 @@
 from fastapi import APIRouter,Request
 from fastapi.routing import APIRoute
 from fastapi.responses import JSONResponse,Response
+from datetime import datetime,timedelta,timezone
 from platform_core.storage import DomainError,new_id,now
 from execution.security.control import timestamp
-from platform_core.access import require_resource,require_action,can_read_execution
+from platform_core.access import (require_resource,require_action,can_read_execution,
+    require_object_scope,require_plan_scope,project_result,level_for)
 
 
 class ExecutionRoute(APIRoute):
@@ -30,6 +32,10 @@ def create_router(runtime,identity):
     def owned(kind,oid,user):
         value=e.store.require(kind,oid)
         if not can_read_execution(runtime,kind,value,user):raise DomainError('无权访问该记录',403)
+        if kind=='plan':require_plan_scope(user,runtime,value)
+        elif kind in ('job','run','delivery','workflow'):
+            plan=e.store.get('plan',value.get('plan_id',''),value.get('plan_version'))
+            if plan:require_plan_scope(user,runtime,plan)
         return value
     @router.get('/status')
     def status(request:Request):
@@ -58,10 +64,16 @@ def create_router(runtime,identity):
         return {'items':visible}
     @router.post('/views')
     async def view(request:Request):
-        user=who(request,action='view.create');return e.queries.define(await body(request),user['id'])
+        user=who(request,action='view.create');data=await body(request)
+        require_object_scope(user,runtime.management.store,
+            list(data.get('fields',[]))+list(data.get('output_fields',[]))+
+            list(data.get('group_by',[]))+[item.get('field') for item in data.get('filters',[]) if isinstance(item,dict)])
+        return e.queries.define(data,user['id'])
     @router.post('/plans')
     async def plan(request:Request):
-        user=who(request,action='plan.create');return e.plan(await body(request),user['id'])
+        user=who(request,action='plan.create');data=await body(request)
+        require_plan_scope(user,runtime,data)
+        return e.plan(data,user['id'])
     @router.post('/plans/{oid}/detail-export')
     def detail_export(oid:str,request:Request):
         user=who(request,action='plan.detail_export');plan=owned('plan',oid,user)
@@ -71,7 +83,8 @@ def create_router(runtime,identity):
         raise DomainError('仅允许汇总查询',403)
     @router.post('/plans/{oid}/confirm')
     async def confirm(oid:str,request:Request):
-        user=who(request,action='plan.confirm');data=await body(request);return e.confirm(oid,data.get('version'),user['id'])
+        user=who(request,action='plan.confirm');plan=owned('plan',oid,user);data=await body(request)
+        return e.confirm(oid,data.get('version'),user['id'])
     @router.post('/grants')
     async def grant(request:Request):
         user=who(request,action='grant.create');data=await body(request);plan=e.get(data.get('plan_id',''),data.get('plan_version'));e.current(plan)
@@ -82,7 +95,38 @@ def create_router(runtime,identity):
         with e.lock:return e.security.revoke(oid,user['id'])
     @router.post('/plans/{oid}/run')
     async def run(oid:str,request:Request):
-        user=who(request,action='plan.run');owned('plan',oid,user);data=await body(request)
+        user=who(request,action='plan.run');plan=owned('plan',oid,user);data=await body(request)
+        if data.get('confirmed') is True:
+            version=data.get('version')
+            if type(version) is not int or version!=plan['version']:
+                raise DomainError('方案版本已变化，请刷新后重新确认',409)
+            require_plan_scope(user,runtime,plan)
+            state=e.store.require('plan_state',oid)
+            if state.get('status')!='confirmed':
+                e.confirm(oid,version,user['id'])
+            plan=e.get(oid,version);e.current(plan)
+            policy=plan.get('execution_policy') or {}
+            try:
+                deadline=datetime.fromisoformat(str(policy.get('deadline_at','')).replace('Z','+00:00'))
+            except (TypeError,ValueError):
+                raise DomainError('方案期限无效，不能自动执行',409)
+            if deadline.tzinfo is None:
+                raise DomainError('方案期限缺少时区，不能自动执行',409)
+            expires_at=min(datetime.now(timezone.utc)+timedelta(hours=1),deadline)
+            if expires_at<=datetime.now(timezone.utc):
+                raise DomainError('方案已过期，请重新生成并确认',409)
+            grant=e.security.grant_for_account_level({
+                'subject':user['id'],'purpose':plan['purpose'],'plan_id':plan['id'],
+                'plan_version':plan['version'],'expires_at':expires_at.isoformat(),
+                'mode':plan['output_mode'],'max_rows':policy.get('max_rows',200),
+                'min_group_size':policy.get('min_group_size',5)},user['id'],level_for(user))
+            require_plan_scope(user,runtime,plan)
+            job=e.submit(oid,version,grant['id'],user['id'],data.get('retry_of'),data.get('priority',0))
+            return {'job':job,'grant':{'id':grant['id'],'expires_at':grant['expires_at']},
+                    'authorization':{'basis':'account_level','level':level_for(user),'status':'approved'},
+                    'note':'已按当前账户权限自动登记限期授权并提交执行；运行阶段会再次核验账户等级、数据范围、方案版本和期限。'}
+        if level_for(user)<4:
+            raise DomainError('请先核对本次方案用途和执行步骤，再一次确认意图并执行。',409)
         return e.submit(oid,data.get('version'),data.get('grant_id',''),user['id'],data.get('retry_of'),data.get('priority',0))
     @router.post('/jobs/{oid}/cancel')
     def cancel(oid:str,request:Request):return e.cancel(oid,who(request,action='job.cancel')['id'])
@@ -96,13 +140,16 @@ def create_router(runtime,identity):
             value=e.delivery.read(oid,user['id'],p)
             if p['circulation_mode']=='api':
                 return {**{k:v for k,v in value.items() if k!='result'},'reference':'/api/execution/deliveries/'+oid+'/data'}
-            return value
+            grant=e.store.require('grant',value['grant_id'])
+            return {**value,'result':project_result(value.get('result'),user,grant.get('min_group_size',5))}
     @router.get('/deliveries/{oid}/data')
     def referenced_data(oid:str,request:Request):
         user=who(request,action='delivery.reference');d=owned('delivery',oid,user);p=e.get(d['plan_id'],d['plan_version'])
         if p['circulation_mode']!='api':raise DomainError('该方案不是API引用交付',409)
         with e.lock,e.management.store.lock:
-            e.current(p);return e.delivery.read(oid,user['id'],p)['result']
+            e.current(p);value=e.delivery.read(oid,user['id'],p)
+            grant=e.store.require('grant',value['grant_id'])
+            return project_result(value['result'],user,grant.get('min_group_size',5))
     @router.get('/deliveries/{oid}/download')
     def download(oid:str,request:Request):
         import json
@@ -110,6 +157,8 @@ def create_router(runtime,identity):
         if p['circulation_mode']!='download':raise DomainError('方案未确认下载交付模式',403)
         with e.lock,e.management.store.lock:
             e.current(p);result=e.delivery.read(oid,user['id'],p)
+            grant=e.store.require('grant',result['grant_id'])
+            result={**result,'result':project_result(result.get('result'),user,grant.get('min_group_size',5))}
             return Response(json.dumps(result,ensure_ascii=False),media_type='application/json',headers={'Content-Disposition':'attachment; filename="delivery.json"','Cache-Control':'no-store'})
     @router.post('/deliveries/{oid}/destroy')
     def destroy(oid:str,request:Request):

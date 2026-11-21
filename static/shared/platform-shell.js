@@ -3,7 +3,7 @@
  document.body.classList.add('ui-refresh-demo');
  const demoStyle=document.createElement('link');
  demoStyle.rel='stylesheet';
- demoStyle.href='/static/shared/demo-refresh.css?v=identity-20261111';
+ demoStyle.href='/static/shared/demo-refresh.css?v=0.1.28';
  document.head.append(demoStyle);
  const motionStyle=document.createElement('link');
  motionStyle.rel='stylesheet';
@@ -14,8 +14,8 @@
  if((path==='/'||path==='/static/index.html')&&!location.hash){location.replace('/static/portal/index.html');return;}
  const sidebar=document.querySelector('.mf-sidebar');if(!sidebar)return;
  const intakeDock=document.querySelector('#intake-flow-dock');
- const access=await import('/static/shared/access.js?v=identity-20261111');
- const {visibleNavigation}=await import('/static/shared/access-model.js?v=identity-20261111');
+ const access=await import('/static/shared/access.js?v=0.1.28');
+ const {visibleNavigation}=await import('/static/shared/access-model.js?v=0.1.28');
  const {icon}=await import('/static/shared/icons.js');
  access.bindRole();
  sidebar.replaceChildren();sidebar.classList.add('platform-sidebar');sidebar.setAttribute('aria-label','平台导航');

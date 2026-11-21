@@ -8,6 +8,7 @@
 - 模型服务：`http://114.212.173.201:8080/v1`
 - 模型：`qwen3.8-flash-next-iq3_s`（OpenAI 兼容 Chat Completions）
 - 模型密钥：服务器私有文件 `/home/fuwuqi/.config/medfabric/api.env`
+- 自然语言查询可选模型：Qwen 或 DeepSeek Flash。DeepSeek 使用 `MEDFABRIC_DEEPSEEK_BASE_URL`、`MEDFABRIC_DEEPSEEK_MODEL`、`MEDFABRIC_DEEPSEEK_API_KEY` 和可选的 `MEDFABRIC_DEEPSEEK_TIMEOUT`，只配置在服务器私有 `api.env` 中。
 - 数据目录：`/mnt/medfabric/work/demo-data`
 - 控制目录：`/mnt/medfabric/runtime`
 

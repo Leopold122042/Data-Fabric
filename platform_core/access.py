@@ -4,12 +4,156 @@ The JSON manifest is consumed by the UI and enforced here. Hiding controls is
 only a presentation of this policy, never the authorization boundary itself.
 """
 import json
+import re
 from pathlib import Path
 from platform_core.storage import DomainError
 
 POLICY = json.loads((Path(__file__).resolve().parents[1] / 'static' / 'shared' / 'access-policy.json').read_text(encoding='utf-8'))
 READ_ACTIONS = {'read', 'history', 'impact', 'export', 'candidates', 'suggest',
                 'resolve', 'gaps', 'metrics', 'reference', 'download', 'verify'}
+
+# Current demo catalog scopes. Level 1 can run queries in its scope but receives
+# only a thresholded count; levels 2 and 3 see de-identified rows; level 4 sees
+# the full catalog and output. Per-account grants can narrow these sets later.
+LEVEL_TABLES = {
+    1: {'vitals', 'devices', 'imaging_turnaround', 'test_order', 'result'},
+    2: {'vitals', 'devices', 'imaging_turnaround', 'test_order', 'result',
+        'visit', 'orders', 'study', 'laboratory_reports', 'chronic_followup', 'research_cohort'},
+    3: {'vitals', 'devices', 'imaging_turnaround', 'test_order', 'result',
+        'visit', 'orders', 'study', 'laboratory_reports', 'chronic_followup', 'research_cohort',
+        'patient', 'dossier'},
+    4: {'*'},
+}
+LEVEL_VISIBILITY = {1: '仅查看满足最小样本数的查询计数',
+                    2: '可查看授权范围内的脱敏明细',
+                    3: '可查看全部数据表的脱敏明细',
+                    4: '可查看全部字段和原始明细'}
+
+
+def level_for(user):
+    try:
+        fallback={'requester':1,'provider':2,'auditor':3,'platform':4}.get(user.get('role'),1)
+        return max(1, min(4, int(user.get('level', fallback))))
+    except (AttributeError, TypeError, ValueError):
+        return 4
+
+
+def canonical_table_name(table):
+    if isinstance(table, dict):
+        value = table.get('table') or table.get('name') or ''
+    else:
+        value = table or ''
+    text = str(value).strip().casefold()
+    # Display labels such as dossier(病历文书) are normalized to the physical name.
+    text = re.sub(r'\s*\([^)]*\)\s*$', '', text)
+    return text
+
+
+def can_access_table(user, table):
+    allowed = LEVEL_TABLES[level_for(user)]
+    return '*' in allowed or canonical_table_name(table) in allowed
+
+
+def require_table_scope(user, tables):
+    denied = [canonical_table_name(table) for table in tables if not can_access_table(user, table)]
+    if denied:
+        raise DomainError('当前账户等级不能使用这些数据表：' + '、'.join(dict.fromkeys(denied)), 403)
+    return user
+
+
+def account_permission(user):
+    level = level_for(user)
+    tables = sorted(LEVEL_TABLES[level]) if '*' not in LEVEL_TABLES[level] else ['全部13张表']
+    return {'level': level, 'dataset_tables': tables,
+            'visibility': LEVEL_VISIBILITY[level], 'can_manage_accounts': level == 4,
+            'scope_note': '权限按账户等级限制；数据源合同、用途、期限及撤销规则仍生效。'}
+
+
+def table_ids_for_fields(store, field_ids):
+    ids = set()
+    for field_id in field_ids or []:
+        field = store.get('object', field_id)
+        if not field:
+            raise DomainError('查询引用了无效字段，已拒绝执行', 403)
+        if field.get('kind') == 'table':
+            ids.add(field['id'])
+        else:
+            parent = store.get('object', field.get('parent_id', ''))
+            if not parent or parent.get('kind') != 'table':
+                raise DomainError('字段没有有效的所属表，已拒绝执行', 403)
+            ids.add(parent['id'])
+    return ids
+
+
+def require_object_scope(user, store, object_ids):
+    table_ids = table_ids_for_fields(store, object_ids)
+    tables = [store.require('object', oid) for oid in table_ids]
+    return require_table_scope(user, tables)
+
+
+def require_plan_scope(user, runtime, plan):
+    store = runtime.management.store
+    table_ids = set()
+    scoped_nodes = 0
+    for node in plan.get('nodes', []):
+        if node.get('operation') == 'view':
+            scoped_nodes += 1
+            view = runtime.execution.store.get('view', node.get('view_id', ''))
+            if not view:
+                raise DomainError('方案引用的逻辑视图不存在', 403)
+            table_ids.update(table_ids_for_fields(store, view.get('fields', [])))
+        elif node.get('operation') == 'service':
+            scoped_nodes += 1
+            service = store.get('service', node.get('service_id', ''))
+            if not service:
+                raise DomainError('方案引用的数据服务不存在', 403)
+            sources=service.get('source_objects', [])
+            if not sources and level_for(user)<4:
+                raise DomainError('该数据服务没有登记来源字段，当前等级不能执行',403)
+            table_ids.update(table_ids_for_fields(store, sources))
+        elif node.get('operation') == 'medical' and level_for(user) < 4:
+            raise DomainError('该示例服务仅对4级账户开放', 403)
+    if scoped_nodes and not table_ids and level_for(user)<4:
+        raise DomainError('方案未能关联到当前账户范围内的数据表，已拒绝执行',403)
+    return require_table_scope(user, [store.require('object', oid) for oid in table_ids])
+
+
+def filter_catalog(tables, user):
+    return [table for table in tables if can_access_table(user, table)]
+
+
+def project_result(result, user, min_group_size=5):
+    """Apply the account's output tier at every result read boundary."""
+    level = level_for(user)
+    if level >= 4:
+        return result
+    if not isinstance(result, dict) or not isinstance(result.get('rows'), list):
+        return {'columns': [], 'rows': [], 'message': '当前权限不允许展示该结果结构。'}
+    rows = result['rows']
+    columns = result.get('columns', [])
+    if level == 1:
+        count = len(rows)
+        return {'columns': ['符合条件的记录数'],
+                'rows': [[count]] if count >= min_group_size else [],
+                'message': '' if count >= min_group_size else f'结果少于{min_group_size}条，已按权限隐藏具体数量和明细。',
+                'suppressed': count < min_group_size}
+    from execution.security.output_policy import name_classification
+    identifier_indexes = [i for i, name in enumerate(columns)
+                          if name_classification(name) == 'identifier']
+    per_result = {}
+    projected = []
+    for row_index, row in enumerate(rows):
+        values = list(row) if isinstance(row, (list, tuple)) else [row.get(name) for name in columns] if isinstance(row, dict) else []
+        for index in identifier_indexes:
+            if index >= len(values) or values[index] is None:
+                continue
+            raw = str(values[index])
+            # Stable only within this returned result; no cross-query identity linkage.
+            if raw not in per_result:
+                per_result[raw] = f'记录-{len(per_result) + 1:03d}'
+            values[index] = per_result[raw]
+        projected.append(values)
+    return {**result, 'rows': projected}
 
 
 def resource_level(user, resource):

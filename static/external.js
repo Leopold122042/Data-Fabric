@@ -33,7 +33,7 @@
   async function api(path, body) {
     const response = await fetch('/api/external/' + path, {
       method: body === undefined ? 'GET' : 'POST', credentials:'same-origin',
-      headers:{'Content-Type':'application/json','X-Medfabric-External':'1','X-Demo-Role':localStorage.getItem('mf-demo-role')||'platform','X-External-Grant':el('externalGrant')?.value||'','X-External-Purpose':encodeURIComponent(el('externalGrant')?.selectedOptions[0]?.dataset.purpose||'')},
+      headers:{'Content-Type':'application/json','X-Medfabric-External':'1','X-External-Grant':el('externalGrant')?.value||'','X-External-Purpose':encodeURIComponent(el('externalGrant')?.selectedOptions[0]?.dataset.purpose||'')},
       body: body === undefined ? undefined : JSON.stringify(body)
     });
     const data = await response.json();
@@ -42,7 +42,7 @@
   }
   async function loadGrants(){
     const select=el('externalGrant');if(!select)return;const previous=select.value;
-    try{const data=await api('governance/status');select.replaceChildren();text(select,'option','请选择读取授权').value='';const subject='demo-'+(localStorage.getItem('mf-demo-role')||'platform');for(const g of data.grants.filter(g=>g.subject===subject&&g.status==='active'&&Date.parse(g.expires_at)>Date.now())){const option=text(select,'option',g.purpose+' · '+g.table_ids.length+' 张表 · '+g.id);option.value=g.id;option.dataset.purpose=g.purpose;}select.value=previous;el('externalGrantStatus').textContent='读取前和返回结果前均检查授权；新增或变化的来源需重新授权。';}catch(e){el('externalGrantStatus').textContent=e.message;}
+    try{const [data,access]=await Promise.all([api('governance/status'),fetch('/api/access',{credentials:'same-origin',cache:'no-store'}).then(r=>r.json())]);select.replaceChildren();text(select,'option','请选择读取授权').value='';const subject=access.principal?.id;for(const g of data.grants.filter(g=>g.subject===subject&&g.status==='active'&&Date.parse(g.expires_at)>Date.now())){const option=text(select,'option',g.purpose+' · '+g.table_ids.length+' 张表 · '+g.id);option.value=g.id;option.dataset.purpose=g.purpose;}select.value=previous;el('externalGrantStatus').textContent='读取前和返回结果前均检查授权；新增或变化的来源需重新授权。';}catch(e){el('externalGrantStatus').textContent=e.message;}
   }
   window.addEventListener('external-grants-updated',loadGrants);
   async function action(fn) {

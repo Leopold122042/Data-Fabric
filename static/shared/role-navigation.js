@@ -1,4 +1,4 @@
-import {canRead,pageResource} from './access-model.js?v=identity-20261111';
+import {canRead,pageResource} from './access-model.js?v=0.1.28';
 
 export const userHome='/static/portal/index.html';
 export function roleDestination(href,permissions){

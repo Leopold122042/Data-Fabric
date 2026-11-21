@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 def create_router(runtime):
     router = APIRouter()
@@ -26,5 +26,7 @@ def create_router(runtime):
     router.add_api_route('/api/events', runtime.events, methods=['GET'])
     router.add_api_route('/api/stream', runtime.stream, methods=['GET'])
     router.add_api_route('/api/cockpit', runtime.cockpit_api, methods=['GET'])
-    router.add_api_route('/', runtime.index, methods=['GET'])
+    @router.get('/')
+    def root():
+        return RedirectResponse('/static/portal/index.html?page=home', status_code=303)
     return router

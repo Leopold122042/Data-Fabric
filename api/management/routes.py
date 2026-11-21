@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 from copy import deepcopy
 import re
 from management.store import DomainError,new_id
-from platform_core.access import require_resource,require_action,can_read_management,can_read_execution,management_record
+from platform_core.access import (require_resource,require_action,can_read_management,can_read_execution,
+    management_record,can_access_table,table_ids_for_fields,level_for,require_plan_scope,project_result)
 
 READ_KINDS={'object','concept','mapping','service','validation','demand','spec','feedback','improvement','metric_definition','case','pair','identifier','notice','relation','scan','mapping_rule','source','external_design'}
 
@@ -26,6 +27,77 @@ def create_router(runtime,identity):
         return user
     def can_read(kind,item,user):
         return can_read_management(runtime,kind,item,user)
+    def in_data_scope(kind,item,user):
+        if level_for(user)>=4:return True
+        store=m.store
+        try:
+            if kind=='object':
+                table_ids=table_ids_for_fields(store,[item['id']])
+                return all(can_access_table(user,store.require('object',oid)) for oid in table_ids)
+            if kind=='field_definition':
+                field=store.get('object',item.get('field_id',''))
+                return bool(field and in_data_scope('object',field,user))
+            if kind=='mapping':
+                ids=table_ids_for_fields(store,item.get('fields',[]))
+                return all(can_access_table(user,store.require('object',oid)) for oid in ids)
+            if kind=='relation':
+                ids=table_ids_for_fields(store,[item.get('source'),item.get('target')])
+                return all(can_access_table(user,store.require('object',oid)) for oid in ids)
+            if kind=='identifier':
+                return in_data_scope('object',store.get('object',item.get('field_id','')) or {},user)
+            if kind=='source':
+                visible=[obj for obj in store.list('object') if obj.get('source_id')==item.get('id')
+                         and obj.get('kind')=='table' and can_access_table(user,obj)]
+                return bool(visible)
+            if kind=='intake_flow':
+                plan=runtime.execution.store.get('plan',item.get('execution_plan_id',''),item.get('execution_plan_version'))
+                if plan:require_plan_scope(user,runtime,plan)
+                object_ids=[resource.get('id') for resource in item.get('resources',[])
+                            if isinstance(resource,dict) and store.get('object',resource.get('id',''))]
+                object_ids.extend(candidate.get('field_id') for binding in item.get('field_bindings',[])
+                    if isinstance(binding,dict) for candidate in binding.get('candidates',[])
+                    if isinstance(candidate,dict) and candidate.get('field_id'))
+                policy=(item.get('draft') or {}).get('execution_constraints') or {}
+                object_ids.extend(policy.get('field_outputs') or [])
+                if policy.get('field_output'):object_ids.append(policy['field_output'])
+                object_ids.extend(condition.get('field') for condition in (policy.get('scope') or {}).get('filters',[])
+                    if isinstance(condition,dict) and condition.get('field'))
+                if object_ids:
+                    table_ids=table_ids_for_fields(store,object_ids)
+                    if any(not can_access_table(user,store.require('object',oid)) for oid in table_ids):return False
+                query=item.get('query_draft') or (item.get('draft') or {}).get('query_draft')
+                if query:
+                    from management.intake.professional import professional_shape
+                    shape=professional_shape(query,store)
+                    if any(not can_access_table(user,table) for table in shape['tables']):return False
+                return True
+            if kind=='spec':
+                specification=item.get('specification') or {}
+                policy=specification.get('execution_constraints') or {}
+                object_ids=list(policy.get('field_outputs') or [])
+                if policy.get('field_output'):object_ids.append(policy['field_output'])
+                object_ids.extend(condition.get('field') for condition in (policy.get('scope') or {}).get('filters',[])
+                    if isinstance(condition,dict) and condition.get('field'))
+                if object_ids:
+                    table_ids=table_ids_for_fields(store,object_ids)
+                    if any(not can_access_table(user,store.require('object',oid)) for oid in table_ids):return False
+                query=specification.get('query_draft')
+                if query:
+                    from management.intake.professional import professional_shape
+                    shape=professional_shape(query,store)
+                    if any(not can_access_table(user,table) for table in shape['tables']):return False
+                for service_id in specification.get('service_ids') or []:
+                    service=store.get('service',service_id)
+                    if not service:return False
+                    ids=table_ids_for_fields(store,service.get('source_objects',[]))
+                    if any(not can_access_table(user,store.require('object',oid)) for oid in ids):return False
+                return True
+            if kind=='demand':
+                flows=[flow for flow in store.list('intake_flow') if flow.get('demand_id')==item.get('id')]
+                return all(in_data_scope('intake_flow',flow,user) for flow in flows)
+        except (DomainError,KeyError,TypeError):
+            return False
+        return True
     def own(kind,oid,user):
         obj=m.store.require(kind,oid)
         if not can_read(kind,obj,user):raise DomainError('无权访问该对象',403)
@@ -91,14 +163,16 @@ def create_router(runtime,identity):
         if kind not in READ_KINDS:raise DomainError('未知资源类型',404)
         require_resource(user,kind)
         rows=m.store.list(kind,at)
-        return {'items':[management_record(runtime,kind,r,user) for r in rows if can_read(kind,r,user) and (not q or q.lower() in str(r).lower())]}
+        return {'items':[management_record(runtime,kind,r,user) for r in rows if can_read(kind,r,user)
+                         and in_data_scope(kind,r,user) and (not q or q.lower() in str(r).lower())]}
 
     @router.get('/items/{kind}/{oid}/history')
     def history(kind:str,oid:str,request:Request):
         user=who(request)
         if kind not in READ_KINDS:raise DomainError('未知资源类型',404)
         require_resource(user,kind);own(kind,oid,user)
-        return {'items':[management_record(runtime,kind,r,user) for r in m.store.history(kind,oid) if can_read(kind,r,user)]}
+        return {'items':[management_record(runtime,kind,r,user) for r in m.store.history(kind,oid)
+                         if can_read(kind,r,user) and in_data_scope(kind,r,user)]}
 
     from management.catalog.field_library import FieldLibrary
     field_library=FieldLibrary(m.store)
@@ -106,7 +180,8 @@ def create_router(runtime,identity):
     @router.get('/field-library')
     def fields_list(request:Request):
         user=who(request);require_resource(user,'object')
-        return {'items':field_library.items()}
+        return {'items':[item for item in field_library.items()
+                         if in_data_scope('field_definition',item,user)]}
 
     @router.post('/field-library/sync')
     def fields_sync(request:Request):
@@ -116,11 +191,15 @@ def create_router(runtime,identity):
     @router.post('/field-library/match')
     async def fields_match(request:Request):
         user=who(request);require_resource(user,'object')
-        return field_library.match((await request.json()).get('text'))
+        result=field_library.match((await request.json()).get('text'))
+        result['items']=[item for item in result['items'] if in_data_scope('field_definition',item,user)]
+        return result
 
     @router.get('/field-library/{oid}/history')
     def field_history(oid:str,request:Request):
         user=who(request);require_resource(user,'object')
+        item=m.store.get('field_definition',oid)
+        if not item or not in_data_scope('field_definition',item,user):raise DomainError('无权查看该字段定义',403)
         return {'items':m.store.history('field_definition',oid)}
 
     @router.post('/field-library/{oid}/save')
@@ -287,7 +366,8 @@ def create_router(runtime,identity):
     @router.get('/demands/{oid}/flows')
     def demand_flows(oid:str,request:Request):
         user=who(request,action='demand.gaps');own('demand',oid,user)
-        items=sorted([x for x in m.store.list('intake_flow') if x.get('demand_id')==oid],key=lambda x:x['updated_at'],reverse=True)
+        items=sorted([x for x in m.store.list('intake_flow') if x.get('demand_id')==oid
+                      and in_data_scope('intake_flow',x,user)],key=lambda x:x['updated_at'],reverse=True)
         needs_cloud_session=any(x.get('state')=='waiting_authorization' and any(
             step.get('capability')=='connected_source_discovery' and step.get('status')=='waiting_authorization'
             for step in x.get('steps',[])) and any(str(resource.get('source_id','')).startswith('cloud-') or
@@ -718,6 +798,7 @@ def create_router(runtime,identity):
         if body.get('expected_version')!=flow['version']:raise DomainError('链路版本已变化，请刷新后重试',409)
         if body.get('confirmed') is not True:raise DomainError('需明确确认固定方案')
         plan=runtime.execution.get(flow.get('execution_plan_id',''),flow.get('execution_plan_version'))
+        require_plan_scope(user,runtime,plan)
         runtime.execution.confirm(plan['id'],plan['version'],user['id'])
         steps=[]
         for step in flow.get('steps',[]):
@@ -796,6 +877,7 @@ def create_router(runtime,identity):
         if not plan_id or not plan_version or not flow.get('plan_confirmed_by'):
             raise DomainError('固定方案尚未确认，不能审核授权申请',409)
         plan=runtime.execution.get(plan_id,plan_version);runtime.execution.current(plan)
+        require_plan_scope(user,runtime,plan)
         demand=m.store.require('demand',flow['demand_id'])
         demand_requester_id=demand.get('requester_id') or ('demo-requester' if demand.get('created_by')=='demo-platform' else None)
         from execution.security.output_policy import output_authorization_requirements
@@ -917,6 +999,7 @@ def create_router(runtime,identity):
             raise DomainError('当前账号不是本次授权申请人，不能提交查询',403)
         plan=runtime.execution.get(flow.get('execution_plan_id',''),flow.get('execution_plan_version'))
         runtime.execution.current(plan)
+        require_plan_scope(user,runtime,plan)
         with runtime.execution.lock:
             if retrying:
                 prior=runtime.execution.store.require('job',flow.get('job_id',''))
@@ -962,11 +1045,14 @@ def create_router(runtime,identity):
             raise DomainError('当前流程还没有可读取的查询结果',409)
         plan=runtime.execution.get(flow.get('execution_plan_id',''),flow.get('execution_plan_version'))
         runtime.execution.current(plan)
+        require_plan_scope(user,runtime,plan)
         with runtime.execution.lock,m.store.lock:
             delivery=runtime.execution.delivery.read(flow['delivery_id'],user['id'],plan)
             flow=m.store.save('intake_flow',flow_id,{**flow,'delivery_result_read_at':datetime.now(timezone.utc).isoformat()},
                 flow['version'],user['id'],'用户读取受控查询交付结果')
-        return {'flow':flow,'delivery_id':delivery['id'],'result':delivery['result'],
+        grant=runtime.execution.store.require('grant',delivery['grant_id'])
+        return {'flow':flow,'delivery_id':delivery['id'],
+                'result':project_result(delivery['result'],user,grant.get('min_group_size',5)),
                 'issued_at':delivery['receipt']['issued_at'],'expires_at':delivery['receipt']['expires_at'],
                 'checks':delivery['receipt']['checks']}
 

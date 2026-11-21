@@ -9,6 +9,11 @@ def install(app):
     async def guard(request,call_next):
         path=request.url.path
         if path.startswith('/api/') and not path.startswith(('/api/external/','/api/management/','/api/execution/')):
+            # Authentication entry points must reach their own handlers before
+            # an authenticated principal exists. The account gate and auth
+            # router enforce the correct public/session rules for each route.
+            if path in {'/api/auth/login', '/api/auth/register', '/api/auth/logout', '/api/health'}:
+                return await call_next(request)
             try:
                 user=app.state.identity.principal(request);request.state.principal=user
                 if path in ('/api/overview', '/api/cockpit') and user['role'] not in ('platform', 'auditor'):

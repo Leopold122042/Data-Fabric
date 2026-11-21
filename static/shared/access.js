@@ -1,44 +1,46 @@
-import {roleDestination} from './role-navigation.js?v=identity-20261111';
-import {actionAllowed,canRead,level,pageResource,roleNames} from './access-model.js?v=identity-20261111';
+import {actionAllowed,canRead,level,pageResource,roleNames} from './access-model.js?v=identity-20261118';
 export {actionAllowed,canRead,level,pageResource,roleNames};
 let snapshot={principal:null,resources:{},actions:{}},pending;
 export const currentAccess=()=>snapshot;
-export function role(){const value=globalThis.localStorage?.getItem('mf-demo-role');return Object.hasOwn(roleNames,value)?value:'platform';}
-export function headers(extra={}){return {'X-Demo-Role':role(),...extra};}
+export function role(){return snapshot.principal?.role||'requester';}
+export function headers(extra={}){return {...extra};}
+function redirectLogin(){
+ if(location.pathname==='/static/portal/login.html')return;
+ const target=location.pathname+location.search;
+ location.replace('/static/portal/login.html?return='+encodeURIComponent(target));
+}
 export function ready(){
- if(!pending)pending=(async()=>{const response=await fetch('/api/access',{headers:headers(),cache:'no-store'});const result=await response.json();if(!response.ok||!result.principal||!result.resources||!result.actions)throw Error(result.error||'无法加载身份权限');snapshot=result;return result;})();
+ if(!pending)pending=(async()=>{
+  const response=await fetch('/api/access',{credentials:'same-origin',cache:'no-store'});
+  let result={};try{result=await response.json();}catch{}
+  if(response.status===401){redirectLogin();throw Error('请先登录平台');}
+  if(!response.ok||!result.principal||!result.resources||!result.actions)throw Error(result.error||'无法加载账户权限');
+  snapshot=result;return result;
+ })();
  return pending;
 }
 export function allowed(key,record=null){return actionAllowed(snapshot,key,record);}
 export function readable(resource){return canRead(snapshot,resource);}
-export function bindRole(){const select=document.querySelector('#role');if(!select)return;select.value=role();for(const option of select.options)if(roleNames[option.value])option.textContent=roleNames[option.value];const label=select.closest('label');if(label)for(const child of label.childNodes)if(child.nodeType===Node.TEXT_NODE&&child.textContent.includes('身份'))child.textContent='当前身份 ';const identity=document.querySelector('#identity');if(identity&&!location.pathname.startsWith('/static/portal/'))identity.textContent='本机身份 · 本地权限已启用';select.onchange=async()=>{select.disabled=true;try{await switchRole(select.value);}catch(error){select.value=role();alert(error.message);}finally{select.disabled=false;}};}
+export function bindRole(){
+ document.querySelector('#role')?.closest('label')?.remove();
+ const identity=document.querySelector('#identity');
+ if(identity&&snapshot.principal){identity.textContent=`${snapshot.principal.display_name||snapshot.principal.username} · ${snapshot.principal.level}级`;}
+}
 export function showAccess(resource){
  const content=document.querySelector('.mf-content');if(!content)return;
  content.dataset.access=level(snapshot,resource);
  document.querySelector('#access-status')?.remove();
- const identity=document.querySelector('#identity');if(identity&&!location.pathname.startsWith('/static/portal/'))identity.textContent='本机身份 · 本地权限已启用';
+ const identity=document.querySelector('#identity');
+ if(identity&&snapshot.principal)identity.textContent=`${snapshot.principal.display_name||snapshot.principal.username} · ${snapshot.principal.level}级`;
 }
-export function denyPage(message='当前身份不能查看此目录，请从左侧选择可访问的目录。'){
+export function denyPage(message='当前账户权限范围内没有可查看的内容。'){
  const content=document.querySelector('.mf-content');if(!content)return false;
- content.replaceChildren();const box=document.createElement('section');box.className='access-denied mf-panel';const title=document.createElement('h1');title.textContent='无查看权限';const description=document.createElement('p');description.textContent=message;box.append(title,description);content.append(box);return false;
+ content.replaceChildren();const box=document.createElement('section');box.className='access-denied mf-panel';
+ const title=document.createElement('h1');title.textContent='当前账户无权查看';
+ const description=document.createElement('p');description.textContent=message;box.append(title,description);content.append(box);return false;
 }
 export async function enterPage(resource=pageResource(location.href)){
- bindRole();try{await ready();}catch(error){return denyPage(error.message+'，已隐藏数据与操作入口。');}
- if(resource&&!readable(resource))return denyPage();
- if(resource)showAccess(resource);return true;
+ try{await ready();}catch(error){if(location.pathname==='/static/portal/login.html')return false;return denyPage(error.message+'，正在跳转到账户登录。');}
+ bindRole();if(resource&&!readable(resource))return denyPage();if(resource)showAccess(resource);return true;
 }
-
-// Resolve the new permissions before committing the identity and loading any data.
-export async function switchRole(next){
- if(!Object.hasOwn(roleNames,next))throw Error('未知身份');
- const response=await fetch('/api/access',{headers:{'X-Demo-Role':next},cache:'no-store'});
- const permissions=await response.json();
- if(!response.ok||permissions.principal?.role!==next||!permissions.resources||!permissions.actions)
-  throw Error('无法确认新身份的权限，请重试');
- const destination=roleDestination(location.href,permissions);
- localStorage.setItem('mf-demo-role',next);
- location.assign(destination);
-}
-if(typeof window!=='undefined')window.addEventListener('storage',event=>{
- if(event.key==='mf-demo-role')location.reload();
-});
+export async function switchRole(){throw Error('身份由登录账户决定，请退出后使用其他账户登录。');}

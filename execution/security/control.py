@@ -15,7 +15,7 @@ def timestamp(value):
 
 class Security:
     def __init__(self,store):self.store=store;self.lock=threading.RLock();self.plan_validator=None
-    def grant(self,body,actor,health_output_authorization=None,identifier_output_authorization=None):
+    def grant(self,body,actor,health_output_authorization=None,identifier_output_authorization=None,account_level=None):
         if self.store.environment!='demo':raise DomainError('真实授权适配器尚未接入，拒绝签发演示授权',503)
         if not all(body.get(k) for k in ('subject','purpose','plan_id','plan_version','expires_at')):raise DomainError('授权缺少主体、用途、方案版本或期限')
         timestamp(body['expires_at'])
@@ -30,8 +30,12 @@ class Security:
             if not required:return None
             supplied=supplied if isinstance(supplied,dict) else {}
             expected_ids=set(required);supplied_ids=supplied.get('field_ids')
-            if (supplied.get('decision')!='approved' or supplied.get('approver_role')!='platform'
-                    or supplied.get('approver_id')!=actor
+            account_policy=(account_level in (1,2,3,4)
+                and supplied.get('approver_role')=='account_level'
+                and supplied.get('account_level')==account_level
+                and supplied.get('approver_id')==actor and actor==body.get('subject'))
+            platform_approved=(supplied.get('approver_role')=='platform' and supplied.get('approver_id')==actor)
+            if (supplied.get('decision')!='approved' or not (account_policy or platform_approved)
                     or supplied.get('requester_id')!=body.get('subject')
                     or not isinstance(supplied.get('request_id'),str) or not supplied.get('request_id')
                     or supplied.get('plan_id')!=plan['id']
@@ -41,7 +45,8 @@ class Security:
                     or any(not isinstance(field_id,str) for field_id in supplied_ids)
                     or set(supplied_ids)!=expected_ids):
                 raise DomainError(label+'须由平台方对本方案、本用途和指定字段作出批准',403)
-            return {'decision':'approved','approver_role':'platform','approver_id':actor,
+            return {'decision':'approved','approver_role':supplied.get('approver_role'),'approver_id':actor,
+                    'account_level':account_level if account_policy else None,
                     'requester_id':body['subject'],'request_id':supplied['request_id'],
                     'plan_id':plan['id'],'plan_version':plan['version'],'purpose':body['purpose'],
                     'field_ids':sorted(expected_ids),
@@ -61,6 +66,9 @@ class Security:
         data={k:body[k] for k in ('subject','purpose','plan_id','plan_version','expires_at')}
         data.update(mode=mode,status='active',scope='local-demo',min_group_size=min_group,max_rows=max_rows,
                     execution_policy_digest=plan['execution_policy_digest'],plan_digest=fingerprint(plan))
+        if account_level in (1,2,3,4):
+            data['authorization_basis']='account_level'
+            data['account_level']=account_level
         if consent:
             data['health_output_authorization']=consent
             data['health_output_authorized_by']=actor
@@ -71,9 +79,28 @@ class Security:
         if data['contract_id']:
             contract=self.store.require('contract',data['contract_id'])
             if (contract['plan_id'],contract['plan_version'])!=(data['plan_id'],data['plan_version']):raise DomainError('合约与方案版本不匹配')
-        note=('平台方批准需求方指定健康信息字段申请并登记本地授权；绑定方案版本与用途'
+        note=('账户等级策略批准范围内字段使用并登记本地授权；结果按账户等级投影；绑定方案版本与用途'
+              if account_level in (1,2,3,4) and (consent or identifier_consent) else
+              '平台方批准需求方指定健康信息字段申请并登记本地授权；绑定方案版本与用途'
               if consent else '本地授权登记；跨机构授权适配器尚未接入')
         return self.store.save('grant',new_id('GRANT'),data,0,actor,note)
+
+    def grant_for_account_level(self,body,actor,level):
+        if type(level) is not int or level not in (1,2,3,4):
+            raise DomainError('账户权限等级无效',403)
+        plan=self.store.require('plan',body.get('plan_id',''),body.get('plan_version'))
+        from execution.security.output_policy import output_authorization_requirements
+        requirements=output_authorization_requirements(plan)
+        if requirements is None:raise DomainError('当前方案输出分类不完整，不能按账户等级授权',403)
+        request_id=new_id('LEVEL-AUTH')
+        def approval(fields):
+            if not fields:return None
+            return {'decision':'approved','approver_role':'account_level','approver_id':actor,
+                    'account_level':level,'requester_id':body.get('subject'),'request_id':request_id,
+                    'plan_id':plan['id'],'plan_version':plan['version'],'purpose':body.get('purpose'),
+                    'field_ids':sorted(fields)}
+        return self.grant(body,actor,approval(requirements['health']),
+                          approval(requirements['identifier']),account_level=level)
     def revoke(self,oid,actor):
         with self.lock:
             g=self.store.require('grant',oid)
@@ -107,8 +134,14 @@ class Security:
                     consent_ids=consent.get('field_ids');consent_fields=consent.get('fields')
                     field_map=({item.get('field_id'):item for item in consent_fields
                                 if isinstance(item,dict)} if isinstance(consent_fields,list) else {})
-                    if (consent.get('decision')!='approved' or consent.get('approver_role')!='platform'
-                            or consent.get('approver_id')!=grant.get(actor_key)
+                    platform_approved=(consent.get('approver_role')=='platform'
+                        and consent.get('approver_id')==grant.get(actor_key))
+                    account_approved=(grant.get('authorization_basis')=='account_level'
+                        and consent.get('approver_role')=='account_level'
+                        and consent.get('account_level')==grant.get('account_level')
+                        and consent.get('approver_id')==grant.get(actor_key)
+                        and grant.get(actor_key)==grant.get('subject'))
+                    if (consent.get('decision')!='approved' or not (platform_approved or account_approved)
                             or consent.get('requester_id')!=grant.get('subject')
                             or not isinstance(consent.get('request_id'),str) or not consent.get('request_id')
                             or consent.get('plan_id')!=plan['id']

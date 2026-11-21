@@ -5,7 +5,7 @@
   const link=(label,url)=>{const a=document.createElement('a');a.textContent=label;a.href=url;return a;};
   const text=(parent,tag,value)=>{const e=document.createElement(tag);e.textContent=value;parent.append(e);return e;};
   const url=id=>'/static/platform/connections.html'+(id?'?external_table='+encodeURIComponent(id):'');
-  async function api(path,body){const response=await fetch('/api/external/'+path,{method:body?'POST':'GET',headers:{'X-Medfabric-External':'1','Content-Type':'application/json','X-Demo-Role':document.querySelector('#role')?.value||'platform'},...(body?{body:JSON.stringify(body)}:{})});const value=await response.json();if(!response.ok)throw Error(value.detail||value.error||'外部目录暂不可用');return value;}
+  async function api(path,body){const response=await fetch('/api/external/'+path,{method:body?'POST':'GET',credentials:'same-origin',headers:{'X-Medfabric-External':'1','Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const value=await response.json();if(!response.ok)throw Error(value.detail||value.error||'外部目录暂不可用');return value;}
   for(const host of hosts){
     host.classList.add('external-inventory');
     const head=text(host,'div','');head.className='external-inventory-head';text(head,'h2','外部数据资源');

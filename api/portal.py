@@ -1,10 +1,12 @@
 """Role-scoped user workbench projections and explicit query preparation."""
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 from platform_core.storage import DomainError, new_id
-from platform_core.access import require_action, require_resource, can_read_management, can_read_execution
+from platform_core.access import (require_action, require_resource, can_read_management,
+    can_read_execution, can_access_table, require_table_scope, require_plan_scope,
+    project_result, level_for)
 from management.intake.flow import IntakeFlow
 from management.catalog.field_library import FieldLibrary
 from management.intake.professional import professional_shape
@@ -45,15 +47,30 @@ def create_router(runtime, identity):
         ]
         registered=[]
         for item in runtime.management.store.list('service'):
-            if item.get('lifecycle')=='published' and can_read_management(runtime,'service',item,principal):
+            source_objects=item.get('source_objects') or []
+            in_scope=True
+            if source_objects:
+                try:
+                    from platform_core.access import require_object_scope
+                    require_object_scope(principal,store,source_objects)
+                except DomainError:in_scope=False
+            elif level_for(principal)<4:in_scope=False
+            if item.get('lifecycle')=='published' and can_read_management(runtime,'service',item,principal) and in_scope:
                 registered.append({'id':item['id'],'name':item.get('name',item['id']),'category':'已发布数据服务','description':item.get('description',''),'status':'已发布','input':'按服务规格'})
-        return {'services':builtins+registered,'composition':{'enabled':True,'message':'可将数据查询、函数和医疗小模型按顺序组合；每一步保留输入、输出、来源和版本。'}}
-    def catalog():
+        level=level_for(principal)
+        minimum={'fn.age':3,'fn.date_range':1,'fn.stats':1,'fn.abnormal':1,
+                 'model.summary':3,'model.lab':1,'model.risk':3}
+        builtins=[item for item in builtins if level>=minimum[item['id']]]
+        return {'services':builtins+registered,
+                'permission':{'level':level,'label':f'{level}级 · '+principal.get('visibility','按账户权限提供服务'),
+                              'dataset_tables':principal.get('dataset_tables',[])},
+                'composition':{'enabled':True,'message':'确认查询意图后，自动按账户等级和数据范围执行；每一步保留来源、版本和运行记录。'}}
+    def catalog(principal):
         definitions={r['field_id']:r for r in FieldLibrary(store).items() if r['status']!='retired'}
         objects=[o for o in store.list('object') if o.get('status')=='active']
         tables=[]
         for table in objects:
-            if table.get('kind')!='table':continue
+            if table.get('kind')!='table' or not can_access_table(principal,table):continue
             fields=[]
             for field in objects:
                 if field.get('kind')!='field' or field.get('parent_id')!=table['id']:continue
@@ -80,7 +97,7 @@ def create_router(runtime, identity):
                 date=datetime.fromisoformat(flow['updated_at']).astimezone(ZoneInfo('Asia/Shanghai')).date()
                 count+=date==day
             trend.append({'date':day.isoformat(),'count':count})
-        tables=catalog() if principal['role'] in ('platform','requester','auditor') else []
+        tables=catalog(principal)
         return {'tables':len(tables),'fields':sum(len(t['fields']) for t in tables),
                 'sources':len({t['source'] for t in tables if t['connected']}),
                 'completed':sum(f.get('state')=='query_completed' for f in rows),
@@ -90,13 +107,24 @@ def create_router(runtime, identity):
     @router.get('/catalog')
     def get_catalog(request:Request):
         principal=user(request);require_resource(principal,'object')
-        return {'tables':catalog()}
+        return {'tables':catalog(principal)}
+
+    @router.get('/ai/providers')
+    def ai_providers(request:Request):
+        principal=user(request,'demand.understand')
+        from management.intake.ollama import IntakeLLM
+        return IntakeLLM.provider_options()
 
     @router.get('/queries/{flow_id}')
     def get_query(flow_id:str,request:Request):
         principal=user(request);flow=owned(flow_id,principal)
         flow=intake.reconcile_execution(flow,principal['id'])
         plan=runtime.execution.store.get('plan',flow.get('execution_plan_id',''),flow.get('execution_plan_version'))
+        if plan:
+            require_plan_scope(principal,runtime,plan)
+        elif flow.get('query_draft'):
+            shape=professional_shape(flow['query_draft'],store)
+            require_table_scope(principal,shape['tables'])
         return {'flow':flow,'can_download':bool(plan and plan.get('circulation_mode')=='download'
                 and can_read_execution(runtime,'plan',plan,principal)),
                 'demand':store.require('demand',flow['demand_id'])}
@@ -107,7 +135,11 @@ def create_router(runtime, identity):
         body=await request.json();text=body.get('text')
         if not isinstance(text,str) or not 1<=len(text.strip())<=4000:raise DomainError('请填写 1 至 4000 字的查询需求')
         from management.intake.semantic_query import prepare
-        flow=await run_in_threadpool(prepare,runtime,text.strip(),principal['id'],catalog())
+        available=catalog(principal)
+        flow=await run_in_threadpool(prepare,runtime,text.strip(),principal['id'],available,
+                                     provider=body.get('provider'))
+        shape=flow.get('professional_preview') or {}
+        require_table_scope(principal,shape.get('tables') or ([shape['table']] if shape.get('table') else []))
         return {'flow':flow}
 
     @router.post('/queries/{flow_id}/clarify')
@@ -128,13 +160,18 @@ def create_router(runtime, identity):
         text=flow['request_text']+'\n用户补充：'+'；'.join(additions)
         if len(text)>12000:raise DomainError('补充内容过长，请重新描述需求')
         from management.intake.semantic_query import prepare
-        updated=await run_in_threadpool(prepare,runtime,text,principal['id'],catalog(),flow)
+        available=catalog(principal)
+        updated=await run_in_threadpool(prepare,runtime,text,principal['id'],available,flow,
+                                        provider=flow.get('ai_provider'))
+        shape=updated.get('professional_preview') or {}
+        require_table_scope(principal,shape.get('tables') or ([shape['table']] if shape.get('table') else []))
         return {'flow':updated}
 
     @router.post('/professional/preview')
     async def preview(request:Request):
         principal=user(request,'demand.create');require_resource(principal,'object')
         body=await request.json();shape=professional_shape(body.get('sql'),store)
+        require_table_scope(principal,shape['tables'])
         definitions=FieldLibrary(store).confirmed()
         return {'sql':shape['sql'],'outputs':[{'name':f['name'],'label':definitions[f['id']]['label'],
             'classification':field_classification(f)} for f in shape['output_fields']],
@@ -147,6 +184,7 @@ def create_router(runtime, identity):
         body=await request.json()
         if body.get('confirmed') is not True:raise DomainError('请先核对查询范围与输出字段')
         shape=professional_shape(body.get('sql'),store)
+        require_table_scope(principal,shape['tables'])
         today=datetime.now(ZoneInfo('Asia/Shanghai')).date();end=today+timedelta(days=7)
         policy={'scope':{'kind':'lookup','filters':shape['filters']},'time_field':None,'output_mode':'object',
                 'field_outputs':[f['id'] for f in shape['output_fields']],'circulation_modes':['controlled_compute'],
@@ -181,6 +219,8 @@ def create_router(runtime, identity):
             checked=compile_intent(flow['semantic_intent'],store)
             if not checked or checked['sql']!=flow['query_draft']:raise DomainError('查询意图与草案不一致，请重新理解查询',409)
         professional_shape(flow['query_draft'],store)
+        checked=professional_shape(flow['query_draft'],store)
+        require_table_scope(principal,checked['tables'])
         flow={**flow,'resources':[{**r,'review_status':'human_confirmed'} for r in flow['resources']]}
         with store.atomic():
             demand=store.require('demand',flow['demand_id'])
@@ -198,4 +238,124 @@ def create_router(runtime, identity):
                 'steps':[{'id':'query','capability':'data_query','label':'查询数据','status':'awaiting_plan_confirmation'}]},
                 flow['version'],principal['id'],'专业查询规格已确认并建立固定方案')
         return {'flow':updated}
+
+    @router.post('/queries/{flow_id}/execute')
+    async def confirm_intent_and_execute(flow_id:str,request:Request):
+        principal=user(request,'demand.create')
+        flow=owned(flow_id,principal)
+        body=await request.json()
+        if body.get('confirmed') is not True:
+            raise DomainError('请先确认页面展示的查询意图')
+        if body.get('expected_version')!=flow['version']:
+            raise DomainError('查询意图已变化，请刷新后确认',409)
+        if flow.get('state') not in ('waiting_manual_spec_confirmation','awaiting_plan_confirmation'):
+            raise DomainError('当前查询尚未形成可执行意图；请先补充必要的意图说明',409)
+        if flow.get('query_validation',{}).get('status') not in ('valid_pending_human_confirmation','valid'):
+            raise DomainError('查询范围未通过结构校验，请重新描述需求',409)
+        shape=professional_shape(flow.get('query_draft'),store)
+        require_table_scope(principal,shape['tables'])
+        confirmed=FieldLibrary(store).confirmed()
+        if any(field_id not in confirmed for field_id in shape['fields']):
+            raise DomainError('当前查询引用了字段库外或结构待复核的字段，请联系管理员更新目录',409)
+        resources=[{**store.require('object',oid),'review_status':'human_confirmed'}
+                   for oid in dict.fromkeys([table['id'] for table in shape['tables']]+shape['fields'])]
+        flow_for_plan={**flow,'resources':resources}
+        with store.atomic():
+            if flow.get('state')=='awaiting_plan_confirmation':
+                spec=store.require('spec',flow.get('spec_id',''),flow.get('spec_version'))
+                if (spec.get('demand_id')!=flow['demand_id']
+                        or not spec.get('query_draft_confirmed')
+                        or (spec.get('specification') or {}).get('query_draft')!=flow.get('query_draft')):
+                    raise DomainError('已生成方案与当前查询意图不一致，请重新描述并确认',409)
+                plan=runtime.execution.get(flow.get('execution_plan_id',''),flow.get('execution_plan_version'))
+                view=runtime.execution.store.get('view',flow.get('execution_view_id',''))
+                if not view or plan.get('spec_id')!=spec['id'] or plan.get('spec_version')!=spec['version']:
+                    raise DomainError('固定方案与已确认规格不匹配，请重新生成',409)
+                if runtime.execution.store.require('plan_state',plan['id']).get('status')!='confirmed':
+                    runtime.execution.confirm(plan['id'],plan['version'],principal['id'])
+            else:
+                demand=store.require('demand',flow['demand_id'])
+                spec=store.get('spec',flow.get('spec_id') or 'SPEC-'+demand['id'])
+                if demand.get('state')=='confirmed':
+                    if (not spec or not spec.get('query_draft_confirmed')
+                            or (spec.get('specification') or {}).get('query_draft')!=flow.get('query_draft')):
+                        raise DomainError('已确认规格与当前查询不一致，请重新描述需求',409)
+                else:
+                    spec=runtime.management.intake.confirm(demand['id'],{
+                        'expected_version':demand['version'],
+                        'confirmations':{'content':True,'attachments':True,'gaps':True,
+                                         'execution_constraints':True,'quality_requirement_reviewed':True},
+                        'note':'用户确认查询意图；字段定义已在字段库统一确认，按当前账户等级执行。',
+                        'query_sql_confirmed':True,'query_draft':flow['query_draft']},principal['id'])
+                from execution.query.intake_plan import create_field_plan
+                view,plan,shape=create_field_plan(runtime,flow_for_plan,spec,principal['id'])
+                if runtime.execution.store.require('plan_state',plan['id']).get('status')!='confirmed':
+                    runtime.execution.confirm(plan['id'],plan['version'],principal['id'])
+            shape=professional_shape(flow.get('query_draft'),store)
+            require_plan_scope(principal,runtime,plan)
+            plan=runtime.execution.store.require('plan',plan['id'],plan['version'])
+            policy=plan.get('execution_policy') or {}
+            try:
+                deadline=datetime.fromisoformat(str(policy.get('deadline_at','')).replace('Z','+00:00'))
+            except (TypeError,ValueError):
+                raise DomainError('查询方案期限无效，不能自动执行',409)
+            if deadline.tzinfo is None:raise DomainError('查询方案期限缺少时区，不能自动执行',409)
+            expires_at=min(datetime.now(timezone.utc)+timedelta(hours=1),deadline)
+            if expires_at<=datetime.now(timezone.utc):raise DomainError('查询方案已过期，请重新描述需求',409)
+            existing_job=None
+            for candidate in runtime.execution.store.list('job'):
+                if (candidate.get('plan_id')==plan['id'] and candidate.get('plan_version')==plan['version']
+                        and candidate.get('actor')==principal['id']
+                        and candidate.get('state') in ('queued','running','success')):
+                    candidate_grant=runtime.execution.store.get('grant',candidate.get('grant_id',''))
+                    if (candidate_grant and candidate_grant.get('authorization_basis')=='account_level'
+                            and candidate_grant.get('account_level')==level_for(principal)):
+                        _,grant_error=runtime.execution.security.assess(candidate_grant['id'],plan,
+                            principal['id'],plan['purpose'])
+                        if grant_error is None:existing_job=candidate
+            if existing_job:
+                job=existing_job
+                grant=runtime.execution.store.require('grant',job['grant_id'])
+            else:
+                grant=runtime.execution.security.grant_for_account_level({
+                    'subject':principal['id'],'purpose':plan['purpose'],'plan_id':plan['id'],
+                    'plan_version':plan['version'],'expires_at':expires_at.isoformat(),
+                    'mode':plan['output_mode'],'max_rows':policy['max_rows'],
+                    'min_group_size':policy['min_group_size']},principal['id'],level_for(principal))
+                require_plan_scope(principal,runtime,plan)
+                job=runtime.execution.submit(plan['id'],plan['version'],grant['id'],principal['id'])
+            health=(grant.get('health_output_authorization') or {}).get('field_ids',[])
+            identifiers=(grant.get('identifier_output_authorization') or {}).get('field_ids',[])
+            fields=sorted(set(health+identifiers))
+            auth=(grant.get('health_output_authorization') or grant.get('identifier_output_authorization') or {})
+            steps=[]
+            for step in flow.get('steps',[]):
+                item=dict(step)
+                if item.get('capability')=='data_query':
+                    item.update(status='query_queued',detail='查询意图已确认；按账户等级校验范围、登记审计授权并自动进入执行队列。')
+                steps.append(item)
+            updated=store.save('intake_flow',flow_id,{**flow_for_plan,'spec_id':spec['id'],
+                'spec_version':spec['version'],'execution_plan_id':plan['id'],
+                'execution_plan_version':plan['version'],'execution_view_id':view['id'],
+                'execution_plan_preview':{'output_columns':[field['name'] for field in shape['output_fields']],
+                    'output_description':'、'.join(field['name'] for field in shape['output_fields']),
+                    'table':' + '.join(table['name'] for table in shape['tables']),
+                    'filters':shape['filters'],'output_mode':plan['output_mode']},
+                'state':'query_queued','steps':steps,'plan_confirmed_by':principal['id'],
+                'plan_confirmed_version':plan['version'],'execution_authorized':True,'grant_id':grant['id'],
+                'authorization_request':{'id':auth.get('request_id') or grant['id'],'status':'approved',
+                    'requester_id':principal['id'],'requester_role':'account_level',
+                    'account_level':level_for(principal),'authorization_basis':'account_level',
+                    'plan_id':plan['id'],'plan_version':plan['version'],'purpose':plan['purpose'],
+                    'field_ids':fields,'grant_id':grant['id'],'expires_at':grant['expires_at']},
+                'authorization_decision':{'value':'yes','actor':'account-level-policy',
+                    'role':'account_level','account_level':level_for(principal),'field_ids':fields,
+                    'expires_at':grant['expires_at']},
+                'job_id':job['id'],'job_state':job['state'],'execution_submitted_by':principal['id'],
+                'execution_submitted_at':job.get('created_at') or job['updated_at']},
+                flow['version'],principal['id'],'用户确认查询意图后按账户等级自动执行')
+        updated=intake.reconcile_execution(updated,principal['id'])
+        return {'flow':updated,'job':{'id':job['id'],'state':job['state']},
+                'permission':{'level':level_for(principal),'visibility':principal.get('visibility')},
+                'note':'已按当前账户数据范围自动执行；结果会按账户等级脱敏或汇总。'}
     return router

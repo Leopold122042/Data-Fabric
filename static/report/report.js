@@ -1,12 +1,13 @@
 import {guideHtml} from './topic2-guide.js?v=019';
 import {caseIntro,caseContent} from './topic2-case.js?v=case-017';
 import {renderTopicFour} from './topic4.js?v=topic4-r2-20261113';
+import {renderTopicThree} from './topic3.js?v=topic3-v1-20261118';
 const $=selector=>document.querySelector(selector);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const topics={
  '1':{title:'医疗数据编织平台总体框架',label:'课题 01 / 04 · 总体框架',summary:'从数据准备与语义资产出发，串联需求解析、方案编译、受控执行和结果反馈；点击图中节点直达对应平台功能。'},
  '2':{title:'多源数据编织与可信执行',label:'课题 02 / 04 · 能力演示',summary:'从异构接入、语义统一到合规执行、运行反馈，沿同一条演示链路展示关键能力。'},
- '3':{title:'课题三',label:'课题 03 / 04',summary:'该模块预留给报告中的第三项课题，收到内容后再配置演示路径。'},
+ '3':{title:'服务供给与可信交付',label:'课题 03 / 04 · 服务编排演示',summary:'从需求澄清与任务规格开始，按用途组合服务图，经合约策略校验后执行和交付，并以同范围复测沉淀改进证据。'},
  '4':{title:'医疗统计安全使用演示',label:'课题 04 / 04 · 子课题四对接子课题五',summary:'以 T01 为例，现场核对 12 条关联、人数阈值、六类授权判断、到期后拒绝，以及来源和交付证据。'}
 };
 const stages=[
@@ -73,6 +74,7 @@ function setTopic(topic){
  const url=new URL(location.href);if(topic==='2')url.searchParams.delete('topic');else url.searchParams.set('topic',topic);history.replaceState(null,'',url);
  if(topic==='2')renderTopicTwo();
  else if(topic==='1')renderTopicOne();
+ else if(topic==='3')renderTopicThree($('#topic-content'));
  else if(topic==='4')renderTopicFour($('#topic-content'));
  else $('#topic-content').innerHTML=`<article class="placeholder-card"><span class="placeholder-index">${topic.padStart(2,'0')}</span><h2>${esc(data.title)} · 内容待补充</h2><p>四个课题共用这套独立汇报界面。请把这一课题的目标、展示要点和希望演示的功能发来，我再补上对应内容。</p><small>当前先完成课题二的端到端交互样例</small></article>`;
 }

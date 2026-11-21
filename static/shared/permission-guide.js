@@ -1,4 +1,4 @@
-import {navigationGroups,roleNames} from './access-model.js?v=identity-20261111';
+import {navigationGroups,roleNames} from './access-model.js?v=0.1.28';
 
 export const permissionRoles=['platform','provider','requester','auditor'];
 const accessLabels={write:'可查看、可操作',read:'可查看',none:'不可查看'};

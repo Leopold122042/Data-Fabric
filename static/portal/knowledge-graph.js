@@ -1,5 +1,5 @@
-import {ready,currentAccess,role,bindRole} from '/static/shared/access.js?v=identity-20261111';
-import {icon} from '/static/shared/icons.js?v=0.1.25';
+import {ready,currentAccess,role,bindRole} from '/static/shared/access.js?v=0.1.28';
+import {icon} from '/static/shared/icons.js?v=0.1.28';
 import {renderKnowledgeGraph} from '/static/report/topic1.js?v=topic1-graph-r6-20261117';
 
 const host=document.querySelector('#knowledge-graph');

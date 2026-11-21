@@ -2,6 +2,7 @@
 import json,threading,time
 from datetime import datetime,timezone
 from platform_core.storage import DomainError,new_id,now
+from platform_core.accounts import BOOTSTRAP_ACCOUNTS
 from execution.security.control import Security,timestamp
 from execution.delivery import Delivery
 from execution.query.engine import Queries
@@ -205,6 +206,24 @@ class Execution:
         latest=self.store.require('job',job['id'])
         if self.stop.is_set() or latest.get('cancel_requested'):raise DomainError(latest.get('cancel_reason') or '任务已中止',409)
         self.current(plan)
+        accounts=getattr(self.runtime,'account_store',None)
+        if accounts:
+            account=accounts.account(job.get('actor',''),include_disabled=True)
+            if account:
+                if not account.get('enabled'):raise DomainError('提交任务的账户已停用，任务被阻止',403)
+                from platform_core.access import require_plan_scope
+                require_plan_scope(account,self.runtime,plan)
+                grant=self.store.get('grant',job.get('grant_id','')) or {}
+                if (grant.get('authorization_basis')=='account_level'
+                        and grant.get('account_level')!=account.get('level')):
+                    raise DomainError('提交后账户权限等级已变化；请按当前等级重新确认并执行',403)
+            elif job.get('actor') not in ('demo-platform','demo-requester','demo-provider','demo-auditor'):
+                raise DomainError('提交任务的账户不存在，任务被阻止',403)
+            else:
+                from execution.security.identity import DEMO_USERS
+                from platform_core.access import require_plan_scope
+                legacy=next((value for value in DEMO_USERS.values() if value['id']==job.get('actor')),None)
+                if legacy:require_plan_scope(legacy,self.runtime,plan)
         return self.security.check(job['grant_id'],plan,job['actor'],job['purpose'],stage)[0]
     def run(self,job):
         start=time.perf_counter();plan=self.get(job['plan_id'],job['plan_version']);results={};node_states={};delivery=None;error=None
