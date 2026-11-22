@@ -128,6 +128,8 @@ class ExecutionHandlers:
         if definition is None or definition.get('lifecycle') not in ('published', 'trial'):
             raise DomainError('服务未发布或已失效', 409)
         handler=definition.get('handler_id') or sid
+        if self.openalex is not None and self.openalex.supports(handler):
+            return self.openalex.invoke(handler, params or {})
         if handler=='SVC-MEDICAL-REMOTE-QUERY':
             from remote_medical_sources import query
             from external_api import medical_service_session
@@ -153,6 +155,8 @@ class ExecutionHandlers:
     def _execute_handler(self, sid, params):
         # Private raw handler. Call only after the caller's authorization/validation gate.
         p = params or {}
+        if self.openalex is not None and self.openalex.supports(sid):
+            return self.openalex.invoke(sid, p)
         if sid == 'SVC-PATIENT-360':
             return self.vlayer.patient_360(str(p.get('patient_id', '')).strip().upper())
         if sid == 'SVC-LAB-RESULT':

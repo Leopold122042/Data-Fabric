@@ -16,6 +16,7 @@ class Runtime(PlatformHandlers, ManagementHandlers, ExecutionHandlers):
         self.threads = []
         self.SCAN_INTERVAL = 4.0
         self.engine = self.vlayer = self.sim = self.orch = None
+        self.openalex = None
         self.SERVICES = SERVICES
         self.CIRC_ACTORS, self.CIRC_SVC_PARAMS, self.SERVICE_ASSET = CIRC_ACTORS, CIRC_SVC_PARAMS, SERVICE_ASSET
         self.gov = GovernanceState(services=management.legacy_services)

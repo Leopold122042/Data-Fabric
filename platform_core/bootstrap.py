@@ -33,6 +33,10 @@ def create_app(control_root=None,start_runtime=True,simulate=None,identity=None)
     import medsim
     management.catalog.sources = SourceRegistry(management.store, medsim.DATA_DIR)
     runtime=Runtime(management,simulate=(os.environ.get('MEDFABRIC_SIMULATE')=='1') if simulate is None else simulate)
+    from management.catalog.openalex import OpenAlex, SERVICES as OPENALEX_SERVICES
+    runtime.openalex=OpenAlex(management.catalog)
+    for service_id in OPENALEX_SERVICES:
+        runtime.SERVICE_ASSET[service_id]='openalex_metadata'
     runtime.execution=Execution(runtime)
     from execution.external.governance import ExternalGovernance
     runtime.external_governance=ExternalGovernance(runtime)
@@ -58,8 +62,11 @@ def create_app(control_root=None,start_runtime=True,simulate=None,identity=None)
                 runtime.start_background()
                 runtime.execution.start()
                 runtime.external_governance.start()
+                runtime.openalex.start()
             yield
         finally:
+            if runtime.openalex is not None:
+                runtime.openalex.close()
             runtime.external_governance.close()
             runtime.execution.close()
             runtime.shutdown()

@@ -67,6 +67,7 @@ def create_router(runtime, identity):
                  'model.summary':3,'model.lab':1,'model.risk':3}
         builtins=[item for item in builtins if level>=minimum[item['id']]]
         return {'services':builtins+registered,
+                'openalex_sync':runtime.openalex.status() if runtime.openalex is not None else None,
                 'permission':{'level':level,'label':f'{level}级 · '+principal.get('visibility','按账户权限提供服务'),
                               'dataset_tables':principal.get('dataset_tables',[])},
                 'composition':{'enabled':True,'message':'确认查询意图后，自动按账户等级和数据范围执行；每一步保留来源、版本和运行记录。'}}

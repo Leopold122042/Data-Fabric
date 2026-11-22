@@ -10,13 +10,14 @@ def sql_identifier(name):return '"'+str(name).replace('"','""')+'"'
 
 
 class SQLiteSource:
-    def __init__(self,path):self.path=Path(path)
+    def __init__(self,path,hidden_tables=()):self.path=Path(path);self.hidden_tables=set(hidden_tables or ())
     def connection(self):return sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro',uri=True)
     def snapshot(self):
         con=self.connection()
         try:
             result={}
             for (name,) in con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"):
+                if name in self.hidden_tables:continue
                 columns=[{'name':r[1],'type':r[2],'nullable':not bool(r[3]),'default':r[4],'primary_key':bool(r[5])}
                          for r in con.execute('PRAGMA table_info('+sql_identifier(name)+')')]
                 result[name]={'columns':[c['name'] for c in columns],'column_details':columns,
@@ -89,6 +90,11 @@ class SourceRegistry:
             def snapshot(self):raise DomainError(self.error)
         result={}
         for source in self.store.list('source'):
-            try:result[source['id']]=self.factories[source['connector']](self.resolve_path(source['path']))
+            try:
+                path=self.resolve_path(source['path'])
+                if source['connector']=='sqlite':
+                    result[source['id']]=SQLiteSource(path,source.get('hidden_tables',[]))
+                else:
+                    result[source['id']]=self.factories[source['connector']](path)
             except (DomainError,KeyError) as exc:result[source['id']]=FailedSource(str(exc))
         return result

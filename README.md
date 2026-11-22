@@ -98,6 +98,8 @@ patients' vital history. Neither startup nor backup rotation invokes patient cle
 
 保留桌面版云盘连接、自动扫描目录、虚拟表及查询功能。打开 `/static/index.html#external`，详见 [配置与使用说明](docs/external-data.md)。`requirements.txt` 已包含外部接入依赖。
 
+OpenAlex 医学与健康科学公开文献接入、逻辑表、定时同步和可调用服务详见 [OpenAlex 接入说明](docs/openalex.md)。
+
 已有 `.venv-external` 可直接用 `.venv-external/bin/python -m pip install -r requirements.txt` 更新依赖，先执行 `.venv-external/bin/python initialize_data.py`，再执行 `.venv-external/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8321`。
 
 ## B 执行与交付

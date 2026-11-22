@@ -50,6 +50,10 @@ def canonical_table_name(table):
 
 
 def can_access_table(user, table):
+    # OpenAlex is a public scholarly-metadata source, independent of the
+    # level-scoped clinical tables below.
+    if isinstance(table, dict) and table.get('source_id') == 'openalex':
+        return True
     allowed = LEVEL_TABLES[level_for(user)]
     return '*' in allowed or canonical_table_name(table) in allowed
 

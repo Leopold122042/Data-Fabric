@@ -1,4 +1,6 @@
 DATA_ASSETS = [
+    {"id": "openalex_metadata", "name": "OpenAlex 学术文献元数据", "source": "OpenAlex", "class": "L1", "rows_key": "works",
+     "fields": ["title", "doi", "publication_year", "cited_by_count", "author_name", "institution_name", "topic_name"], "masking": "公开学术元数据，无患者标识", "scope": "公开"},
     {"id": "clinical_patient", "name": "患者主索引", "source": "HIS", "class": "L4", "rows_key": "patients",
      "fields": ["patient_id", "name", "gender", "birth_date", "id_card", "phone"], "masking": "身份字段掩码 + 患者ID伪名化", "scope": "院内"},
     {"id": "clinical_visit", "name": "就诊与诊断", "source": "HIS", "class": "L3", "rows_key": "visits",

@@ -23,7 +23,8 @@ def check_schema(value,schema):
 def validator(runtime):
     def validate(service):
         sid=service.get('handler_id')
-        reachable=any(s['id']==sid for s in runtime.SERVICES)
+        reachable=any(s['id']==sid for s in runtime.SERVICES) or bool(
+            runtime.openalex is not None and runtime.openalex.supports(sid))
         mappings=service.get('concept_ids',[])
         semantic=bool(service.get('source_objects') or mappings)
         reasons=[]
