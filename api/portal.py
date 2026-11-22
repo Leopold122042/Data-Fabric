@@ -6,7 +6,7 @@ from starlette.concurrency import run_in_threadpool
 from platform_core.storage import DomainError, new_id
 from platform_core.access import (require_action, require_resource, can_read_management,
     can_read_execution, can_access_table, require_table_scope, require_plan_scope,
-    project_result, level_for)
+    project_result, level_for, account_permission)
 from management.intake.flow import IntakeFlow
 from management.catalog.field_library import FieldLibrary
 from management.intake.professional import professional_shape
@@ -32,6 +32,11 @@ def create_router(runtime, identity):
         return [f for f in store.list('intake_flow') if f.get('demand_id') in demands]
     def brief(flow):
         return {k:flow.get(k) for k in ('id','demand_id','request_text','state','query_mode','updated_at','created_by')}
+    def query_permission_context(principal, available_tables):
+        permission=account_permission(principal)
+        return {'level':permission['level'],'visibility':permission['visibility'],
+                'allowed_tables':[table['name'] for table in available_tables],
+                'scope_limited':permission['level']<4}
 
     @router.get('/services')
     def services(request:Request):
@@ -137,7 +142,8 @@ def create_router(runtime, identity):
         from management.intake.semantic_query import prepare
         available=catalog(principal)
         flow=await run_in_threadpool(prepare,runtime,text.strip(),principal['id'],available,
-                                     provider=body.get('provider'))
+                                     provider=body.get('provider'),
+                                     permission_context=query_permission_context(principal,available))
         shape=flow.get('professional_preview') or {}
         require_table_scope(principal,shape.get('tables') or ([shape['table']] if shape.get('table') else []))
         return {'flow':flow}
@@ -162,7 +168,8 @@ def create_router(runtime, identity):
         from management.intake.semantic_query import prepare
         available=catalog(principal)
         updated=await run_in_threadpool(prepare,runtime,text,principal['id'],available,flow,
-                                        provider=flow.get('ai_provider'))
+                                        provider=flow.get('ai_provider'),
+                                        permission_context=query_permission_context(principal,available))
         shape=updated.get('professional_preview') or {}
         require_table_scope(principal,shape.get('tables') or ([shape['table']] if shape.get('table') else []))
         return {'flow':updated}

@@ -55,9 +55,13 @@ def can_access_table(user, table):
 
 
 def require_table_scope(user, tables):
+    level=level_for(user)
     denied = [canonical_table_name(table) for table in tables if not can_access_table(user, table)]
     if denied:
-        raise DomainError('当前账户等级不能使用这些数据表：' + '、'.join(dict.fromkeys(denied)), 403)
+        allowed=LEVEL_TABLES[level]
+        scope='全部13张表' if '*' in allowed else '、'.join(sorted(allowed))
+        raise DomainError(f"当前账户为{level}级，当前权限下无法访问数据表："+
+                          '、'.join(dict.fromkeys(denied))+f'。当前可用数据范围：{scope}。请联系管理员核对权限。',403)
     return user
 
 
@@ -128,14 +132,15 @@ def project_result(result, user, min_group_size=5):
     if level >= 4:
         return result
     if not isinstance(result, dict) or not isinstance(result.get('rows'), list):
-        return {'columns': [], 'rows': [], 'message': '当前权限不允许展示该结果结构。'}
+        return {'columns': [], 'rows': [], 'message': '查询可能已执行，但当前权限不允许展示该结果结构；请联系管理员核对结果查看范围。'}
     rows = result['rows']
     columns = result.get('columns', [])
     if level == 1:
         count = len(rows)
         return {'columns': ['符合条件的记录数'],
                 'rows': [[count]] if count >= min_group_size else [],
-                'message': '' if count >= min_group_size else f'结果少于{min_group_size}条，已按权限隐藏具体数量和明细。',
+                'message': '' if count >= min_group_size else
+                    f'查询已执行成功；当前权限只允许展示达到最小样本阈值的计数，本次未达到阈值，因此隐藏具体数量和明细。',
                 'suppressed': count < min_group_size}
     from execution.security.output_policy import name_classification
     identifier_indexes = [i for i, name in enumerate(columns)
@@ -163,13 +168,30 @@ def resource_level(user, resource):
 def require_resource(user, resource, write=False):
     level = resource_level(user, resource)
     if level == 'none' or write and level != 'write':
-        raise DomainError('当前身份无权修改该模块' if write else '当前身份无权查看该模块', 403)
+        labels={'overview':'平台总览','demand':'查询工作台','object':'数据目录','delivery':'查询结果',
+                'execution':'执行管理','service':'数据服务','account':'账户管理'}
+        operation='修改' if write else '查看'
+        raise DomainError(f"当前账户为{level_for(user)}级，当前权限下无权{operation}{labels.get(resource,resource)}。"
+                          '如需使用此功能，请联系平台管理员核对账户权限。',403)
     return user
 
 
 def require_action(user, action):
     if user.get('role') not in POLICY['actions'].get(action, []):
-        raise DomainError('当前身份无权执行该操作', 403)
+        level=level_for(user)
+        if action=='demand.create':
+            message=f'当前账户为{level}级，没有新建查询的权限；请联系平台管理员核对账户权限。'
+        elif action=='demand.understand':
+            message=f'当前账户为{level}级，没有使用自然语言理解的权限；请联系平台管理员调整权限。'
+        elif action=='demand.confirm':
+            message=f'当前账户为{level}级，没有确认查询方案的权限；请联系管理员处理。'
+        elif action=='delivery.read':
+            message=f'查询状态与结果查看权限相互独立；当前账户为{level}级，当前权限下无法查看这次查询结果。请联系管理员核对结果查看范围。'
+        elif action=='delivery.download':
+            message=f'当前账户为{level}级，当前权限下无法导出查询结果；可以查看允许展示的结果，或联系管理员核对导出权限。'
+        else:
+            message=f'当前账户为{level}级，当前权限下无权执行“{action}”操作；请联系平台管理员核对权限。'
+        raise DomainError(message, 403)
     resource, operation = action.split('.', 1)
     # Creating a plan from a specification never edits that immutable record.
     require_resource(user, resource, write=operation not in READ_ACTIONS and action != 'spec.plan')
