@@ -1,0 +1,18 @@
+[Unit]
+Description=Check MedFabric VPN routes and Doris connectivity
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fuwuqi
+Group=fuwuqi
+WorkingDirectory=/mnt/medfabric
+EnvironmentFile=-/home/fuwuqi/.config/medfabric/doris-check.env
+ExecStart=/home/fuwuqi/.conda/envs/medfabric/bin/python -m deploy.medfabric_vpn_check --bootstrap-host 192.168.0.183 --bootstrap-port 9030 --state-file /mnt/medfabric/runtime/vpn-check.json
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/mnt/medfabric/runtime
+UMask=0077
+TimeoutStartSec=45

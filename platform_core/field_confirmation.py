@@ -18,6 +18,8 @@ def confirm_current_demo_fields(runtime, marker):
         for field in store.list('object'):
             if field.get('kind') != 'field' or field.get('status') != 'active':
                 continue
+            if field.get('source_id','').startswith('doris-'):
+                continue
             current = store.require('object', field['id'])
             classification = current.get('classification')
             from execution.security.output_policy import field_classification

@@ -12,7 +12,7 @@ def normalized(value):
 
 
 IDENTIFIER_NAMES = {
-    'patientid', 'recordid', 'personid', 'name', 'patientname', 'fullname',
+    'patientid', 'recordid', 'personid', 'pid', 'name', 'patientname', 'fullname',
     'phone', 'telephone', 'mobile', 'email', 'idcard', 'identitynumber',
     '身份证', '身份证号', '姓名', '患者姓名', '手机号', '联系电话', '地址',
 }
@@ -42,6 +42,7 @@ METADATA_VALUES = {
     'notice': {
         '部分分组未满足输出条件', '部分分组可能未满足输出条件',
         '本地对象级结果',
+        '源库实时读取',
     },
     'fixture': {'新建虚构样例；仅用于本地演示'},
 }

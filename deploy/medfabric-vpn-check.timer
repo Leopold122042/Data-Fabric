@@ -1,0 +1,10 @@
+[Unit]
+Description=Check MedFabric VPN and Doris every minute
+
+[Timer]
+OnBootSec=15s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

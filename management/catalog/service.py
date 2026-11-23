@@ -7,6 +7,7 @@ class Catalog:
     def __init__(self, store):
         self.store = store
         self.sources = None
+        self.doris = None
 
     def objects(self, **filters):
         rows = self.store.list('object', filters.get('at'))
@@ -22,7 +23,11 @@ class Catalog:
             index = {(r['kind'],r.get('table'),r['name']): r for r in existing}
             seen = set(); changes = []
             for table, info in snapshot.get('tables',{}).items():
-                items = [('table',table, {'columns': info.get('columns',[]), 'foreign_keys':info.get('foreign_keys',[])})]
+                table_structure = {'columns': info.get('columns',[]), 'foreign_keys':info.get('foreign_keys',[])}
+                for key in ('physical_name', 'remote_binding'):
+                    if key in info:
+                        table_structure[key] = info[key]
+                items = [('table',table, table_structure)]
                 details = info.get('column_details') or [{'name':c,'type':'unknown'} for c in info.get('columns',[])]
                 items += [('field',c['name'],c) for c in details]
                 parent = None
@@ -32,7 +37,8 @@ class Catalog:
                     seen.add(oid)
                     data={**(old or {}),'source_id':source_id,'kind':kind,'table':table,'name':name,
                           'structure':structure,'status':'active','parent_id':parent if kind=='field' else None,
-                          'meaning':(old or {}).get('meaning',''),'domain':(old or {}).get('domain',snapshot.get('domain','医疗演示')),
+                          'meaning':(old or {}).get('meaning',structure.get('comment') or structure.get('physical_name','')),
+                          'domain':(old or {}).get('domain',snapshot.get('domain','医疗演示')),
                           'owner':(old or {}).get('owner','待指定'),'constraints':(old or {}).get('constraints',{}),
                           'classification':(old or {}).get('classification','待确认')}
                     # Volatile row counts are scan facts, not immutable structural versions.
@@ -46,10 +52,19 @@ class Catalog:
                 if old['id'] not in seen and old.get('status')!='deleted':
                     self.store.save('object',old['id'],{**old,'status':'deleted'},old['version'],reason='源对象删除')
                     changes.append({'id':old['id'],'type':'deleted'})
-            for change in changes:
-                affected=set(self.impact(change['id'])['downstream'])
+            if changes:
+                downstream = {}
+                for origin, target, _ in self.edges():
+                    downstream.setdefault(origin, []).append(target)
+                affected = {change['id'] for change in changes}
+                queue = deque(affected)
+                while queue:
+                    for target in downstream.get(queue.popleft(), []):
+                        if target not in affected:
+                            affected.add(target)
+                            queue.append(target)
                 for mapping in self.store.list('mapping'):
-                    if any(f in affected|{change['id']} for f in mapping.get('fields',[])) and mapping.get('status')=='confirmed':
+                    if mapping.get('status')=='confirmed' and affected.intersection(mapping.get('fields',[])):
                         self.store.save('mapping',mapping['id'],{**mapping,'status':'review_required'},mapping['version'],reason='源结构变化，需复核')
             from management.catalog.field_library import FieldLibrary
             FieldLibrary(self.store).sync()
@@ -64,17 +79,19 @@ class Catalog:
             try:
                 snapshot=adapter.snapshot()
                 changes.extend(self.ingest(sid,snapshot))
-                old=self.store.get('scan',sid)
-                data={'status':'success','tables':snapshot.get('tables',{})}
-                if old is None or old.get('status')!='success' or old.get('tables')!=data['tables']:
-                    self.store.save('scan',sid,data,old['version'] if old else 0,reason='元数据扫描状态或内容变化')
+                self.record_scan(sid, {'status':'success','tables':snapshot.get('tables',{})})
             except Exception as exc:
-                old=self.store.get('scan',sid)
-                if old is None or old.get('status')!='failed' or old.get('error')!=str(exc):
-                    self.store.save('scan',sid,{'status':'failed','error':str(exc)},old['version'] if old else 0,reason='扫描失败')
+                self.record_scan(sid, {'status':'failed','error':str(exc)})
         from management.catalog.external import sync
         changes.extend(sync(self))
         return changes
+
+    def record_scan(self, source_id, data):
+        with self.store.atomic():
+            old = self.store.get('scan', source_id)
+            if old is None or any(old.get(key) != value for key, value in data.items()):
+                reason = '元数据扫描状态或内容变化' if data['status'] == 'success' else '扫描失败'
+                self.store.save('scan', source_id, data, old['version'] if old else 0, reason=reason)
 
     def annotate(self, oid, body, actor):
         old=self.store.require('object',oid)
@@ -85,6 +102,8 @@ class Catalog:
     def confirm_rename(self, oid, name, expected, actor):
         if not name or not name.strip():raise DomainError('新名称不能为空')
         old=self.store.require('object',oid)
+        if old['source_id'].startswith('doris-'):
+            raise DomainError('Doris 字段名由源端维护，平台可修改字段库里的业务名称')
         if any(r['id']!=oid and r.get('status')=='active' and r['source_id']==old['source_id'] and
                r['kind']==old['kind'] and r.get('table')==old.get('table') and r['name']==name for r in self.objects()):
             raise DomainError('目标名称已存在，不能覆盖',409)

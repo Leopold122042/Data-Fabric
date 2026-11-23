@@ -49,6 +49,8 @@ def create_router(runtime,identity):
                 visible=[obj for obj in store.list('object') if obj.get('source_id')==item.get('id')
                          and obj.get('kind')=='table' and can_access_table(user,obj)]
                 return bool(visible)
+            if kind=='scan' and item['id'].startswith('doris-'):
+                return False
             if kind=='intake_flow':
                 plan=runtime.execution.store.get('plan',item.get('execution_plan_id',''),item.get('execution_plan_version'))
                 if plan:require_plan_scope(user,runtime,plan)
@@ -155,7 +157,7 @@ def create_router(runtime,identity):
                     'api_key_configured':bool(llm.api_key)},
                 'plan_snapshots':m.services.plan_reader is not None,'external_identity':False,'execution_control':m.reconciliation.controller is not None,
                 'counts':{k:sum(can_read(k,x,user) for x in m.store.list(k)) for k in ('object','concept','mapping','service','demand','case')},
-                'capabilities':{'sources':['SQLite','CSV','JSON','EMR JSON','WebDAV','GitHub'],'external_sources':'已接入：云盘目录、虚拟表；选中结构可纳入平台目录','standards':'本地schema，未验证国家/行业标准'}}
+                'capabilities':{'sources':['SQLite','CSV','JSON','EMR JSON','WebDAV','GitHub','Apache Doris'],'external_sources':'已接入：云盘目录、虚拟表和服务端配置的 Doris 库','standards':'本地schema，未验证国家/行业标准'}}
 
     @router.get('/items/{kind}')
     def items(kind:str,request:Request,q:str='',at:str|None=None):
@@ -214,9 +216,11 @@ def create_router(runtime,identity):
 
     @router.get('/catalog/export')
     def export(request:Request):
-        who(request,action='object.export')
-        return JSONResponse({'schema_version':'local-demo-v1','standard_verified':False,'objects':m.catalog.objects(),
-            'identifiers':m.store.list('identifier')},headers={'Content-Disposition':'attachment; filename="catalog-demo.json"'})
+        user=who(request,action='object.export')
+        return JSONResponse({'schema_version':'local-demo-v1','standard_verified':False,
+            'objects':[item for item in m.catalog.objects() if in_data_scope('object',item,user)],
+            'identifiers':[item for item in m.store.list('identifier') if in_data_scope('identifier',item,user)]},
+            headers={'Content-Disposition':'attachment; filename="catalog-demo.json"'})
 
     @router.post('/catalog/scan')
     def scan(request:Request):
@@ -235,7 +239,16 @@ def create_router(runtime,identity):
 
     @router.get('/catalog/{oid}/impact')
     def impact(oid:str,request:Request):
-        who(request,action='object.impact');return m.catalog.impact(oid)
+        user=who(request,action='object.impact')
+        target=m.store.require('object',oid)
+        if not in_data_scope('object',target,user):raise DomainError('当前权限下无法查看此目录对象',403)
+        result=m.catalog.impact(oid)
+        if level_for(user)<4:
+            hidden={item['id'] for item in m.catalog.objects() if not in_data_scope('object',item,user)}
+            result['upstream']=[item for item in result['upstream'] if item not in hidden]
+            result['downstream']=[item for item in result['downstream'] if item not in hidden]
+            result['edges']=[edge for edge in result['edges'] if not hidden.intersection((edge['source'],edge['target']))]
+        return result
 
     @router.post('/identifiers')
     async def identifier(request:Request):

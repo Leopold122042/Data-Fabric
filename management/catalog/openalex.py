@@ -116,6 +116,17 @@ RELATIONS = {
     'openalex_yearly': [],
 }
 
+class OpenAlexSource(SQLiteSource):
+    def snapshot(self):
+        snapshot = super().snapshot()
+        tables = {name: item for name, item in snapshot['tables'].items() if name in TABLES}
+        for name, item in tables.items():
+            item['foreign_keys'] = [reference for reference in RELATIONS[name]
+                if reference['from'] in item['columns']
+                and reference['to'] in tables.get(reference['table'], {}).get('columns', [])]
+        return {'domain': '学术文献', 'tables': tables}
+
+
 SEARCH = 'SVC-OPENALEX-SEARCH'
 DETAIL = 'SVC-OPENALEX-DETAIL'
 STATS = 'SVC-OPENALEX-STATS'
@@ -341,11 +352,7 @@ class OpenAlex:
                        'openalex-connector', '登记并确认 OpenAlex 公开字段定义')
 
     def register(self):
-        snapshot = SQLiteSource(self.path).snapshot()
-        snapshot['tables'] = {table: snapshot['tables'][table] for table in TABLES}
-        for table, foreign_keys in RELATIONS.items():
-            snapshot['tables'][table]['foreign_keys'] = foreign_keys
-        snapshot['domain'] = '学术文献'
+        snapshot = OpenAlexSource(self.path).snapshot()
         store = self.catalog.store
         if not store.get('source', SOURCE):
             store.save('source', SOURCE, {'source_id': SOURCE, 'connector': 'sqlite',

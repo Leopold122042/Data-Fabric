@@ -30,8 +30,10 @@ def create_app(control_root=None,start_runtime=True,simulate=None,identity=None)
     evidence=Evidence(root/'execution'/'control.db',environment)
     management=Management(root/'management'/'control.db',evidence,environment)
     from management.catalog.sources import SourceRegistry
+    from management.catalog.doris import DorisSources
     import medsim
     management.catalog.sources = SourceRegistry(management.store, medsim.DATA_DIR)
+    management.catalog.doris = DorisSources(management.store)
     runtime=Runtime(management,simulate=(os.environ.get('MEDFABRIC_SIMULATE')=='1') if simulate is None else simulate)
     from management.catalog.openalex import OpenAlex, SERVICES as OPENALEX_SERVICES
     runtime.openalex=OpenAlex(management.catalog)
@@ -63,8 +65,10 @@ def create_app(control_root=None,start_runtime=True,simulate=None,identity=None)
                 runtime.execution.start()
                 runtime.external_governance.start()
                 runtime.openalex.start()
+                management.catalog.doris.start(management.catalog)
             yield
         finally:
+            management.catalog.doris.close()
             if runtime.openalex is not None:
                 runtime.openalex.close()
             runtime.external_governance.close()

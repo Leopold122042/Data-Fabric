@@ -1,5 +1,6 @@
 """Role-scoped user workbench projections and explicit query preparation."""
 from datetime import datetime, timedelta, timezone
+from time import perf_counter
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
@@ -63,29 +64,83 @@ def create_router(runtime, identity):
             if item.get('lifecycle')=='published' and can_read_management(runtime,'service',item,principal) and in_scope:
                 registered.append({'id':item['id'],'name':item.get('name',item['id']),'category':'已发布数据服务','description':item.get('description',''),'status':'已发布','input':'按服务规格'})
         level=level_for(principal)
+        doris=runtime.management.catalog.doris
+        if level==4 and doris:
+            for source,alias,service_id in doris.services():
+                database, table=source.tables[alias]
+                registered.append({'id':service_id,'name':f'{source.name} · {table} 记录数',
+                    'category':'Doris 实时服务','description':f'实时统计 {database}.{table} 的记录数，少于 5 条时隐藏。',
+                    'status':'可调用' if doris.status(source.id)=='connected' else '待连接',
+                    'input':'无参数','live_call':True})
         minimum={'fn.age':3,'fn.date_range':1,'fn.stats':1,'fn.abnormal':1,
                  'model.summary':3,'model.lab':1,'model.risk':3}
         builtins=[item for item in builtins if level>=minimum[item['id']]]
         return {'services':builtins+registered,
                 'openalex_sync':runtime.openalex.status() if runtime.openalex is not None else None,
+                'doris_sources':doris.statuses() if level==4 and doris else [],
+                'doris_config_error':doris.config_error if level==4 and doris else None,
                 'permission':{'level':level,'label':f'{level}级 · '+principal.get('visibility','按账户权限提供服务'),
                               'dataset_tables':principal.get('dataset_tables',[])},
                 'composition':{'enabled':True,'message':'确认查询意图后，自动按账户等级和数据范围执行；每一步保留来源、版本和运行记录。'}}
-    def catalog(principal):
+
+    @router.post('/services/{service_id}/run-live')
+    def run_live_service(service_id:str,request:Request):
+        principal=user(request,'demand.create')
+        if level_for(principal)!=4:
+            raise DomainError('当前账户等级无权调用此实时数据服务',403)
+        doris=runtime.management.catalog.doris
+        service=next((item for item in doris.services() if item[2]==service_id),None) if doris else None
+        if service is None:
+            raise DomainError('实时服务未发布或已撤回',404)
+        source,alias,_=service
+        table=next((item for item in runtime.management.catalog.objects(source_id=source.id,kind='table',status='active')
+                    if item['name']==alias),None)
+        if table is None:
+            raise DomainError('实时服务尚未完成目录扫描，请检查数据源和 VPN 连接',503)
+        require_table_scope(principal,[table])
+        doris.for_table(source.id,alias,[table])
+        evidence={'object_kind':'service','object_id':service_id,'object_version':table['version'],
+                  'environment':store.environment,'actor':principal['id'],
+                  'task_scope':{'source_id':source.id,'table_id':table['id'],'operation':'count'}}
+        runtime.management.evidence.record({**evidence,'status':'started'})
+        started=perf_counter()
+        try:
+            count=source.count(alias)
+            current=user(request)
+            if current['id']!=principal['id'] or level_for(current)!=4:
+                raise DomainError('账户权限已变化，未返回服务结果',403)
+            latest=store.require('object',table['id'])
+            if latest['version']!=table['version'] or latest['status']!='active':
+                raise DomainError('数据源结构发生变化，请重新调用服务',409)
+        except DomainError as exc:
+            runtime.management.evidence.record({**evidence,'status':'failed','error':str(exc)})
+            raise
+        record=runtime.management.evidence.record({**evidence,'status':'success',
+            'latency_ms':round((perf_counter()-started)*1000,2),'suppressed':count is None})
+        return {'service_id':service_id,'count':count,'suppressed':count is None,
+                'source_id':source.id,'evidence_id':record['id']}
+    def catalog(principal, objects=None):
         definitions={r['field_id']:r for r in FieldLibrary(store).items() if r['status']!='retired'}
-        objects=[o for o in store.list('object') if o.get('status')=='active']
+        if objects is None:
+            objects=[o for o in store.list('object') if o.get('status')=='active']
+        from collections import defaultdict
+        fields_by_table=defaultdict(list)
+        for obj in objects:
+            if obj.get('kind')=='field':
+                fields_by_table[obj.get('parent_id')].append(obj)
         tables=[]
         for table in objects:
             if table.get('kind')!='table' or not can_access_table(principal,table):continue
             fields=[]
-            for field in objects:
-                if field.get('kind')!='field' or field.get('parent_id')!=table['id']:continue
+            for field in fields_by_table[table['id']]:
                 definition=definitions.get(field['id'],{})
                 fields.append({'id':field['id'],'name':field['name'],'label':definition.get('label') or field['name'],
                     'definition':definition.get('definition',''),'status':definition.get('status','draft'),
                     'classification':field_classification(field),'type':field.get('structure',{}).get('type','unknown')})
             tables.append({'id':table['id'],'name':table.get('table') or table['name'],'source':table.get('source_id'),
-                'connected':intake._source_connection_status(table)=='connected','fields':fields})
+                'connected':intake._source_connection_status(table)=='connected','fields':fields,
+                'label':table.get('meaning') or table['name'],
+                'physical_name':table.get('structure',{}).get('physical_name')})
         return tables
 
     @router.get('/overview')
@@ -111,9 +166,15 @@ def create_router(runtime, identity):
                 'scope':'我的可见查询' if principal['role']=='requester' else '当前角色可见查询'}
 
     @router.get('/catalog')
-    def get_catalog(request:Request):
+    def get_catalog(request:Request, include_relations:bool=False):
         principal=user(request);require_resource(principal,'object')
-        return {'tables':catalog(principal)}
+        if not include_relations:
+            return {'tables':catalog(principal)}
+        from management.catalog.graph import graph_relationships
+        objects=[obj for obj in store.list('object') if obj.get('status')=='active']
+        tables=catalog(principal, objects)
+        return {'tables':tables, 'relations':graph_relationships(tables, objects, store.list('relation'),
+                    intake._has_confirmed_patient_id_link)}
 
     @router.get('/ai/providers')
     def ai_providers(request:Request):
@@ -310,11 +371,13 @@ def create_router(runtime, identity):
             if deadline.tzinfo is None:raise DomainError('查询方案期限缺少时区，不能自动执行',409)
             expires_at=min(datetime.now(timezone.utc)+timedelta(hours=1),deadline)
             if expires_at<=datetime.now(timezone.utc):raise DomainError('查询方案已过期，请重新描述需求',409)
+            live_query=any(table['source_id'].startswith('doris-') for table in shape['tables'])
+            reusable_states=('queued','running') if live_query else ('queued','running','success')
             existing_job=None
             for candidate in runtime.execution.store.list('job'):
                 if (candidate.get('plan_id')==plan['id'] and candidate.get('plan_version')==plan['version']
                         and candidate.get('actor')==principal['id']
-                        and candidate.get('state') in ('queued','running','success')):
+                        and candidate.get('state') in reusable_states):
                     candidate_grant=runtime.execution.store.get('grant',candidate.get('grant_id',''))
                     if (candidate_grant and candidate_grant.get('authorization_basis')=='account_level'
                             and candidate_grant.get('account_level')==level_for(principal)):

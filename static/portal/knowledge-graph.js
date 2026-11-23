@@ -1,6 +1,6 @@
 import {ready,currentAccess,role,bindRole} from '/static/shared/access.js?v=0.1.28';
 import {icon} from '/static/shared/icons.js?v=0.1.28';
-import {renderKnowledgeGraph} from '/static/report/topic1.js?v=topic1-graph-r6-20261117';
+import {renderKnowledgeGraph} from '/static/report/topic1.js?v=0.1.42';
 
 const host=document.querySelector('#knowledge-graph');
 const labels={platform:'平台管理员',requester:'业务用户',provider:'数据供给方',auditor:'审计人员'};

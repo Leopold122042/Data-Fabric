@@ -79,7 +79,7 @@ class SourceRegistry:
     def register(self,body,actor):
         kind=body.get('connector');sid=body.get('source_id','')
         if not sid or not sid.replace('-','').replace('_','').isalnum():raise DomainError('数据源ID只能包含字母、数字、连字符和下划线')
-        if sid in ('his','lis','pacs','iot','emr'):raise DomainError('不能覆盖现有演示源')
+        if sid in ('his','lis','pacs','iot','emr') or sid.startswith('doris-'):raise DomainError('该数据源 ID 已保留')
         if kind not in self.factories:raise DomainError('连接器未安装')
         path=self.resolve_path(body.get('path',''));self.factories[kind](path).snapshot()
         return self.store.save('source',sid,{'source_id':sid,'connector':kind,'path':str(path.relative_to(self.root)),
@@ -90,9 +90,14 @@ class SourceRegistry:
             def snapshot(self):raise DomainError(self.error)
         result={}
         for source in self.store.list('source'):
+            if source['connector']=='doris':
+                continue
             try:
                 path=self.resolve_path(source['path'])
-                if source['connector']=='sqlite':
+                if source['id']=='openalex' and source['connector']=='sqlite' and source['path']=='openalex.sqlite':
+                    from management.catalog.openalex import OpenAlexSource
+                    result[source['id']]=OpenAlexSource(path, source.get('hidden_tables',[]))
+                elif source['connector']=='sqlite':
                     result[source['id']]=SQLiteSource(path,source.get('hidden_tables',[]))
                 else:
                     result[source['id']]=self.factories[source['connector']](path)

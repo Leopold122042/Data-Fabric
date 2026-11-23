@@ -471,6 +471,9 @@ class IntakeFlow:
             return 'connected' if emr_path.is_dir() and any(emr_path.glob('*.json')) else 'unavailable'
         if source_id.startswith('cloud-'):
             return 'cloud'
+        if source_id.startswith('doris-'):
+            doris=self.runtime.management.catalog.doris
+            return doris.status(source_id) if doris else 'unavailable'
         registration=self.store.get('source',source_id) if source_id else None
         registry=getattr(self.runtime.management.catalog,'sources',None)
         if registration and registry and registration.get('connector') in registry.factories:

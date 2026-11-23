@@ -1,4 +1,4 @@
-"""Bounded local federated queries. Identifier whitelist from A, values bound separately."""
+"""Bounded federated queries with catalog-bound fields and separate values."""
 import hashlib,json,sqlite3,time
 from pathlib import Path
 import medsim
@@ -96,6 +96,12 @@ class Queries:
         for f in fields:groups.setdefault((f['source_id'],f['table']),[]).append(f)
         sources=[]
         for (sid,table),columns in sorted(groups.items()):
+            if sid.startswith('doris-'):
+                doris=self.management.catalog.doris
+                if doris is None:
+                    raise DomainError('Doris 连接器未启动',503)
+                sources.append((sid,table,doris.for_table(sid,table,columns),columns))
+                continue
             if sid in ('his','lis','pacs','iot'):path=Path(medsim.DATA_DIR)/(sid+'.db')
             elif sid=='emr':path=Path(medsim.DATA_DIR)/'emr'
             else:
@@ -115,6 +121,8 @@ class Queries:
         if mode!=view['output_mode']:raise DomainError('视图输出粒度与授权不一致',403)
         sources=self.sources(view)
         constraints=constraints or {}
+        requested_limit=view.get('row_limit')
+        if requested_limit and requested_limit>max_rows:raise DomainError('查询条数超过当前授权上限',403)
         selective_fields={condition['field'] for condition in view['filters']+constraints.get('filters',[])}
         if constraints.get('time_field'):selective_fields.add(constraints['time_field'])
         sources.sort(key=lambda source:(
@@ -128,38 +136,47 @@ class Queries:
         if view.get('pseudonymize_fields'):
             from execution.security.pseudonym import PatientPseudonymizer
             pseudonymizer=PatientPseudonymizer(self.store)
-        stamp=[]
-        for sid,table,path,fields in sources:
-            if sid=='emr' and path.is_dir():
-                source_stamp=[(entry.name,entry.stat().st_mtime_ns,entry.stat().st_size)
-                        for entry in sorted(path.glob('*.json')) if entry.is_file()]
-                wal_stamp=0
-            else:
-                source_stamp=path.stat().st_mtime_ns
-                wal=Path(str(path)+'-wal');wal_stamp=wal.stat().st_mtime_ns if wal.exists() else 0
-            stamp.append((sid,table,source_stamp,[(f['id'],f['version']) for f in fields],wal_stamp))
-        # Exclude old materializations that serialized SQLite booleans as strings.
-        pseudonym_key_id=hashlib.sha256(pseudonymizer.key).hexdigest() if pseudonymizer else None
-        key=hashlib.sha256(json.dumps(['sqlite-types-v4',view['id'],view['version'],stamp,mode,min_group,max_rows,constraints,
-            sorted(set(authorized_health_fields)),sorted(set(authorized_identifier_fields)),pseudonym_key_id],sort_keys=True).encode()).hexdigest()
-        cached=self.store.get('materialization',key)
+        live=any(sid.startswith('doris-') for sid,_,_,_ in sources)
+        key=cached=None
+        if not live:
+            stamp=[]
+            for sid,table,path,fields in sources:
+                if sid=='emr' and path.is_dir():
+                    source_stamp=[(entry.name,entry.stat().st_mtime_ns,entry.stat().st_size)
+                            for entry in sorted(path.glob('*.json')) if entry.is_file()]
+                    wal_stamp=0
+                else:
+                    source_stamp=path.stat().st_mtime_ns
+                    wal=Path(str(path)+'-wal');wal_stamp=wal.stat().st_mtime_ns if wal.exists() else 0
+                stamp.append((sid,table,source_stamp,[(f['id'],f['version']) for f in fields],wal_stamp))
+            pseudonym_key_id=hashlib.sha256(pseudonymizer.key).hexdigest() if pseudonymizer else None
+            key=hashlib.sha256(json.dumps(['sqlite-types-v4',view['id'],view['version'],stamp,mode,min_group,max_rows,constraints,
+                sorted(set(authorized_health_fields)),sorted(set(authorized_identifier_fields)),pseudonym_key_id],sort_keys=True).encode()).hexdigest()
+            cached=self.store.get('materialization',key)
         if cached and cached['expires_epoch']>time.time():
             if not sensitive_output_allowed(cached['result'],{'output_policy':output_policy},authorized_health_fields,
                     authorized_identifier_fields=authorized_identifier_fields):
                 raise DomainError('缓存查询输出未通过当前字段授权复核，未返回结果',403)
             return cached['result'],{'cache_hit':True,'materialization_id':key,'sources':cached['sources']}
-        con=duckdb.connect(':memory:');deadline=time.monotonic()+5;locations={};trace=[];loaded_values={}
+        con=duckdb.connect(':memory:');deadline=time.monotonic()+(25 if live else 5);locations={};trace=[];loaded_values={}
         try:
             con.execute("SET enable_external_access=false");con.execute("SET memory_limit='128MB'");con.execute('SET threads=1')
             for index,(sid,table,path,fields) in enumerate(sources):
+                if time.monotonic()>deadline:
+                    raise DomainError('查询超过执行时间预算，请缩小查询范围',503)
                 params=[];where=[];byid={f['id']:f for f in fields};emr_patient_candidates=[]
+                remote_filters=[];remote_candidates=[];time_window=None
                 for condition in view['filters']+constraints.get('filters',[]):
                     if condition['field'] in byid:
-                        where.append(quote(byid[condition['field']]['name'])+' '+condition['op']+' ?');params.append(condition.get('value'))
+                        name=byid[condition['field']]['name']
+                        where.append(quote(name)+' '+condition['op']+' ?');params.append(condition.get('value'))
+                        remote_filters.append((name,condition['op'],condition.get('value')))
                 if constraints.get('time_field') in byid:
-                    column=quote(byid[constraints['time_field']]['name'])
+                    time_field=byid[constraints['time_field']]
+                    column=quote(time_field['name'])
                     where.extend(['julianday('+column+') >= julianday(?)','julianday('+column+') < julianday(?)'])
                     params.extend([constraints['time_start'],constraints['time_end_exclusive']])
+                    time_window=(time_field,constraints['time_start'],constraints['time_end_exclusive'])
                 # Push exact filters through registered equality joins before
                 # scanning a related source table.
                 for left_id,right_id in view.get('joins',[]):
@@ -170,6 +187,7 @@ class Queries:
                         current_id,prior_id=right_id,left_id
                     if not current_id:continue
                     values=list(dict.fromkeys(value for value in loaded_values[prior_id] if value is not None))
+                    remote_candidates.append((byid[current_id]['name'],values))
                     if not values:
                         where.append('1=0')
                     elif len(values)>900:
@@ -188,7 +206,15 @@ class Queries:
                 sql='SELECT '+','.join(quote(f['name']) for f in fields)+' FROM '+quote(table)+(' WHERE '+' AND '.join(where) if where else '')+' LIMIT '+str(source_budget+1)
                 sql_types={'integer':' BIGINT','number':' DOUBLE','boolean':' BOOLEAN','string':' VARCHAR'}
                 types=[field_type(f) for f in fields]
-                if sid=='emr':
+                if sid.startswith('doris-'):
+                    remote_order=[]
+                    remote_limit=source_budget+1
+                    if mode=='object' and len(sources)==1 and requested_limit:
+                        remote_order=[(byid[item['field']]['name'],item['direction'],item['nulls_first'])
+                                      for item in view.get('order_by',[])]
+                        remote_limit=requested_limit
+                    rows=path.read(table,fields,remote_filters,remote_candidates,time_window,remote_limit,remote_order)
+                elif sid=='emr':
                     db=sqlite3.connect(':memory:')
                     declared=','.join(quote(field['name'])+sql_types[dtype]
                         for field,dtype in zip(fields,types))
@@ -237,10 +263,11 @@ class Queries:
                             ','.join('?' for _ in fields)+')',projected)
                 else:
                     db=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)
-                try:
-                    db.set_progress_handler(lambda:int(time.monotonic()>deadline),1000)
-                    rows=db.execute(sql,params).fetchall()
-                finally:db.close()
+                if not sid.startswith('doris-'):
+                    try:
+                        db.set_progress_handler(lambda:int(time.monotonic()>deadline),1000)
+                        rows=db.execute(sql,params).fetchall()
+                    finally:db.close()
                 if len(rows)>source_budget:raise DomainError('源返回超过本次授权行数或本地查询预算，请增加筛选条件')
                 alias='s'+str(index)
                 boolean_columns=[i for i,dtype in enumerate(types) if dtype=='boolean']
@@ -260,7 +287,8 @@ class Queries:
                 if rows:con.executemany('INSERT INTO '+alias+' VALUES ('+','.join('?' for _ in fields)+')',rows)
                 for i,f in enumerate(fields):locations[f['id']]=alias+'.c'+str(i)
                 for i,f in enumerate(fields):loaded_values[f['id']]=[row[i] for row in rows]
-                trace.append({'source_id':sid,'table':table,'rows_read':len(rows),'pushed_projection':[f['name'] for f in fields],'pushed_filters':len(where),'local_alias':alias})
+                trace.append({'source_id':sid,'table':table,'rows_read':len(rows),'pushed_projection':[f['name'] for f in fields],'pushed_filters':len(where),'local_alias':alias,
+                              'connector':'doris' if sid.startswith('doris-') else 'local'})
             predicates=[locations[a]+'='+locations[b] for a,b in view['joins']]
             tables=','.join('s'+str(i) for i in range(len(sources)))
             selected=view['group_by'] if mode=='aggregate' else view.get('output_fields',view['fields'])
@@ -279,8 +307,6 @@ class Queries:
             if view.get('order_by'):
                 sql+=' ORDER BY '+','.join(locations[item['field']]+' '+item['direction'].upper()+
                     (' NULLS FIRST' if item['nulls_first'] else ' NULLS LAST') for item in view['order_by'])
-            requested_limit=view.get('row_limit')
-            if requested_limit and requested_limit>max_rows:raise DomainError('查询条数超过当前授权上限',403)
             sql+=' LIMIT '+str(requested_limit or 201)
             physical_plan=con.execute('EXPLAIN '+sql,bound).fetchall()[-1][-1]
             import threading
@@ -294,11 +320,12 @@ class Queries:
                     if field_id not in selected:raise DomainError('伪名字段没有进入输出，拒绝执行',403)
                     index=selected.index(field_id)
                     output_rows=[row[:index]+[pseudonymizer.token(row[index])]+row[index+1:] for row in output_rows]
-            result={'columns':columns,'rows':output_rows,'notice':'部分分组可能未满足输出条件' if mode=='aggregate' else '本地对象级结果'}
+            result={'columns':columns,'rows':output_rows,'notice':'部分分组可能未满足输出条件' if mode=='aggregate' else '源库实时读取' if live else '本地对象级结果'}
             if not sensitive_output_allowed(result,{'output_policy':output_policy},authorized_health_fields,
                     authorized_identifier_fields=authorized_identifier_fields):
                 raise DomainError('查询输出未通过字段分类或敏感内容检查，未缓存结果',403)
-            old=self.store.get('materialization',key)
-            self.store.save('materialization',key,{'result':result,'sources':trace,'expires_epoch':time.time()+60,'view_id':view['id']},old['version'] if old else 0,'execution','按版本与源指纹缓存，命中仍需重新授权')
+            if key is not None:
+                old=self.store.get('materialization',key)
+                self.store.save('materialization',key,{'result':result,'sources':trace,'expires_epoch':time.time()+60,'view_id':view['id']},old['version'] if old else 0,'execution','按版本与源指纹缓存，命中仍需重新授权')
             return result,{'cache_hit':False,'materialization_id':key,'sources':trace,'optimizer':'DuckDB本地代价优化','physical_plan':physical_plan,'chosen_plan':'字段/过滤下推后本地等值连接','alternatives':[{'name':'全表拉取','selected':False,'reason':'传输与内存成本较高'}]}
         finally:con.close()
