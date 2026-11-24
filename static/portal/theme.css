@@ -238,9 +238,12 @@
 .fabric-portal .button.primary:hover {background: var(--fabric-blue-hover)}
 .fabric-portal .button:not(.primary) {border-color: var(--fabric-line)}
 .fabric-portal .button:not(.primary):hover {background: var(--fabric-sky); border-color: #adcde9}
-.fabric-portal :is(.composer,.field-input,.sql-editor) {border-color: #c6dbe9}
-.fabric-portal .composer:focus-within {border-color: #4f9fd8; box-shadow: 0 0 0 3px #498dd429}
-.fabric-portal :is(.field-check:has(input:checked),.table-option.active,.table-option.is-active,.ai-model-picker) {
+.fabric-portal :is(.field-input,.sql-editor) {border-color: #c6dbe9}
+.fabric-portal .composer {background-color: #fff; border-color: #d9dce0}
+.fabric-portal .composer:focus-within {border-color: #8e969f; box-shadow: 0 0 0 3px #30364018}
+.fabric-portal .ai-model-picker {border-color: #e0e2e5}
+.fabric-portal .ai-model-picker select {background-color: #fafafa; border-color: #d9dce0}
+.fabric-portal :is(.field-check:has(input:checked),.table-option.active,.table-option.is-active) {
   background: var(--fabric-sky);
   border-color: #a6c9e7;
 }
@@ -248,6 +251,7 @@
 .fabric-portal .user-bubble {background: #e3f2fc; color: #213f54}
 .fabric-portal .spinner {border-top-color: var(--fabric-blue)}
 .fabric-portal :is(select,input,textarea):not(.kg-search):focus-visible {outline-color: var(--fabric-blue)}
+.fabric-portal .ai-model-picker select:focus {outline-color: #69717b}
 .fabric-portal .service-card button {background: var(--fabric-blue); border: 0; border-radius: 8px; color: #fff; padding: 7px 11px}
 
 .fabric-portal.kg-page {
