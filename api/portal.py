@@ -121,6 +121,8 @@ def create_router(runtime, identity):
                 'source_id':source.id,'evidence_id':record['id']}
     def catalog(principal, objects=None):
         definitions={r['field_id']:r for r in FieldLibrary(store).items() if r['status']!='retired'}
+        source_names={source['id']:source['name'].strip() or None for source in store.list('source')
+                      if isinstance(source.get('name'), str)}
         if objects is None:
             objects=[o for o in store.list('object') if o.get('status')=='active']
         from collections import defaultdict
@@ -138,6 +140,7 @@ def create_router(runtime, identity):
                     'definition':definition.get('definition',''),'status':definition.get('status','draft'),
                     'classification':field_classification(field),'type':field.get('structure',{}).get('type','unknown')})
             tables.append({'id':table['id'],'name':table.get('table') or table['name'],'source':table.get('source_id'),
+                'source_label':source_names.get(table.get('source_id')),
                 'connected':intake._source_connection_status(table)=='connected','fields':fields,
                 'label':table.get('meaning') or table['name'],
                 'physical_name':table.get('structure',{}).get('physical_name')})

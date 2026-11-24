@@ -1,7 +1,9 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 from platform_core.bootstrap import create_app
@@ -35,6 +37,47 @@ class PortalTest(unittest.TestCase):
         response=self.client.post(path,json=data,headers={'X-Demo-Role':role})
         self.assertEqual(response.status_code,200,response.text)
         return response.json()
+
+    def test_scanned_source_in_permission_scoped_graph(self):
+        # A new file registration and a rescan use the same routes as the workbench.
+        with closing(sqlite3.connect(self.data/'new-feed.sqlite')) as db:
+            db.execute('CREATE TABLE sensor_samples (sample_id INTEGER, reading REAL)')
+        with closing(sqlite3.connect(self.data/'his.db')) as db:
+            db.execute('CREATE TABLE vitals (sample_id INTEGER)')
+            db.execute('CREATE TABLE visit (sample_id INTEGER)')
+            db.execute('CREATE TABLE patient (sample_id INTEGER)')
+        self.runtime.engine = SimpleNamespace(adapters={'his': SQLiteSource(self.data/'his.db')})
+        registration = {'source_id': 'Ward-East', 'connector': 'sqlite',
+                        'path': 'new-feed.sqlite', 'name': '东区设备记录'}
+        self.post('/api/management/sources', registration)
+        endpoint = '/api/portal/catalog?include_relations=true'
+
+        def catalog(role):
+            response = self.client.get(endpoint, headers={'X-Demo-Role': role})
+            self.assertEqual(response.status_code, 200, response.text)
+            return response.json()
+
+        self.assertNotIn('Ward-East', {table['source'] for table in catalog('platform')['tables']})
+        self.post('/api/management/catalog/scan', {})
+        graph = catalog('platform')
+        sensor, = [table for table in graph['tables'] if table['source'] == 'Ward-East']
+        self.assertEqual(sensor['name'], 'sensor_samples')
+        self.assertEqual(sensor['source_label'], '东区设备记录')
+        self.assertEqual({field['name'] for field in sensor['fields']}, {'sample_id', 'reading'})
+        self.assertEqual({field['status'] for field in sensor['fields']}, {'draft'})
+        self.assertNotIn(registration['path'], str(graph))
+        self.assertTrue(any(member['table_id'] == sensor['id'] for relation in graph['relations']
+                            for member in relation['members']))
+        for role, expected in [('requester', {'vitals'}), ('provider', {'vitals', 'visit'}),
+                               ('auditor', {'vitals', 'visit', 'patient'})]:
+            with self.subTest(role=role):
+                graph = catalog(role)
+                self.assertEqual({table['name'] for table in graph['tables']}, expected)
+                self.assertTrue(all(table['source_label'] is None for table in graph['tables']))
+                self.assertNotIn('东区设备记录', str(graph))
+                visible = {field['id'] for table in graph['tables'] for field in table['fields']}
+                self.assertTrue(all(member['field_id'] in visible for relation in graph['relations']
+                                    for member in relation['members']))
     def execute(self,cohort):
         sql=f"SELECT value FROM observations WHERE cohort = '{cohort}' ORDER BY observed_at DESC LIMIT 2"
         preview=self.post('/api/portal/professional/preview',{'sql':sql})

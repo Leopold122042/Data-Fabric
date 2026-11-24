@@ -1,4 +1,8 @@
-import {focusLayout, overviewLayout, seededRandom} from './topic1-layout.js?v=0.1.44';
+import {overviewLayout} from './topic1-layout.js?v=0.1.57';
+import {mountGalaxySky} from './galaxy-sky.js?v=0.1.57';
+import {fieldLayout, bindFieldDrag} from './field-constellation.js?v=0.1.57';
+import {mountStarLayer, mountEdgeLayer} from './atlas-stars.js?v=0.1.57';
+import {mountOverviewDrag} from './overview-drag.js?v=0.1.57';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -6,7 +10,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
 
 const sourceNames = {
   his: '医院 HIS', lis: '检验 LIS', pacs: '影像 PACS', iot: '监护 IoT', emr: '电子病历 EMR',
-  'src-clinical-operations': '临床运营主题库', 'doris-nju': '南大医疗 Doris', openalex: 'OpenAlex 文献'
+  'SRC-CLINICAL-OPERATIONS': '临床运营主题库', 'doris-nju': '南大医疗 Doris', openalex: 'OpenAlex 文献'
 };
 const sourceOrder = Object.keys(sourceNames);
 const relationLabels = {
@@ -21,21 +25,17 @@ const openalexLabels = {
   openalex_references: '引用关系', openalex_yearly: '年度统计'
 };
 const registered = relation => relation.kind === 'confirmed' || relation.kind === 'reference';
-function sourceLabel(source) {
-  const id = String(source ?? '').toLowerCase();
-  return Object.hasOwn(sourceNames, id) ? sourceNames[id] : source || '未登记来源';
+function sourceLabel(table) {
+  return table.source_label || (Object.hasOwn(sourceNames, table.source) ? sourceNames[table.source] : table.source || '未登记来源');
 }
 const sessions = new WeakMap();
-const medicalSources = new Set(['his', 'lis', 'pacs', 'iot', 'emr', 'src-clinical-operations']);
-const galaxyHues = [187, 35, 213, 173, 46, 202];
-
-function galaxyFor(source) {
-  const id = String(source ?? '').toLowerCase();
-  if (medicalSources.has(id)) return {id: 'group:medical', name: '合成医疗演示', hue: galaxyHues[0]};
-  if (id === 'doris-nju') return {id: 'source:doris-nju', name: sourceLabel(source), hue: galaxyHues[1]};
-  if (id === 'openalex') return {id: 'source:openalex', name: sourceLabel(source), hue: galaxyHues[2]};
-  const hash = [...id].reduce((value, char) => (value * 31 + char.codePointAt(0)) >>> 0, 0);
-  return {id: 'source:' + id, name: sourceLabel(source), hue: galaxyHues[3 + hash % 3]};
+const medicalSources = new Set(['his', 'lis', 'pacs', 'iot', 'emr', 'SRC-CLINICAL-OPERATIONS']);
+function galaxyFor(table) {
+  const id = String(table.source ?? '');
+  if (medicalSources.has(id)) return {id: 'group:medical', name: '合成医疗演示', hue: 186};
+  const hash = [...id].reduce((value, char) => Math.imul(value ^ char.codePointAt(0), 16777619), 2166136261);
+  const hue = id === 'openalex' ? 36 : id === 'doris-nju' ? 258 : (hash >>> 0) % 360;
+  return {id: 'source:' + id, name: sourceLabel(table), hue};
 }
 
 export async function renderKnowledgeGraph(host) {
@@ -43,14 +43,14 @@ export async function renderKnowledgeGraph(host) {
   const previous = sessions.get(host);
   previous?.controller.abort();
   previous?.observer?.disconnect();
-  const session = {controller: new AbortController()};
+  const session = {controller: new AbortController(), pins: previous?.pins || {fields: new Map(), groups: new Map(), tables: new Map()}};
   sessions.set(host, session);
   const {signal} = session.controller;
   host.innerHTML = '<div class="kg-loading" role="status">正在载入星图…</div>';
 
   try {
     const response = await fetch('/api/portal/catalog?include_relations=true', {
-      credentials: 'same-origin', headers: {Accept: 'application/json'}, signal
+      credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'}, signal
     });
     if (!response.ok) throw new Error('目录接口返回 ' + response.status);
     const catalog = await response.json();
@@ -59,14 +59,23 @@ export async function renderKnowledgeGraph(host) {
     const maxFields = catalogTables.reduce((max, table) => Math.max(max, table.fields.length), 1);
     const tables = catalogTables.map(table => {
       const shortName = (table.physical_name || table.name).replace(/^cdm\./, '').split('(')[0];
-      const display = table.label && table.label !== table.name ? table.label : openalexLabels[table.name] || shortName;
-      // Scale the visible area with field count while keeping the smallest planets clickable.
-      const planetDiameter = Math.sqrt(10 ** 2 + (26 ** 2 - 10 ** 2) * table.fields.length / maxFields);
-      return {...table, shortName, display, planetDiameter, galaxy: galaxyFor(table.source),
+      const alias = table.source === 'openalex' && Object.hasOwn(openalexLabels, table.name) && openalexLabels[table.name];
+      const display = table.label && table.label !== table.name ? table.label : alias || shortName;
+      const starSize = 19 + 17 * Math.sqrt(table.fields.length / maxFields);
+      return {...table, shortName, display, starSize, galaxy: galaxyFor(table),
         fieldsById: new Map(table.fields.map(field => [field.id, field]))};
     }).sort((a, b) => sourceRank(a.source) - sourceRank(b.source)
       || String(a.source).localeCompare(String(b.source)) || a.name.localeCompare(b.name, 'zh-CN'));
     const tableMap = new Map(tables.map((table, index) => [table.id, {...table, index}]));
+    // Keep hand-placed objects across catalog refreshes by ID. Removed tables
+    // and fields must not leave a reset handle in a newly scoped catalog.
+    for (const id of session.pins.tables.keys()) if (!tableMap.has(id)) session.pins.tables.delete(id);
+    for (const [id, pins] of session.pins.fields) {
+      for (const fieldId of pins.keys()) if (!tableMap.get(id)?.fieldsById.has(fieldId)) pins.delete(fieldId);
+      if (!pins.size) session.pins.fields.delete(id);
+    }
+    const liveGroups = new Set(tables.map(table => table.galaxy.id));
+    for (const id of session.pins.groups.keys()) if (!liveGroups.has(id)) session.pins.groups.delete(id);
     const relations = (catalog.relations || []).map(relation => ({
       ...relation,
       members: relation.members.flatMap(member => {
@@ -85,131 +94,352 @@ export async function renderKnowledgeGraph(host) {
 }
 
 function sourceRank(source) {
-  const index = sourceOrder.indexOf(String(source).toLowerCase());
+  const index = sourceOrder.indexOf(source);
   return index < 0 ? sourceOrder.length : index;
 }
 
 function mountGraph(host, session, tables, relations) {
   const preferred = tables.find(table => table.source === 'his' && table.shortName === 'patient');
-  const state = {tables, relations, table: preferred || tables[0], fieldId: null,
-    search: '', source: '', filter: 'all', mode: 'overview', overviewFilters: {}, details: true};
-  const sources = [...new Set(tables.map(table => table.source))];
+  const state = {table: preferred || tables[0], fieldId: null, mode: 'overview',
+    search: '', source: '', filter: 'all', overviewFilters: {}, details: true, paused: false};
+  const sources = new Map(tables.map(table => [table.source, sourceLabel(table)]));
   host.innerHTML = `<section class="kg-panel" aria-label="数据世界">
-    <div class="kg-toolbar">
-      <div class="kg-modes" role="group" aria-label="图谱视图">
-        <button type="button" data-graph-mode="overview">全部表关系</button>
-        <button type="button" data-graph-mode="focus" ${tables.length ? '' : 'disabled'}>选中表关系</button>
+    <header class="kg-heading">
+      <div><h1>数据星图</h1><p class="kg-instructions"></p></div>
+      <dl class="kg-metrics">
+        <div><dt>来源组</dt><dd>${new Set(tables.map(t => t.galaxy.id)).size}</dd></div>
+        <div><dt>逻辑表</dt><dd>${tables.length}</dd></div>
+        <div><dt>字段</dt><dd>${tables.reduce((sum, t) => sum + t.fields.length, 0)}</dd></div>
+      </dl>
+    </header>
+    <div class="kg-window">
+      <div class="kg-toolbar">
+        <div class="kg-modes" role="group" aria-label="图谱视图">
+          <button type="button" data-graph-mode="overview"><span aria-hidden="true">✧</span> 星系总览</button>
+          <button type="button" data-graph-mode="focus" ${tables.length ? '' : 'disabled'}>字段探索</button>
+        </div>
+        <label class="kg-input-label"><span>来源</span><select class="kg-search" data-graph-source>
+          <option value="">全部来源</option>${[...sources].map(([id, label]) => `<option value="${esc(id)}">${esc(label)}</option>`).join('')}
+        </select></label>
+        <label class="kg-input-label kg-table-picker"><span>当前表</span><select class="kg-search" data-graph-table>
+          ${tables.map(t => `<option value="${t.index}">${esc(t.display)} · ${esc(sourceLabel(t))}</option>`).join('')}
+        </select></label>
+        <label class="kg-input-label kg-relation-filter"><span>连线</span><select class="kg-search" data-graph-filter>
+          <option value="all">全部关系</option><option value="registered">已确认与已登记</option>
+          <option value="candidates">同名与语义候选</option>
+        </select></label>
+        <label class="kg-search-box"><i aria-hidden="true"></i><input class="kg-search" aria-label="查找表名、字段或来源" data-graph-search type="search" placeholder="查找表、字段或来源"></label>
+        <button type="button" class="kg-command" data-graph-details aria-controls="kg-fields">字段详情</button>
+        <button type="button" class="kg-motion" data-graph-motion aria-pressed="false" aria-label="暂停星图动效" title="暂停星图动效"><i aria-hidden="true"></i></button>
       </div>
-      <label>来源<select class="kg-search" data-graph-source>
-        <option value="">全部来源</option>${sources.map(source => `<option value="${esc(source)}">${esc(sourceLabel(source))}</option>`).join('')}
-      </select></label>
-      <label>查找<input class="kg-search" data-graph-search type="search" placeholder="表名、字段或来源"></label>
-      <label class="kg-relation-filter">连线<select class="kg-search" data-graph-filter>
-        <option value="all">全部关系</option><option value="registered">已确认与已登记</option>
-        <option value="candidates">同名与语义候选</option>
-      </select></label>
-      <button type="button" class="kg-command" data-graph-details aria-controls="kg-fields">字段详情</button>
-      <p class="kg-counts" aria-live="polite"></p>
+      <div class="kg-layout"><div class="kg-scene" aria-label="逻辑表星图">
+        <div class="kg-atlas">
+          <canvas class="kg-sky" aria-hidden="true"></canvas>
+          <svg class="kg-edges" aria-hidden="true"></svg>
+          <div class="kg-captions"></div>
+          <div class="kg-stars"></div>
+          <i class="kg-target" aria-hidden="true" hidden></i>
+          <button type="button" class="kg-reset" data-reset-layout hidden>还原布局</button>
+        </div><div class="kg-edge-readout" hidden></div>
+      </div><aside id="kg-fields" class="kg-inspector" aria-label="字段与关联详情" hidden></aside></div>
+      <footer class="kg-footer"><div class="kg-legend"></div><p class="kg-counts" role="status"></p></footer>
     </div>
-    <div class="kg-layout"><div class="kg-scene" aria-label="逻辑表星图">
-      <div class="kg-atlas"></div>
-      <footer class="kg-legend">
-        <span><i></i>已确认或已登记</span>
-        <span><i class="kg-legend-candidate"></i>同名或语义候选</span>
-      </footer>
-    </div><aside id="kg-fields" class="kg-inspector" aria-label="字段与关联详情"></aside></div>
   </section>`;
 
-  const draw = () => renderGraph(host, state);
   const {signal} = session.controller;
-  const search = host.querySelector('[data-graph-search]');
-  const sourceSelect = host.querySelector('[data-graph-source]');
-  const setBrowseFilters = ({source = '', search: term = '', input = term} = {}) => {
-    state.source = source;
-    state.search = term;
-    sourceSelect.value = source;
-    search.value = input;
-  };
-  const switchMode = mode => {
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const panel = host.querySelector('.kg-panel');
+  const atlas = panel.querySelector('.kg-atlas');
+  const aside = panel.querySelector('.kg-inspector');
+  const search = panel.querySelector('[data-graph-search]');
+  const sourceSelect = panel.querySelector('[data-graph-source]');
+  const tablePicker = panel.querySelector('[data-graph-table]');
+  const detailsButton = panel.querySelector('[data-graph-details]');
+  const motionButton = panel.querySelector('[data-graph-motion]');
+  const captions = atlas.querySelector('.kg-captions');
+  const target = atlas.querySelector('.kg-target');
+  const svg = atlas.querySelector('.kg-edges');
+  const stars = mountStarLayer(atlas.querySelector('.kg-stars'), reducedMotion, signal);
+  const edges = mountEdgeLayer(svg, relationLabels, panel.querySelector('.kg-edge-readout'));
+  signal.addEventListener('abort', () => edges.clear(), {once: true});
+  const fieldButton = 'button[data-star-field], button[data-field-index]';
+  function highlightField(node) {
+    const button = node?.closest?.(fieldButton);
+    edges.highlight(button ? Number(button.dataset.starField ?? button.dataset.fieldIndex) : null);
+  }
+  for (const name of ['pointerover', 'focusin']) {
+    panel.addEventListener(name, event => highlightField(event.target), {signal});
+  }
+  for (const name of ['pointerout', 'focusout']) {
+    panel.addEventListener(name, event => highlightField(event.relatedTarget), {signal});
+  }
+  const sky = mountGalaxySky(atlas.querySelector('canvas'), signal);
+  const positions = session.pins.fields;
+  const resetButton = panel.querySelector('[data-reset-layout]');
+  const overview = mountOverviewDrag(atlas, signal, stars, sky, session.pins, () => draw(false), updateReset);
+  function updateReset() {
+    resetButton.hidden = state.mode === 'focus' ? !positions.has(state.table?.id) : !overview.hasPins();
+  }
+  const drag = bindFieldDrag(atlas, signal, positions, (index, point) => {
+    const button = atlas.querySelector(`[data-star-field="${index}"]:not(:disabled)`);
+    if (button) {
+      button.style.left = point.x + 'px';
+      button.style.top = point.y + 'px';
+    }
+    if (state.table.fields[index].id === state.fieldId) {
+      target.getAnimations().forEach(animation => animation.cancel());
+      placeTarget(point);
+    }
+    edges.move(index, point);
+  }, updateReset);
+  const searchable = new Map(tables.map(t => [t.id, [t.source, sourceLabel(t), t.galaxy.name, t.display,
+    t.name, t.physical_name, ...t.fields.flatMap(f => [f.name, f.label, f.definition])].join(' ').toLowerCase()]));
+  let lastFocus, lastInspector, lastWidth, lastHeight;
+  let resizeFrame = 0;
+
+  function placeTarget(point) {
+    target.style.left = point.x + 'px';
+    target.style.top = point.y + 'px';
+  }
+  function setFilters({source = '', search: value = ''} = {}) {
+    sourceSelect.value = state.source = source;
+    search.value = value;
+    state.search = value.trim().toLowerCase();
+  }
+  function switchMode(mode) {
     if (mode === state.mode) return;
     if (mode === 'focus') {
-      state.overviewFilters = {source: state.source, search: state.search, input: search.value};
-      setBrowseFilters();
+      state.overviewFilters = {source: state.source, search: search.value};
+      setFilters();
     } else {
-      setBrowseFilters(state.overviewFilters);
+      setFilters(state.overviewFilters);
     }
     state.mode = mode;
-  };
+  }
+  function selectTable(table, field = null) {
+    switchMode('focus');
+    setFilters();
+    state.table = table;
+    state.fieldId = field;
+  }
 
-  search.addEventListener('input', () => {
-    state.search = search.value.trim().toLowerCase();
-    draw();
-  }, {signal});
+  function draw(animate = true) {
+    const {table, fieldId, source, search: term} = state;
+    const focus = state.mode === 'focus' && !!table;
+    const motion = animate && !state.paused && !reducedMotion.matches;
+    const previous = motion ? stars.snapshot() : null;
+    const previousTarget = motion && !target.hidden ? target.getBoundingClientRect() : null;
+    // Cancel a gesture against the old geometry before replacing any paths.
+    drag.setLayout(null, null);
+    overview.clearScene();
+    panel.classList.toggle('kg-is-focus', focus);
+    aside.hidden = !focus || !state.details;
+    updateReset();
+    const instructions = focus
+      ? (table.fields.length ? '拖动字段星调整位置，点选字段查看关联。按 Esc 返回星系总览。' : '这张表在目录中暂无可见字段。按 Esc 返回星系总览。')
+      : '拖动星系名称可移动整组，拖动表星可单独摆放，点选表星可展开字段。';
+    panel.querySelector('.kg-instructions').textContent = instructions;
+    panel.querySelectorAll('[data-graph-mode]').forEach(button =>
+      button.setAttribute('aria-pressed', String(button.dataset.graphMode === state.mode)));
+    detailsButton.setAttribute('aria-expanded', String(!aside.hidden));
+    if (table) tablePicker.value = table.index;
+    const width = atlas.clientWidth;
+    if (width < 120) return;
+    const top = atlas.getBoundingClientRect().top + window.scrollY;
+    const minHeight = Math.max(380, Math.round(document.documentElement.clientHeight - top - 76));
+    lastWidth = width;
+    lastHeight = document.documentElement.clientHeight;
+    const matched = tables.filter(t => (!source || source === t.source) && (!term || searchable.get(t.id).includes(term)));
+    let nodes = [], skies = [], height, caption, countText, legend, origin;
+    const sceneChanged = lastFocus !== (focus ? table.id : null);
+    if (!focus) {
+      const groups = new Map();
+      for (const item of matched) {
+        if (!groups.has(item.galaxy.id)) groups.set(item.galaxy.id, {...item.galaxy, tables: []});
+        groups.get(item.galaxy.id).tables.push(item);
+      }
+      const layout = overviewLayout([...groups.values()], width, minHeight);
+      overview.prepare(layout);
+      height = layout.height;
+      caption = layout.groups.map(({group, x, y, center, core}) => {
+        const cx = x + center.x, cy = y + center.y;
+        return `<div class="kg-galaxy-core" style="left:${cx}px;top:${cy}px;width:${core.width}px;--kg-hue:${group.hue}">
+          <h2><button type="button" data-drag-galaxy="${esc(group.id)}" aria-label="移动星系 · ${esc(group.name)}" aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
+            title="${esc(group.name)} · 拖动或按方向键移动星系">${esc(group.name)}</button></h2><span>${group.tables.length} 张逻辑表</span></div>`;
+      }).join('') || `<p class="kg-no-matches">${tables.length ? '没有找到匹配的表，请更换搜索词或来源。' : '当前账户没有可查看的逻辑表。'}</p>`;
+      layout.groups.forEach(({group, x, y, width: w, height: h, center, points, labelWidth, tilt}) => {
+        skies.push({id: group.id, x: x + center.x, y: y + center.y, rx: w * .48,
+          ry: Math.min(h * .46, w * .29), hue: group.hue, tilt});
+        group.tables.forEach((t, index) => nodes.push(tableStar(t,
+          {...points[index], cluster: group.id, x: x + points[index].x, y: y + points[index].y}, labelWidth)));
+      });
+      countText = `${groups.size} 个星系 · ${matched.length} 张逻辑表`;
+      legend = '<span><i class="kg-legend-star"></i>逻辑表</span><span>星芒大小随字段数量变化</span>';
+      edges.clear();
+      target.hidden = true;
+    } else {
+      const visibleRelations = relations.filter(r => state.filter === 'all' || (state.filter === 'registered') === registered(r));
+      const visible = new Set(matched.map(item => item.id));
+      if (term) {
+        const matches = new Set(visible);
+        for (const relation of visibleRelations) {
+          if (relation.members.some(member => matches.has(member.table.id))) {
+            for (const {table: partner} of relation.members) if (!source || partner.source === source) visible.add(partner.id);
+          }
+        }
+      }
+      const neighbours = neighboursFor(visibleRelations, visible, table, fieldId);
+      const layout = fieldLayout(table, neighbours, width, minHeight, positions);
+      height = layout.height;
+      atlas.style.setProperty('--kg-hue', table.galaxy.hue);
+      skies = [{id: table.galaxy.id, ...layout.center, rx: Math.min(width * .4, layout.fieldAreaHeight * .68),
+        ry: layout.fieldAreaHeight * .31, hue: table.galaxy.hue, tilt: -17}];
+      nodes = [tableStar(table, layout.center, layout.core.width, true),
+        ...table.fields.map((field, index) => ({...layout.fields[index], key: `f:${table.index}:${index}`,
+          field: true, index, hue: table.galaxy.hue, size: field.id === fieldId ? 24 : 17,
+          label: field.label || field.name, description: `${field.label || field.name} · ${field.name} · ${field.type || '字段'} · 属于 ${table.display}`,
+          selected: field.id === fieldId})),
+        ...neighbours.map(([t, links], i) => {
+          const star = tableStar(t, layout.points[i], layout.labelWidth);
+          const names = [...new Set(links.map(link => link.label))];
+          star.caption = names.length === 1 ? names[0] : names.length + ' 组关联';
+          star.description += ' · ' + names.join('、');
+          return star;
+        })];
+      origin = previous?.get('t:' + table.index);
+      if (!origin) {
+        const rect = atlas.getBoundingClientRect();
+        origin = {x: rect.left + layout.center.x, y: rect.top + layout.center.y};
+      }
+      edges.draw(layout, table, neighbours, fieldId);
+      const selectedIndex = fieldId == null ? -1 : table.fields.findIndex(f => f.id === fieldId);
+      target.hidden = selectedIndex < 0;
+      if (!target.hidden) {
+        const point = layout.fields[selectedIndex];
+        placeTarget(point);
+        target.getAnimations().forEach(animation => animation.cancel());
+        if (previousTarget && !sceneChanged) {
+          const end = target.getBoundingClientRect();
+          target.animate([{translate: `${previousTarget.left - end.left}px ${previousTarget.top - end.top}px`},
+            {translate: '0px 0px'}], {duration: 300, easing: 'cubic-bezier(.22,.75,.24,1)'});
+        }
+      }
+      drag.setLayout(table, layout);
+      caption = neighbours.length ? `<div class="kg-relations-divider" style="top:${layout.relationTop}px"><span>关联表</span></div>` : '';
+      countText = `${table.fields.length} 个字段 · ${neighbours.length} 张关联表`;
+      legend = '<span><i class="kg-member-key"></i>字段归属</span><span><i></i>已确认或已登记</span><span><i class="kg-candidate-key"></i>候选关联</span>';
+      const inspectorKey = JSON.stringify([table.id, fieldId, state.filter]);
+      if (lastInspector !== inspectorKey) {
+        const sameTable = aside.dataset.table === table.id;
+        const oldScroll = sameTable ? aside.scrollTop : 0;
+        const listOpen = !sameTable || aside.querySelector('details')?.open;
+        aside.innerHTML = inspector(table, visibleRelations, fieldId);
+        aside.querySelector('.kg-table-fields').open = listOpen;
+        aside.dataset.table = table.id;
+        aside.scrollTop = oldScroll;
+        if (motion) aside.firstElementChild.animate([{opacity: .45}, {opacity: 1}], {duration: 230});
+        lastInspector = inspectorKey;
+      }
+    }
+    atlas.style.height = height + 'px';
+    if (captions.innerHTML !== caption) captions.innerHTML = caption;
+    if (sceneChanged && motion) captions.animate([{opacity: 0}, {opacity: 1}], {duration: 400});
+    if (focus && motion) svg.animate([{opacity: .1}, {opacity: 1}], {duration: sceneChanged ? 490 : 230});
+    sky.setScene({width, height, galaxies: skies});
+    stars.draw(nodes, previous, origin, motion);
+    panel.querySelector('.kg-counts').textContent = countText;
+    panel.querySelector('.kg-legend').innerHTML = legend;
+    lastFocus = focus ? table.id : null;
+  }
+
+  search.addEventListener('input', () => { state.search = search.value.trim().toLowerCase(); draw(); }, {signal});
   sourceSelect.addEventListener('change', () => {
     state.source = sourceSelect.value;
-    const next = tables.find(table => table.source === state.source);
+    const next = tables.find(t => t.source === state.source);
     if (state.mode === 'focus' && next && state.table.source !== state.source) {
       state.table = next;
       state.fieldId = null;
     }
     draw();
   }, {signal});
-  host.querySelector('[data-graph-filter]').addEventListener('change', event => {
+  tablePicker.addEventListener('change', () => { selectTable(tables[Number(tablePicker.value)]); draw(); }, {signal});
+  panel.querySelector('[data-graph-filter]').addEventListener('change', event => {
     state.filter = event.target.value;
     draw();
   }, {signal});
-  host.addEventListener('click', event => {
-    const mode = event.target.closest('[data-graph-mode]');
-    const node = event.target.closest('[data-table-index]');
-    const field = event.target.closest('[data-field-index]');
-    const related = event.target.closest('[data-related-table]');
-    const details = event.target.closest('[data-graph-details]');
-    const start = node?.querySelector('.kg-orb').getBoundingClientRect();
-    if (mode) {
-      switchMode(mode.dataset.graphMode);
-    } else if (node || related) {
-      state.table = tables[Number(node?.dataset.tableIndex ?? related.dataset.relatedTable)];
-      state.fieldId = related?.dataset.relatedField || null;
-      switchMode('focus');
-      setBrowseFilters();
-    } else if (field) {
-      const id = state.table.fields[Number(field.dataset.fieldIndex)]?.id;
+  panel.addEventListener('click', event => {
+    const button = event.target.closest('button');
+    if (!button || button.disabled) return;
+    const data = button.dataset;
+    if (button === resetButton) {
+      if (state.mode === 'focus') positions.delete(state.table.id);
+      else overview.reset();
+      draw();
+      return;
+    }
+    if (button === motionButton) {
+      state.paused = !state.paused;
+      panel.classList.toggle('kg-paused', state.paused);
+      sky.setPaused(state.paused);
+      stars.setPaused(state.paused);
+      motionButton.setAttribute('aria-pressed', String(state.paused));
+      motionButton.title = state.paused ? '继续星图动效' : '暂停星图动效';
+      motionButton.setAttribute('aria-label', motionButton.title);
+      return;
+    }
+    if (data.graphMode) {
+      if (data.graphMode === state.mode) return;
+      switchMode(data.graphMode);
+    } else if (data.tableIndex != null || data.relatedTable != null) {
+      selectTable(tables[Number(data.tableIndex ?? data.relatedTable)], data.relatedField || null);
+    } else if (data.starField != null || data.fieldIndex != null) {
+      const id = state.table.fields[Number(data.starField ?? data.fieldIndex)].id;
       state.fieldId = state.fieldId === id ? null : id;
-    } else if (details) {
+    } else if (button === detailsButton) {
       state.details = !state.details;
     } else {
       return;
     }
     draw();
-    if (node || related) {
-      const selected = host.querySelector('.kg-planet.is-selected');
-      if (node) {
-        host.querySelector('.kg-toolbar').scrollIntoView({block: 'nearest'});
-        flyToPlanet(start, selected.querySelector('.kg-orb'));
+    if (data.starField != null || data.relatedTable != null) aside.scrollTop = 0;
+    if (data.relatedTable != null || data.tableIndex != null) {
+      const core = atlas.querySelector('.is-core:not(:disabled)');
+      core?.focus({preventScroll: true});
+      if (core) {
+        const bounds = core.getBoundingClientRect();
+        if (bounds.bottom < 0 || bounds.top > window.innerHeight) core.scrollIntoView({block: 'center'});
       }
-      selected.focus({preventScroll: true});
-    } else if (field) {
-      host.querySelector(`[data-field-index="${Number(field.dataset.fieldIndex)}"]`)?.focus({preventScroll: true});
+    } else if (data.fieldIndex != null) {
+      aside.querySelector(`[data-field-index="${Number(data.fieldIndex)}"]`)?.focus({preventScroll: true});
     }
   }, {signal});
-  host.addEventListener('keydown', event => {
+  panel.addEventListener('keydown', event => {
     if (event.key !== 'Escape' || state.mode !== 'focus' || event.target.matches('input, select')) return;
     switchMode('overview');
     draw();
-    host.querySelector('[data-graph-mode="overview"]').focus();
+    panel.querySelector('[data-graph-mode="overview"]').focus();
   }, {signal});
-  if (globalThis.ResizeObserver) {
-    const panel = host.querySelector('.kg-scene');
-    session.width = panel.clientWidth;
-    session.observer = new ResizeObserver(() => {
-      if (panel.clientWidth === session.width) return;
-      session.width = panel.clientWidth;
-      draw();
+  const queueResize = () => {
+    if (resizeFrame) return;
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = 0;
+      if (!signal.aborted && (lastWidth !== atlas.clientWidth || lastHeight !== document.documentElement.clientHeight)) draw(false);
     });
-    session.observer.observe(panel);
+  };
+  if (globalThis.ResizeObserver) {
+    session.observer = new ResizeObserver(queueResize);
+    session.observer.observe(panel.querySelector('.kg-scene'));
   }
-  window.addEventListener('resize', draw, {signal});
-  draw();
+  window.addEventListener('resize', queueResize, {signal});
+  signal.addEventListener('abort', () => cancelAnimationFrame(resizeFrame), {once: true});
+  draw(false);
+}
+
+function tableStar(table, point, width, core = false) {
+  return {...point, width, key: 't:' + table.index, index: table.index, core,
+    size: table.starSize + (core ? 26 : 0), label: table.display, hue: table.galaxy.hue,
+    caption: core ? sourceLabel(table) : '',
+    description: `${table.display} · ${sourceLabel(table)} · ${table.fields.length} 个字段`};
 }
 
 function neighboursFor(relations, visible, table, fieldId) {
@@ -223,148 +453,6 @@ function neighboursFor(relations, visible, table, fieldId) {
     }
   }
   return [...neighbours].sort(([a], [b]) => a.index - b.index);
-}
-
-function renderGraph(host, state) {
-  const {tables, table, search, source, fieldId, mode} = state;
-  const focus = mode === 'focus';
-  const panel = host.querySelector('.kg-panel');
-  panel.classList.toggle('kg-is-focus', focus);
-  host.querySelectorAll('[data-graph-mode]').forEach(button =>
-    button.setAttribute('aria-pressed', String(button.dataset.graphMode === mode)));
-  const details = host.querySelector('[data-graph-details]');
-  details.setAttribute('aria-expanded', String(state.details && focus));
-  const aside = host.querySelector('.kg-inspector');
-  aside.hidden = !focus || !state.details;
-
-  const scene = host.querySelector('.kg-scene');
-  const atlas = scene.querySelector('.kg-atlas');
-  const counts = host.querySelector('.kg-counts');
-  const width = scene.clientWidth;
-  if (width < 120) return;
-  const pageTop = scene.getBoundingClientRect().top + window.scrollY;
-  const minHeight = Math.max(420, Math.ceil(document.documentElement.clientHeight - pageTop - 22));
-  const matched = tables.filter(item => (!source || item.source === source)
-    && (!search || [item.source, sourceLabel(item.source), item.galaxy.name, item.display, item.name, item.physical_name,
-      ...item.fields.flatMap(field => [field.name, field.label, field.definition])].join(' ').toLowerCase().includes(search)));
-  if (!focus) {
-    const galaxies = new Map();
-    for (const item of matched) {
-      const {galaxy} = item;
-      if (!galaxies.has(galaxy.id)) galaxies.set(galaxy.id, {...galaxy, tables: []});
-      galaxies.get(galaxy.id).tables.push(item);
-    }
-    const layout = overviewLayout([...galaxies.values()], width, minHeight);
-    atlas.style.height = layout.height + 'px';
-    const empty = tables.length ? '没有符合筛选条件的逻辑表。' : '当前账户没有可查看的逻辑表。';
-    atlas.innerHTML = starfield(width, layout.height) + (layout.groups.length
-      ? layout.groups.map(renderGalaxy).join('') : `<p class="kg-empty kg-no-matches">${empty}</p>`);
-    counts.textContent = `${galaxies.size} 个来源组 · ${matched.length} 张表`;
-    return;
-  }
-
-  const relations = state.relations.filter(relation => state.filter === 'all'
-    || (state.filter === 'registered') === registered(relation));
-  const visible = new Set(matched.map(item => item.id));
-  if (search) {
-    const matches = new Set(visible);
-    for (const relation of relations) {
-      if (relation.members.some(member => matches.has(member.table.id))) {
-        for (const member of relation.members) if (!source || member.table.source === source) visible.add(member.table.id);
-      }
-    }
-  }
-  const neighbours = neighboursFor(relations, visible, table, fieldId);
-  const layout = focusLayout(neighbours.length, width, minHeight);
-  atlas.style.height = layout.height + 'px';
-  atlas.innerHTML = starfield(width, layout.height) + nebula(0, 0, width, layout.height, table.galaxy.hue, -17)
-    + relationLayer(neighbours, layout)
-    + planet(table, layout.center, layout.core.width, true)
-    + neighbours.map(([item], index) => planet(item, layout.points[index], layout.labelWidth)).join('');
-  counts.textContent = `${table.display} · ${neighbours.length} 张关联表`;
-  const oldScroll = aside.dataset.table === table.id ? aside.scrollTop : 0;
-  const fieldListOpen = aside.dataset.table !== table.id || aside.querySelector('details')?.open;
-  aside.innerHTML = inspector(table, relations, fieldId);
-  aside.querySelector('.kg-table-fields').open = fieldListOpen;
-  aside.dataset.table = table.id;
-  aside.scrollTop = oldScroll;
-}
-
-function planet(table, point, width, selected = false) {
-  const size = (table.planetDiameter + (selected ? 22 : 0)).toFixed(2);
-  return `<button type="button" class="kg-planet ${selected ? 'is-selected' : ''}" data-table-index="${table.index}"
-    ${selected ? 'aria-current="true"' : ''}
-    aria-label="${esc(table.display)}，${esc(sourceLabel(table.source))}，${table.fields.length} 个字段"
-    title="${esc(table.display)} · ${esc(sourceLabel(table.source))} · ${table.fields.length} 个字段"
-    style="left:${point.x}px; top:${point.y}px; width:${width}px; --kg-hue:${table.galaxy.hue}; --kg-planet-size:${size}px">
-    <span class="kg-planet-marker" aria-hidden="true"><i class="kg-orb"></i></span>
-    <strong>${esc(table.display)}</strong>
-    ${selected ? `<small>${esc(sourceLabel(table.source))}</small>` : ''}
-  </button>`;
-}
-
-function flyToPlanet(start, orb) {
-  if (!orb?.animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const end = orb.getBoundingClientRect();
-  const x = start.left + start.width / 2 - end.left - end.width / 2;
-  const y = start.top + start.height / 2 - end.top - end.height / 2;
-  if (Math.abs(y) > window.innerHeight * .85) return;
-  orb.animate([{transform: `translate(${x}px,${y}px) scale(${start.width / end.width})`},
-    {transform: 'none'}], {duration: 390, easing: 'cubic-bezier(.22,.72,.25,1)'});
-}
-
-function starfield(width, height) {
-  const random = seededRandom('medfabric-atlas-dust');
-  const dots = Array.from({length: Math.min(800, Math.ceil(width * height / 1700))}, () => {
-    const x = Math.round(random() * width), y = Math.round(random() * height);
-    return `<circle cx="${x}" cy="${y}" r="${(.32 + random() * 1.05).toFixed(2)}" opacity="${(.1 + random() * .45).toFixed(2)}"/>`;
-  });
-  return `<svg class="kg-starfield" width="${width}" height="${height}" aria-hidden="true">${dots.join('')}</svg>`;
-}
-
-function nebula(x, y, width, height, hue, angle) {
-  return `<div class="kg-nebula" aria-hidden="true" style="left:${x}px; top:${y}px; width:${width}px; height:${height}px; --kg-hue:${hue}; --kg-tilt:${angle}deg"></div>`;
-}
-
-function renderGalaxy(layout) {
-  const {group, x, y, width, height, core, center, labelWidth, points} = layout;
-  const tilt = group.id === 'group:medical' ? -14 : group.id === 'source:doris-nju' ? 6 : 12;
-  return `<section class="kg-galaxy" data-galaxy="${esc(group.id)}" aria-label="${esc(group.name)}"
-    style="left:${x}px; top:${y}px; width:${width}px; height:${height}px; --kg-hue:${group.hue}">
-    ${nebula(0, 0, width, height, group.hue, tilt)}
-    <div class="kg-galaxy-core" style="left:${center.x}px;top:${center.y}px;width:${core.width}px">
-      <h2 title="${esc(group.name)}">${esc(group.name)}</h2><span>${group.tables.length} 张表</span>
-    </div>
-    ${group.tables.map((table, i) => planet(table, points[i], labelWidth)).join('')}
-  </section>`;
-}
-
-function relationLayer(neighbours, layout) {
-  const {width, height, center, points, core, labelWidth} = layout;
-  const labels = [];
-  const edges = neighbours.map(([table, links], i) => {
-    const end = points[i], start = center;
-    const dx = end.x - start.x, dy = end.y - start.y;
-    const bend = i % 2 ? .1 : -.1;
-    const mid = {x: (start.x + end.x) / 2 + dy * bend, y: (start.y + end.y) / 2 - dx * bend};
-    const names = [...new Set(links.map(link => link.label))];
-    const label = names.length === 1 ? names[0] : names.length + ' 个字段';
-    const span = Math.min(110, label.length * 10 + 10);
-    const pos = [.51, .63, .39, .73, .29].map(t => ({
-      x: (1-t)**2 * start.x + 2*t*(1-t) * mid.x + t*t * end.x,
-      y: (1-t)**2 * start.y + 2*t*(1-t) * mid.y + t*t * end.y
-    })).find(point =>
-      (Math.abs(point.x - center.x) > (core.width + span) / 2 || Math.abs(point.y - center.y) > 51)
-      && points.every(p => Math.abs(point.x - p.x) > (labelWidth + span) / 2 || Math.abs(point.y - p.y) > 32)
-      && labels.every(p => Math.abs(point.x - p.x) > (p.span + span) / 2 || Math.abs(point.y - p.y) > 18));
-    if (pos) labels.push({...pos, span});
-    return `<g class="kg-connection ${links.some(registered) ? 'kg-connection-solid' : ''}" style="--kg-edge-hue:${table.galaxy.hue}">
-      <title>${esc(names.join('、'))}</title>
-      <path d="M${start.x},${start.y} Q${mid.x},${mid.y} ${end.x},${end.y}"/>
-      ${pos ? `<text x="${pos.x}" y="${pos.y}" dominant-baseline="middle" text-anchor="middle">${esc(label)}</text>` : ''}
-    </g>`;
-  });
-  return `<svg class="kg-edges" width="${width}" height="${height}" aria-hidden="true">${edges.join('')}</svg>`;
 }
 
 function inspector(table, relations, fieldId) {
@@ -386,7 +474,7 @@ function inspector(table, relations, fieldId) {
         ${count ? count + ' 组关联 · ' : ''}${item.status === 'confirmed' ? '已确认定义' : '定义待确认'}
       </span></button>`;
   }).join('');
-  const selected = field ? links.filter(link => link.members.some(member => member.field.id === fieldId)) : links;
+  const selected = field ? links.filter(link => link.members.some(member => member.table.id === table.id && member.field.id === fieldId)) : links;
   const details = selected.map(relation => {
     const ownFields = relation.members.filter(member => member.table.id === table.id).map(member => member.field.name);
     const partners = relation.members.filter(member => member.table.id !== table.id);
@@ -395,14 +483,19 @@ function inspector(table, relations, fieldId) {
       <p>${esc(ownFields.join('、'))} · ${esc(relation.note)}</p>
       <ul>${partners.map(member => `<li><button type="button" data-related-table="${member.table.index}"
         data-related-field="${esc(member.field.id)}">
-        <span>${esc(sourceLabel(member.table.source))} · ${esc(member.table.display)}</span>
+        <span>${esc(sourceLabel(member.table))} · ${esc(member.table.display)}</span>
         <b>${esc(member.field.label)} <code>${esc(member.field.name)}</code></b></button></li>`).join('')}</ul>
     </section>`;
   }).join('');
-  return `<div class="kg-inspector-heading"><p>已选逻辑表</p><h3>${esc(table.display)}</h3>
-      <span>${esc(sourceLabel(table.source))} / ${esc(table.physical_name || table.name)} / ${table.fields.length} 个字段</span>
+  const summary = field ? `<p>所属表 · ${esc(table.display)}</p><h3>${esc(field.label || field.name)}</h3>
+      <span><code>${esc(field.name)}</code> · ${esc(field.type)}</span>
+      <div class="kg-definition">${esc(field.definition || '字段含义待补充')}</div>
+      <span>${field.status === 'confirmed' ? '已确认定义' : '定义待确认'} · ${selected.length} 组关联</span>`
+    : `<p>已选逻辑表</p><h3>${esc(table.display)}</h3>
+      <span>${esc(sourceLabel(table))} / ${esc(table.physical_name || table.name)} / ${table.fields.length} 个字段</span>`;
+  return `<div class="kg-inspector-heading">${summary}
     </div>
-    <details class="kg-table-fields" open><summary>表字段</summary><div class="kg-field-list">${fields}</div></details>
+    <details class="kg-table-fields" open><summary>表字段</summary><div class="kg-field-list">${fields || '<p class="kg-empty">目录中暂无可见字段。</p>'}</div></details>
     <h4 class="kg-relationship-heading">${field ? esc(field.label) : '本表'}的关联</h4>
     ${details || '<p class="kg-empty">当前筛选下没有关联字段。</p>'}`;
 }

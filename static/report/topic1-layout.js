@@ -6,23 +6,63 @@ export function seededRandom(seed) {
   };
 }
 
-const planetHeight = 49;
+const starHeight = 49;
+const turn = 2 * Math.PI;
 
-function scatter(count, width, height, labelWidth, core, seed, focus) {
+// In disk coordinates all stars rotate together. For any pair, their
+// separation vector traces a circle there, which projects to an ellipse on
+// screen. Inverting its label rectangle gives the clearance for a whole turn.
+function revolvingStars(count, width, height, labelWidth, core, seed, tilt) {
+  const rx = (width - labelWidth) / 2 - 12;
+  const maxY = height / 2 - 53;
+  const shear = Math.max(-maxY * .45, Math.min(maxY * .45, rx * Math.sin(tilt * Math.PI / 180) * .64));
+  const ry = Math.sqrt(maxY * maxY - shear * shear);
+  const clearance = (x, y) => Math.hypot(x / rx, (y + Math.abs(shear) * x / rx) / ry);
+  const innerRadius = clearance((core.width + labelWidth) / 2 + 5, 70);
+  const gap = clearance(labelWidth + 8, starHeight + 5);
+  if (innerRadius >= 1 || (count > 1 && 2 * Math.sin(Math.PI / count) < gap)) return null;
+
+  const random = seededRandom(seed);
+  const initialAngle = random() * turn;
+  const direction = random() < .5 ? -1 : 1;
+  const duration = Math.round(146000 + random() * 32000);
+  for (let attempt = 0; attempt < 16; attempt++) {
+    const spread = (16 - attempt) / 16;
+    const tracks = Array.from({length: count}, (_, i) => {
+      const angle = initialAngle + turn / count * (i + (random() - .5) * .65 * spread);
+      const radius = 1 - (1 - innerRadius) * random() * spread;
+      return {angle, radius, x: Math.cos(angle) * radius, y: Math.sin(angle) * radius};
+    });
+    if (tracks.some((a, i) => tracks.slice(0, i).some(b => Math.hypot(a.x - b.x, a.y - b.y) < gap))) continue;
+    return tracks.map(track => {
+      const x = rx * track.x, y = shear * track.x + ry * track.y;
+      const keyframes = Array.from({length: 65}, (_, i) => {
+        const angle = track.angle + direction * turn * i / 64;
+        const u = Math.cos(angle) * track.radius, v = Math.sin(angle) * track.radius;
+        const dx = (rx * u - x).toFixed(2), dy = (shear * u + ry * v - y).toFixed(2);
+        return {transform: `translate(${dx}px, ${dy}px)`};
+      });
+      return {x: width / 2 + x, y: height / 2 + 14 + y, orbit: {duration, keyframes}};
+    });
+  }
+  return null;
+}
+
+function scatter(count, width, height, labelWidth, core, seed) {
   const random = seededRandom(seed);
   const positions = [];
   const cx = width / 2, cy = height / 2;
   const rx = cx - labelWidth / 2 - 7, ry = cy - 31;
   const available = point => (Math.abs(point.x - cx) > (core.width + labelWidth) / 2 + 7
-    || Math.abs(point.y - cy) > (core.height + planetHeight) / 2 + 5)
+    || Math.abs(point.y - cy) > (core.height + starHeight) / 2 + 5)
     && !positions.some(other => Math.abs(point.x - other.x) < labelWidth + 7
-      && Math.abs(point.y - other.y) < planetHeight + 6);
+      && Math.abs(point.y - other.y) < starHeight + 6);
 
   for (let index = 0; index < count; index++) {
     let best = null, score = -Infinity;
     for (let sample = 0; sample < 170; sample++) {
       const angle = random() * Math.PI * 2;
-      const distance = Math.sqrt((focus ? .31 : .08) + random() * (focus ? .69 : .92));
+      const distance = Math.sqrt(.08 + random() * .92);
       const point = {x: Math.round(cx + rx * distance * Math.cos(angle)),
         y: Math.round(cy + ry * distance * Math.sin(angle))};
       if (!available(point)) continue;
@@ -40,19 +80,27 @@ function scatter(count, width, height, labelWidth, core, seed, focus) {
   return positions;
 }
 
-function arrange(count, width, minHeight, core, seed, focus = false) {
+function arrange(count, width, minHeight, core, seed, tilt) {
   const labelWidth = Math.min(110, Math.max(72, Math.floor(width * .23)));
   const lanes = Math.max(1, Math.floor((width - 24) / (labelWidth + 12)));
   const base = Math.max(minHeight, 142 + Math.ceil(count / lanes) * 51);
-  for (let attempt = 0; attempt < 12; attempt++) {
+  // Give sparse groups room for orbits without making dense catalogs scroll
+  // simply to accommodate motion.
+  if (count > 0 && count <= 12 && width >= 460) {
+    for (const height of [base, base + 38]) {
+      const points = revolvingStars(count, width, height, labelWidth, core, seed, tilt);
+      if (points) return {width, height, labelWidth, points, center: {x: width / 2, y: height / 2}};
+    }
+  }
+  for (let attempt = 0; count <= 48 && attempt < 12; attempt++) {
     const height = base + attempt * 35;
-    const points = scatter(count, width, height, labelWidth, core, seed + attempt, focus);
+    const points = scatter(count, width, height, labelWidth, core, seed + attempt);
     if (points) return {width, height, labelWidth, points, center: {x: width / 2, y: height / 2}};
   }
 
   // Large sources expand vertically and retain predictable spacing.
   const rows = Math.ceil(count / lanes);
-  const step = planetHeight + 13;
+  const step = starHeight + 13;
   const center = {x: width / 2, y: (rows * step + core.height + 98) / 2};
   const height = Math.max(minHeight, center.y * 2);
   center.y = height / 2;
@@ -68,32 +116,27 @@ function arrange(count, width, minHeight, core, seed, focus = false) {
 }
 
 export function overviewLayout(groups, width, minHeight) {
-  const useColumns = width >= 750 && groups.length > 1;
-  const split = Math.round(width * .55);
-  const columns = useColumns
-    ? [{x: 0, width: split, groups: [groups[0], ...groups.slice(3).filter((_, i) => i % 2 === 0)]},
-      {x: split, width: width - split, groups: groups.slice(1, 3).concat(groups.slice(3).filter((_, i) => i % 2 === 1))}]
-    : [{x: 0, width, groups}];
-  const sizes = columns.map(column => {
-    const layouts = column.groups.map(group => {
-      const core = {width: Math.min(column.width * .77, Math.max(116, [...group.name].reduce((sum, c) => sum + (c.codePointAt(0) > 127 ? 25 : 14), 27))), height: 52};
-      return {group, core, ...arrange(group.tables.length, column.width,
-        groups.length === 1 ? Math.min(minHeight, 590) : 204, core, group.id)};
-    });
-    return {...column, layouts, height: layouts.reduce((sum, layout) => sum + layout.height, 0)};
+  const capacity = width < 750 ? 1 : Math.max(2, Math.floor(width / 460));
+  const count = Math.max(1, Math.min(groups.length, capacity));
+  const columns = Array.from({length: count}, (_, i) => {
+    const x = Math.round(width * i / count);
+    return {x, width: Math.round(width * (i + 1) / count) - x, height: 0, layouts: []};
   });
-  const height = Math.max(minHeight, ...sizes.map(column => column.height));
-  return {height, groups: sizes.flatMap(column => {
-    let y = (height - column.height) / 2;
-    return column.layouts.map(layout => {
-      const placed = {...layout, x: column.x, y};
-      y += layout.height;
-      return placed;
-    });
+  for (const [index, group] of groups.entries()) {
+    // Place new sources in the shorter column, including very uneven catalogs.
+    const column = columns.reduce((a, b) => a.height <= b.height ? a : b);
+    const nameWidth = [...group.name].reduce((sum, char) => sum + (char.codePointAt(0) > 127 ? 25 : 14), 27);
+    const core = {width: Math.min(column.width * .77, Math.max(128, nameWidth)), height: 118};
+    const tilt = index % 2 ? 16 : -21;
+    const layout = arrange(group.tables.length, column.width, Math.max(275, Math.min(minHeight, column.width * .77)),
+      core, group.id, tilt);
+    column.layouts.push({...layout, group, core, tilt, x: column.x, y: column.height});
+    column.height += layout.height;
+  }
+  const height = Math.max(minHeight, ...columns.map(column => column.height));
+  return {width, height, groups: columns.flatMap(column => {
+    const alignment = groups.length <= 2 ? (columns.length === 2 ? (column.x ? .76 : .24) : .5) : 0;
+    const offset = (height - column.height) * alignment;
+    return column.layouts.map(layout => ({...layout, y: layout.y + offset}));
   })};
-}
-
-export function focusLayout(count, width, minHeight) {
-  const core = {width: Math.min(174, width * .52), height: 103};
-  return {core, ...arrange(count, width, minHeight, core, 'focused-planets', true)};
 }
