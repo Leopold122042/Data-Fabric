@@ -1,11 +1,11 @@
 import {guideHtml} from './topic2-guide.js?v=019';
 import {caseIntro,caseContent} from './topic2-case.js?v=case-017';
-import {renderTopicFour} from './topic4.js?v=topic4-r2-20261113';
-import {renderTopicThree} from './topic3.js?v=topic3-v1-20261118';
+import {renderTopicFour} from './topic4.js?v=0.1.45';
+import {renderTopicThree} from './topic3.js?v=0.1.45';
 const $=selector=>document.querySelector(selector);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const topics={
- '1':{title:'医疗数据编织平台总体框架',label:'课题 01 / 04 · 总体框架',summary:'从数据准备与语义资产出发，串联需求解析、方案编译、受控执行和结果反馈；点击图中节点直达对应平台功能。'},
+ '1':{title:'医疗数据编织平台总体框架',label:'课题 01 / 04 · 总体框架',summary:'从数据准备与语义资产出发，串联需求解析、方案编译、受控执行和结果反馈；点击图中节点查看步骤说明。'},
  '2':{title:'多源数据编织与可信执行',label:'课题 02 / 04 · 能力演示',summary:'从异构接入、语义统一到合规执行、运行反馈，沿同一条演示链路展示关键能力。'},
  '3':{title:'服务供给与可信交付',label:'课题 03 / 04 · 服务编排演示',summary:'从需求澄清与任务规格开始，按用途组合服务图，经合约策略校验后执行和交付，并以同范围复测沉淀改进证据。'},
  '4':{title:'医疗统计安全使用演示',label:'课题 04 / 04 · 子课题四对接子课题五',summary:'以 T01 为例，现场核对 12 条关联、人数阈值、六类授权判断、到期后拒绝，以及来源和交付证据。'}
@@ -17,23 +17,23 @@ const stages=[
  {id:'orchestration',label:'编排与调度'},
  {id:'feedback',label:'运行反馈与证据'}
 ];
-const frameworkLinks=[
- {label:'步骤12：沉淀证据并触发复核',href:'/static/management/feedback.html',x:22.5,y:15.3,w:29.0,h:10.0},
- {label:'步骤11：核验并交付结果',href:'/static/execution/index.html',x:53.4,y:15.3,w:29.0,h:10.0},
- {label:'步骤08：编译逻辑视图与方案',href:'/static/execution/index.html',x:13.5,y:32.2,w:22.4,h:9.8},
- {label:'步骤09：核验授权与执行约束',href:'/static/execution/contracts.html',x:39.2,y:32.2,w:22.5,h:9.8},
- {label:'步骤10：编排并只读执行',href:'/static/execution/index.html',x:65.0,y:32.2,w:22.3,h:9.8},
- {label:'步骤07：澄清并确认规格',href:'/static/management/intake.html',x:12.3,y:52.1,w:18.4,h:8.2},
- {label:'步骤06：匹配候选字段',href:'/static/management/intake.html',x:31.2,y:52.1,w:18.4,h:8.2},
- {label:'步骤05：解析结构化意图',href:'/static/management/intake.html',x:50.8,y:52.1,w:18.4,h:8.2},
- {label:'步骤04：提交查询需求',href:'/static/management/intake.html',x:70.0,y:52.1,w:18.4,h:8.2},
- {label:'步骤01：登记数据源',href:'/static/management/catalog.html',x:13.5,y:67.0,w:22.4,h:9.8},
- {label:'步骤02：形成目录与字段库',href:'/static/management/field-library.html',x:39.2,y:67.0,w:22.5,h:9.8},
- {label:'步骤03：确认概念与实体关系',href:'/static/management/semantic.html',x:65.0,y:67.0,w:22.3,h:9.8},
- {label:'跨流程反馈回流',href:'/static/management/feedback.html',x:2.2,y:43.7,w:4.8,h:3.8},
- {label:'贯穿约束：版本绑定',href:'/static/management/field-library.html',x:13.1,y:89.0,w:23.5,h:4.0},
- {label:'贯穿约束：策略复核',href:'/static/execution/contracts.html',x:38.0,y:89.0,w:23.5,h:4.0},
- {label:'贯穿约束：证据回流',href:'/static/management/feedback.html',x:62.8,y:89.0,w:24.0,h:4.0}
+const frameworkSteps=[
+ {label:'步骤12：沉淀证据并触发复核',detail:'把运行、访问决定和交付凭证归入同一次任务，供版本核对与复测。',x:22.5,y:15.3,w:29.0,h:10.0},
+ {label:'步骤11：核验并交付结果',detail:'检查授权、输出字段分类、结果结构和质量门槛，核验通过后生成交付凭证。',x:53.4,y:15.3,w:29.0,h:10.0},
+ {label:'步骤08：编译逻辑视图与方案',detail:'将已确认字段与关联条件写入逻辑视图，并将视图版本固定到执行方案。',x:13.5,y:32.2,w:22.4,h:9.8},
+ {label:'步骤09：核验授权与执行约束',detail:'依据用途、时间窗、主体及输出范围复核授权，防止沿用旧权限。',x:39.2,y:32.2,w:22.5,h:9.8},
+ {label:'步骤10：编排并只读执行',detail:'按依赖顺序读取、关联和计算。执行节点使用只读连接并记录状态。',x:65.0,y:32.2,w:22.3,h:9.8},
+ {label:'步骤07：澄清并确认规格',detail:'补齐不明确的范围、口径或记录时间，确认本次查询的结构化规格。',x:12.3,y:52.1,w:18.4,h:8.2},
+ {label:'步骤06：匹配候选字段',detail:'按照字段含义、别名和所属表匹配查询候选，保留登记的跨表关联。',x:31.2,y:52.1,w:18.4,h:8.2},
+ {label:'步骤05：解析结构化意图',detail:'提取查询对象、输出、筛选、排序和条数，形成可供校验的结构化意图。',x:50.8,y:52.1,w:18.4,h:8.2},
+ {label:'步骤04：提交查询需求',detail:'提交自然语言需求，或在专业查询中明确选择字段与筛选条件。',x:70.0,y:52.1,w:18.4,h:8.2},
+ {label:'步骤01：登记数据源',detail:'登记不同连接器、扫描源结构，并为表和字段建立统一的目录标识。',x:13.5,y:67.0,w:22.4,h:9.8},
+ {label:'步骤02：形成目录与字段库',detail:'在统一目录维护字段含义、类型、别名和分类，记录定义及来源结构的版本。',x:39.2,y:67.0,w:22.5,h:9.8},
+ {label:'步骤03：确认概念与实体关系',detail:'将异构源字段映射为统一概念，并核对实体标识和关联口径。',x:65.0,y:67.0,w:22.3,h:9.8},
+ {label:'跨流程反馈回流',detail:'将运行偏差、受影响对象和复测结果回写到治理流程。',x:2.2,y:43.7,w:4.8,h:3.8},
+ {label:'贯穿约束：版本绑定',detail:'将所用字段、视图及方案的版本绑定起来，执行前再次校验。',x:13.1,y:89.0,w:23.5,h:4.0},
+ {label:'贯穿约束：策略复核',detail:'在执行和读取交付结果时复核用途、期限及字段边界。',x:38.0,y:89.0,w:23.5,h:4.0},
+ {label:'贯穿约束：证据回流',detail:'保留访问、执行、交付和复测证据，支持按任务核查。',x:62.8,y:89.0,w:24.0,h:4.0}
 ];
 const workflowDefinition=[
  {name:'读取医院诊断表',detail:'医院源 · diagnosis_record',description:'读取本次用途允许的诊断字段'},
@@ -79,8 +79,19 @@ function setTopic(topic){
  else $('#topic-content').innerHTML=`<article class="placeholder-card"><span class="placeholder-index">${topic.padStart(2,'0')}</span><h2>${esc(data.title)} · 内容待补充</h2><p>四个课题共用这套独立汇报界面。请把这一课题的目标、展示要点和希望演示的功能发来，我再补上对应内容。</p><small>当前先完成课题二的端到端交互样例</small></article>`;
 }
 function renderTopicOne(){
- const links=frameworkLinks.map(link=>`<a class="framework-hotspot" href="${link.href}" target="_blank" rel="noopener" aria-label="${esc(link.label)}，在新标签页打开" title="${esc(link.label)}" style="left:${link.x}%;top:${link.y}%;width:${link.w}%;height:${link.h}%"><span>打开对应功能 ↗</span></a>`).join('');
- $('#topic-content').innerHTML=`<article class="framework-panel graphic-only"><div class="framework-scroll"><div class="framework-board"><img src="/static/report/images/topic5-framework.png" alt="医疗数据编织平台总体框架图" width="2100" height="1500" loading="eager">${links}</div></div></article>`;
+ const spots=frameworkSteps.map((step,index)=>`<button type="button" class="framework-hotspot" data-framework-step="${index}" aria-label="${esc(step.label)}" title="${esc(step.label)}" style="left:${step.x}%;top:${step.y}%;width:${step.w}%;height:${step.h}%"><span>查看步骤说明</span></button>`).join('');
+ const host=$('#topic-content');
+ host.innerHTML=`<article class="framework-panel graphic-only"><div class="framework-scroll"><div class="framework-board"><img src="/static/report/images/topic5-framework.png" alt="医疗数据编织平台总体框架图" width="2100" height="1500" loading="eager">${spots}</div></div></article>
+ <dialog class="framework-detail" aria-labelledby="framework-detail-title"><h2 id="framework-detail-title"></h2><p></p><form method="dialog"><button class="action-button" type="submit">关闭</button></form></dialog>`;
+ const dialog=host.querySelector('.framework-detail');
+ for(const spot of host.querySelectorAll('[data-framework-step]')){
+  spot.onclick=()=>{
+   const step=frameworkSteps[Number(spot.dataset.frameworkStep)];
+   dialog.querySelector('h2').textContent=step.label;
+   dialog.querySelector('p').textContent=step.detail;
+   dialog.showModal();
+  };
+ }
 }
 function renderTopicTwo(){
  $('#topic-content').innerHTML=`<div id="case-guide">${guideHtml(state)}</div><details class="case-fixture"><summary>查看本次演示案例与数据范围</summary>${caseIntro()}</details><div class="journey-tabs" role="tablist" aria-label="课题二演示阶段">${stages.map((stage,index)=>`<button class="journey-tab ${state.stage===stage.id?'active':''}" role="tab" aria-selected="${state.stage===stage.id}" aria-controls="stage-panel" data-stage="${stage.id}" type="button"><span>${String(index+1).padStart(2,'0')}</span>${esc(stage.label)}</button>`).join('')}</div><div class="demo-layout"><section class="stage-panel" id="stage-panel" role="tabpanel"></section><aside class="object-rail" id="object-rail" aria-label="贯穿全程的中间对象"></aside></div>`;
@@ -90,7 +101,6 @@ function renderTopicTwo(){
 }
 function refreshGuide(){const host=$('#case-guide');if(host)host.innerHTML=guideHtml(state);}
 function header(index,title,subtitle,badge='演示样例',enhanced=false){return `<div class="stage-title-row"><div><span class="stage-kicker">课题二 · 阶段 ${String(index).padStart(2,'0')}</span><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div><span class="stage-badge ${enhanced?'enhanced':''}">${esc(badge)}</span></div>`;}
-function platformLinks(items){return `<div class="platform-links"><span>对应平台功能</span>${items.map(([label,url])=>`<a href="${esc(url)}" target="_blank" rel="noopener">${esc(label)} ↗</a>`).join('')}</div>`;}
 function sourcesStage(){return `<div class="stage-content">${header(1,'多源接入与元数据组织','医院、医保、科研平台异构源进入统一目录；数据对象携带主体、用途和期限约束。')}
 <div class="stage-actions"><button class="action-button primary" data-action="register-case">登记本案例目录快照</button></div><p class="section-label">异构来源 · 合成演示数据</p><div class="source-grid">
 <article class="source-card"><div class="source-top"><h3>医院诊疗平台</h3><span class="source-tag">HIS</span></div><p>医院数据中心 · 已登记</p><div class="source-objects">patient_core · diagnosis_record</div></article>
@@ -99,31 +109,31 @@ function sourcesStage(){return `<div class="stage-content">${header(1,'多源接
 <div class="object-constraints" aria-label="数据对象约束"><span class="constraint-chip">主体 <strong>临床科研中心</strong></span><span class="constraint-chip">用途 <strong>肺炎病例队列统计</strong></span><span class="constraint-chip">有效期 <strong>2027-03-31</strong></span></div>
 <p class="section-label">统一目录与对象血缘</p><div class="lineage-strip"><div class="lineage-node"><small>源对象</small><strong>HIS / diagnosis_record</strong></div><span class="lineage-arrow">→</span><div class="lineage-node"><small>统一目录对象</small><strong>OBJ-HOSP-001 · 诊断记录</strong></div><span class="lineage-arrow">→</span><div class="lineage-node"><small>下游逻辑视图</small><strong>LV-PNEUMONIA-MONTHLY</strong></div></div>
 ${state.sourceChanged?'<div class="change-alert"><strong>已检测到源端变化：</strong>医保 claim_header.amount 的金额单位由元改为分；已保留旧目录版本并标记待评估下游影响。</div>':'<div class="change-alert success">目录快照稳定 · 血缘关系可追踪 · 主体 / 用途 / 期限约束已随对象登记。</div>'}
-<div class="stage-actions"><button class="action-button primary" data-action="source-change">${state.sourceChanged?'再次注入源端变化':'模拟注入源端字段变化'}</button><button class="action-button" data-action="go-feedback">查看变化处置阶段</button></div>${platformLinks([['接入与资源目录','/static/platform/resources.html'],['元数据维护','/static/management/catalog.html']])}</div>`;}
+<div class="stage-actions"><button class="action-button primary" data-action="source-change">${state.sourceChanged?'再次注入源端变化':'模拟注入源端字段变化'}</button><button class="action-button" data-action="go-feedback">查看变化处置阶段</button></div></div>`;}
 function semanticStage(){return `<div class="stage-content">${header(2,'语义建模与关联','同一诊断在不同系统中使用不同编码；综合多项匹配证据生成统一业务概念。')}
 <div class="semantic-grid"><div><p class="section-label">同一诊断 · 异构编码示例</p><div class="code-match-list">
 <div class="code-match"><small>医院 HIS</small><code>J18.9</code><b>肺炎，未特指</b></div><div class="code-match"><small>医保 ICD</small><code>J18.900</code><b>肺炎编码扩展</b></div><div class="code-match"><small>科研平台</small><code>PNEU-03</code><b>入组诊断组别</b></div>
 </div><ul class="evidence-list"><li><span>代码体系与编码关系</span><b>结构证据</b></li><li><span>字段名、别名与业务定义</span><b>文本证据</b></li><li><span>数据类型、来源域与上下文</span><b>结构 / 语境证据</b></li></ul></div>
 <div class="concept-card"><small>统一业务概念 · 示例</small><strong>肺炎诊断</strong><code>diagnosis.pneumonia</code><div id="semantic-result" class="${state.semanticMatched?'access-result allow':'policy-empty'}">${state.semanticMatched?'3 个来源编码已关联到同一候选概念；映射依据可回看。':'运行匹配后展示多证据关联结果。'}</div></div></div>
-<div class="stage-actions"><button class="action-button primary" data-action="semantic-match">${state.semanticMatched?'重新运行多证据匹配':'运行多证据匹配'}</button><button class="action-button" data-action="select-object" data-object="concept">查看统一概念对象</button></div>${platformLinks([['概念映射','/static/management/semantic.html'],['语义与血缘图谱','/static/platform/graph.html']])}</div>`;}
+<div class="stage-actions"><button class="action-button primary" data-action="semantic-match">${state.semanticMatched?'重新运行多证据匹配':'运行多证据匹配'}</button><button class="action-button" data-action="select-object" data-object="concept">查看统一概念对象</button></div></div>`;}
 function virtualStage(){return `<div class="stage-content">${header(3,'虚拟化与逻辑集成','发布跨源逻辑视图，将委托合同中的主体、用途、期限和输出边界转成策略草案。')}
 <div class="contract-layout"><div class="contract-box"><label for="contract-text">数据委托处理合同条款 · 可编辑的样例文本</label><textarea id="contract-text" spellcheck="false">${esc(state.contractText)}</textarea><div class="stage-actions"><button class="action-button primary" data-action="compile-policy">生成策略对象草案</button><button class="action-button" data-action="select-object" data-object="view">查看合约策略视图</button></div></div><div class="policy-preview"><h3>条款解析结果 · 本地规则演示</h3>${state.policy?`<pre>${esc(JSON.stringify(state.policy,null,2))}</pre>`:'<p class="policy-empty">生成后在此查看主体、用途、期限、输出粒度与限制。</p>'}</div></div>
 ${state.policyResult?`<div class="access-result ${state.policyResult.allowed?'allow':'block'}"><strong>${state.policyResult.allowed?'访问放行':'访问拦截'} · ${esc(state.policyResult.title)}</strong><br>${esc(state.policyResult.reason)}</div>`:''}
 <div class="access-tests"><button class="action-button" data-action="access-allow">检查合规用途访问</button><button class="action-button" data-action="access-purpose">模拟跨用途访问</button><button class="action-button" data-action="access-expired">模拟超期访问</button></div>
 <div class="path-choice"><label for="sensitivity">敏感等级路径示例</label><select id="sensitivity"><option value="aggregate" ${state.sensitivity==='aggregate'?'selected':''}>低敏汇总</option><option value="health" ${state.sensitivity==='health'?'selected':''}>健康信息</option><option value="identifier" ${state.sensitivity==='identifier'?'selected':''}>直接身份标识</option></select><button class="action-button" data-action="route">推荐执行路径</button>${state.routeResult?`<span class="path-result">${esc(state.routeResult.path)} · ${esc(state.routeResult.reason)}</span>`:''}</div>
-<p class="report-disclosure">此页将样例条款解析成可视化策略草案；授权拦截和执行路径为本地演示，不签发真实授权或读取医疗数据。</p>${platformLinks([['逻辑视图与执行','/static/execution/index.html?tab=view'],['合作约定','/static/execution/contracts.html'],['访问授权','/static/execution/index.html?tab=grant']])}</div>`;}
+<p class="report-disclosure">此页将样例条款解析成可视化策略草案；授权拦截和执行路径为本地演示，不签发真实授权或读取医疗数据。</p></div>`;}
 function statusText(status){return({pending:'待执行',running:'执行中',waiting:'等待源数据',retrying:'自动重试',done:'已完成'})[status]||'待执行';}
 function workflowRows(){return `<ol class="workflow-list" id="workflow-steps">${workflowDefinition.map((step,index)=>{const run=state.workflow.steps[index]||{};return `<li class="workflow-step"><span class="step-no">${String(index+1).padStart(2,'0')}</span><div><strong>${esc(step.name)}</strong><small>${esc(step.detail)}${run.attempt>1?` · 第 ${run.attempt} 次尝试`:''}</small></div><span class="workflow-state ${run.status==='done'?'done':run.status==='running'?'running':['waiting'].includes(run.status)?'waiting':run.status==='retrying'?'retry':''}">${statusText(run.status)}${run.duration?` · ${run.duration} ms`:''}</span><details><summary>步骤详情</summary>${esc(step.description)}；当前状态：${esc(statusText(run.status))}；耗时为演示值。</details></li>`;}).join('')}</ol>`;}
 function orchestrationStage(){return `<div class="stage-content">${header(4,'编排与智能调度','需求确认后生成读取、关联、计算、脱敏交付步骤；未就绪时等待，失败时按原步骤重试。')}
 <div class="workflow-head"><div><strong>本次回答共 4 个步骤</strong><br><small>${state.workflow.complete?`流程完成 · 演示总耗时 ${state.workflow.elapsed} ms`:state.workflow.running?'流程运行中 · 展示节点状态和演示耗时':'等待确认需求并生成执行计划'}</small></div><div class="workflow-controls"><select id="workflow-mode" aria-label="选择执行演示场景"><option value="normal" ${state.workflow.mode==='normal'?'selected':''}>正常完成</option><option value="wait" ${state.workflow.mode==='wait'?'selected':''}>源数据未就绪后恢复</option><option value="retry" ${state.workflow.mode==='retry'?'selected':''}>中间步骤失败后重试</option></select><button class="action-button primary" id="run-workflow" data-action="run-workflow" ${state.workflow.running?'disabled':''}>${state.workflow.running?'执行中…':'确认需求并编排'}</button></div></div>
-${workflowRows()}<p class="report-disclosure">步骤状态和耗时在本页使用合成演示；实际执行、等待和重试记录请打开平台运行流程。</p>${platformLinks([['方案与执行流程','/static/execution/index.html?tab=workflow'],['运行证据','/static/execution/index.html?tab=run']])}</div>`;}
+${workflowRows()}<p class="report-disclosure">步骤状态和耗时来自本演示的模拟运行。</p></div>`;}
 const feedbackLabels=['注入源端变更','检测语义偏差','定位下游视图','局部调整规则','保存适配草案'];
 function feedbackStage(){const f=state.feedback;return `<div class="stage-content">${header(5,'多技术协同与运行反馈','从源端变化触发语义校验和血缘影响分析，再局部调整、版本回写，并查询全程证据。')}
 <div class="feedback-flow" aria-label="变更反馈步骤">${feedbackLabels.map((label,index)=>{const done=index<f.phase||(f.complete&&index<5),current=f.running&&index===f.phase;return `<div class="feedback-node ${done?'done':''} ${current?'current':''}"><small>0${index+1} · ${done?'完成':current?'处理中':'待执行'}</small><strong>${esc(label)}</strong></div>`;}).join('')}</div>
 <p class="report-disclosure">反馈链路使用本地合成事件演示。完成后可展开访问、拦截、处置与计量记录。</p>
 <div class="stage-actions"><button class="action-button primary" data-action="run-feedback" ${f.running?'disabled':''}>${f.running?'正在处理…':f.complete?'重新演示变更处置':'注入变更并完成局部处置'}</button><button class="action-button" data-action="query-evidence">${state.evidenceVisible?'刷新证据链':'查询全程证据链'}</button><button class="action-button" data-action="select-object" data-object="evidence">查看证据链对象</button></div>
 ${state.evidenceVisible?renderEvidence():`<div class="evidence-empty">查询证据链后，访问放行、跨用途 / 超期拦截、变更处置和资源计量记录会汇总显示在这里。</div>`}
-${platformLinks([['元数据事件','/static/platform/events.html'],['偏差校准','/static/management/reconciliation.html'],['运行证据','/static/execution/index.html?tab=run']])}</div>`;}
+</div>`;}
 function renderEvidence(){if(!state.events.length)return '<div class="evidence-empty">目前没有本地演示事件。先运行访问校验、执行编排或变更处置，再查询证据链。</div>';return `<table class="evidence-table"><thead><tr><th>时间</th><th>类型</th><th>事件</th><th>结果</th></tr></thead><tbody>${state.events.map(event=>`<tr><td>${esc(event.time)}</td><td><span class="event-tag ${event.kind==='拦截'?'block':event.kind==='变更'?'change':event.kind==='放行'?'ok':''}">${esc(event.kind)}</span></td><td>${esc(event.detail)}</td><td>${esc(event.result)}</td></tr>`).join('')}</tbody></table>`;}
 function stageHtml(){return({sources:sourcesStage,semantics:semanticStage,virtual:virtualStage,orchestration:orchestrationStage,feedback:feedbackStage}[state.stage]||sourcesStage)();}
 function renderStage(){refreshGuide();const panel=$('#stage-panel');if(!panel)return;panel.innerHTML=stageHtml()+caseContent(state.stage,state)+`<div class="case-navigation"><button class="action-button" data-action="case-prev" ${state.stage==='sources'?'disabled':''}>上一步</button><span>阶段 ${stages.findIndex(s=>s.id===state.stage)+1} / 5</span><button class="action-button primary" data-action="case-next" ${state.stage==='feedback'?'disabled':''}>下一步</button></div>`;panel.onclick=handleAction;panel.oninput=event=>{if(event.target.id==='contract-text'){state.contractText=event.target.value;state.policy=null;state.policyResult=null;state.accessChecks={};state.workflow.complete=false;state.completedModes.clear();state.feedback.complete=false;refreshGuide();const preview=$('.policy-preview');if(preview)preview.innerHTML='<h3>合同已修改</h3><p>请重新生成策略并检查合规访问。</p>';}};panel.onchange=event=>{if(event.target.id==='workflow-mode')state.workflow.mode=event.target.value;if(event.target.id==='sensitivity')state.sensitivity=event.target.value;};renderObjectRail();}

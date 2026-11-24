@@ -1,7 +1,17 @@
+import {workspaceFor,workspaceReturn} from '/static/shared/workspaces.js?v=0.1.46';
 const $=selector=>document.querySelector(selector);
 const query=new URLSearchParams(location.search);
 const loginForm=$('#login-form'),registerForm=$('#register-form'),changeForm=$('#change-form');
-const returnTo=(()=>{const value=query.get('return')||'/static/portal/index.html?page=home';return value.startsWith('/')&&!value.startsWith('//')?value:'/static/portal/index.html?page=home';})();
+const area=workspaceFor(location.pathname),returnTo=workspaceReturn(location);
+if(area==='user')document.body.classList.add('fabric-auth');
+const name={user:'用户工作台',admin:'管理后台',showcase:'课题展示'}[area];
+document.title='登录'+name+' · 数据编织平台';
+$('#login-title').textContent='登录'+name;
+$('#login-switch').hidden=area!=='user';
+if(area!=='user'){
+ $('#login-switch').hidden=true;
+ $('.intro').textContent=area==='admin'?'使用平台账户登录，管理操作按账户权限开放。':'使用平台账户登录，打开四个课题的独立演示。';
+}
 let account='';
 
 async function request(path,body){
@@ -15,7 +25,7 @@ function changeMode(username){
  account=username;loginForm.hidden=true;registerForm.hidden=true;$('#login-switch').hidden=true;$('#register-switch').hidden=true;changeForm.hidden=false;$('#new-password').focus();
 }
 function registerMode(){loginForm.hidden=true;changeForm.hidden=true;$('#login-switch').hidden=true;registerForm.hidden=false;$('#register-switch').hidden=false;$('#register-display-name').focus();}
-function loginMode(){registerForm.hidden=true;changeForm.hidden=true;$('#register-switch').hidden=true;loginForm.hidden=false;$('#login-switch').hidden=false;$('#username').focus();}
+function loginMode(){registerForm.hidden=true;changeForm.hidden=true;$('#register-switch').hidden=true;loginForm.hidden=false;$('#login-switch').hidden=area!=='user';$('#username').focus();}
 function go(){location.replace(returnTo);}
 
 $('#show-register').addEventListener('click',registerMode);

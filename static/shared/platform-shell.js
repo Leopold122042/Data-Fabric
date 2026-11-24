@@ -11,21 +11,20 @@
  document.head.append(motionStyle);
  import('/static/shared/motion.js').catch(()=>{});
  const path=location.pathname;
- if((path==='/'||path==='/static/index.html')&&!location.hash){location.replace('/static/portal/index.html');return;}
  const sidebar=document.querySelector('.mf-sidebar');if(!sidebar)return;
  const intakeDock=document.querySelector('#intake-flow-dock');
- const access=await import('/static/shared/access.js?v=0.1.28');
- const {visibleNavigation}=await import('/static/shared/access-model.js?v=0.1.28');
+ const access=await import('/static/shared/access.js?v=0.1.45');
+ const {visibleNavigation}=await import('/static/shared/access-model.js?v=0.1.45');
  const {icon}=await import('/static/shared/icons.js');
  access.bindRole();
  sidebar.replaceChildren();sidebar.classList.add('platform-sidebar');sidebar.setAttribute('aria-label','平台导航');
 
  const brand=document.createElement('a');
- brand.className='platform-brand';brand.href='/static/portal/index.html';brand.setAttribute('aria-label','返回 数据编织平台 工作台');
+ brand.className='platform-brand';brand.href='/admin';brand.setAttribute('aria-label','返回管理后台');
  const brandMark=document.createElement('span');brandMark.className='platform-brand-mark';brandMark.setAttribute('aria-hidden','true');
  for(const height of [13,22,17]){const bar=document.createElement('i');bar.style.height=height+'px';brandMark.append(bar);}
  const brandCopy=document.createElement('span');brandCopy.className='platform-brand-copy';
- const brandName=document.createElement('strong');brandName.textContent='数据编织平台';
+ const brandName=document.createElement('strong');brandName.textContent='管理后台';
  const brandSub=document.createElement('small');brandSub.textContent='医疗数据编织平台';
  brandCopy.append(brandName,brandSub);brand.append(brandMark,brandCopy);sidebar.append(brand);
 
@@ -45,7 +44,7 @@
  for(const [name,items] of groups){
   if(name==='工作台'&&items.length===1){
    const [label,target,resource]=items[0];
-   const workbench=navLink('驾驶舱总览','/static/portal/cockpit.html',resource);
+   const workbench=navLink(label,target,resource);
    workbench.className='platform-nav-root';
    workbench.prepend(icon(groupIcons[name]));
    navHost.append(workbench);
@@ -67,7 +66,19 @@
  const foot=document.createElement('div');foot.className='platform-sidebar-foot';
  const demoBadge=document.createElement('span');demoBadge.className='platform-demo-badge';demoBadge.textContent='管理工作区';
  const demoCopy=document.createElement('small');demoCopy.textContent='数据资产 · 需求交付 · 安全治理';
- const userLink=navLink('用户工作台','/static/portal/index.html','overview');userLink.className='platform-user-entry';userLink.prepend(icon('users'));foot.append(userLink,demoBadge,demoCopy);sidebar.append(foot);
+ if(permissions.principal?.can_manage_accounts){
+  const accounts=navLink('账户权限','/admin/accounts','account');
+  accounts.className='platform-user-entry';
+  accounts.prepend(icon('users'));
+  foot.append(accounts);
+ }
+ const logout=document.createElement('button');
+ logout.type='button';logout.className='mf-button mf-button-secondary';logout.textContent='退出登录';
+ logout.onclick=async()=>{
+  try{await fetch('/api/auth/logout',{method:'POST',credentials:'same-origin'});}
+  finally{location.replace('/admin/login');}
+ };
+ foot.append(demoBadge,demoCopy,logout);sidebar.append(foot);
 
  function highlight(){
   const current=new URL(location.href);

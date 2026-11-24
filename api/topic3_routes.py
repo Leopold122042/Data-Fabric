@@ -46,6 +46,12 @@ def create_router(runtime, identity):
             raise DomainError('请求必须为JSON对象')
         return value
 
+    @router.get('/ai/providers')
+    def ai_providers(request: Request):
+        principal(request, 'demand.understand')
+        from management.intake.ollama import IntakeLLM
+        return IntakeLLM.provider_options()
+
     @router.get('/cases')
     def cases(request: Request):
         user = principal(request, 'service.read')

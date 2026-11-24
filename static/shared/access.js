@@ -1,13 +1,13 @@
-import {actionAllowed,canRead,level,pageResource,roleNames} from './access-model.js?v=identity-20261118';
+import {loginURL} from './workspaces.js?v=0.1.45';
+import {actionAllowed,canRead,level,pageResource,roleNames} from './access-model.js?v=0.1.45';
 export {actionAllowed,canRead,level,pageResource,roleNames};
 let snapshot={principal:null,resources:{},actions:{}},pending;
 export const currentAccess=()=>snapshot;
 export function role(){return snapshot.principal?.role||'requester';}
 export function headers(extra={}){return {...extra};}
 function redirectLogin(){
- if(location.pathname==='/static/portal/login.html')return;
- const target=location.pathname+location.search;
- location.replace('/static/portal/login.html?return='+encodeURIComponent(target));
+ if(location.pathname.endsWith('/login')||location.pathname==='/static/portal/login.html')return;
+ location.replace(loginURL(location));
 }
 export function ready(){
  if(!pending)pending=(async()=>{

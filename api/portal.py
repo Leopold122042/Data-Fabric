@@ -67,9 +67,9 @@ def create_router(runtime, identity):
         doris=runtime.management.catalog.doris
         if level==4 and doris:
             for source,alias,service_id in doris.services():
-                database, table=source.tables[alias]
-                registered.append({'id':service_id,'name':f'{source.name} · {table} 记录数',
-                    'category':'Doris 实时服务','description':f'实时统计 {database}.{table} 的记录数，少于 5 条时隐藏。',
+                _, table=source.tables[alias]
+                registered.append({'id':service_id,'name':f'{table} 记录数',
+                    'category':'实时统计','description':'实时统计记录数，少于 5 条时隐藏。',
                     'status':'可调用' if doris.status(source.id)=='connected' else '待连接',
                     'input':'无参数','live_call':True})
         minimum={'fn.age':3,'fn.date_range':1,'fn.stats':1,'fn.abnormal':1,

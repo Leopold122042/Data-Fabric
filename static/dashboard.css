@@ -101,9 +101,9 @@ body.mf-app.dashboard-page{--mf-sidebar-width:180px;--dash-blue:#327fce;--dash-l
 .dashboard-source:hover{background:#edf7f5;border-color:#b7ded5}
 .dashboard-note{font-size:10px}
 .dashboard-business{display:grid;grid-template-columns:1fr 1fr;gap:7px;flex:1}
-.dashboard-business a{display:flex;align-items:center;gap:6px;min-width:0;padding:9px;background:var(--tone-soft);color:var(--tone);border:1px solid transparent;border-radius:7px;transition:border-color 160ms}
-.dashboard-page .dashboard-business a:hover{border-color:var(--tone);text-decoration:none}
-.dashboard-business a>.ui-icon{width:15px;height:15px}
+.dashboard-business :is(a,div){display:flex;align-items:center;gap:6px;min-width:0;padding:9px;background:var(--tone-soft);color:var(--tone);border:1px solid transparent;border-radius:7px;transition:border-color 160ms}
+.dashboard-page .dashboard-business :is(a,div):hover{border-color:var(--tone);text-decoration:none}
+.dashboard-business :is(a,div)>.ui-icon{width:15px;height:15px}
 .dashboard-business span{font-size:11px;white-space:nowrap}
 .dashboard-business strong{font-size:22px;margin-left:auto;line-height:1.2}
 .dashboard-chips{display:flex;gap:6px;flex-wrap:wrap}
@@ -212,7 +212,7 @@ body.mf-app.dashboard-page{--mf-sidebar-width:180px;--dash-blue:#327fce;--dash-l
  .dashboard-records{gap:10px}.dashboard-event-list .dashboard-row{padding:14px}.dashboard-event-list .dashboard-row>.dashboard-icon{width:38px;height:40px}
  .dashboard-badge{font-size:11px;padding:4px 8px}.dashboard-row-meta{margin-top:9px}.dashboard-row-meta .dashboard-muted,.dashboard-event-overview>.dashboard-muted{font-size:11px}
  .dashboard-sources{gap:8px;grid-template-columns:repeat(5,1fr)}.dashboard-source{gap:9px;padding:10px}.dashboard-source>.dashboard-icon{width:32px;height:32px}.dashboard-source>.dashboard-icon .ui-icon{width:25px;height:25px}.dashboard-source b{font-size:13px}.dashboard-source>.dashboard-badge{font-size:11px}
- .dashboard-business a{padding:14px;gap:10px}.dashboard-business span{font-size:13px}.dashboard-business strong{font-size:27px}.dashboard-business a>.ui-icon{width:20px;height:20px}
+ .dashboard-business :is(a,div){padding:14px;gap:10px}.dashboard-business span{font-size:13px}.dashboard-business strong{font-size:27px}.dashboard-business :is(a,div)>.ui-icon{width:20px;height:20px}
  .dashboard-lifecycle{padding:13px 16px;gap:10px}.dashboard-segments{height:14px}
  .dashboard-usage-row{gap:24px;padding:6px 12px;min-height:0}.dashboard-usage-head{padding:9px 12px;font-size:12px}.dashboard-usage-demand b{font-size:14px;line-height:1.5}.dashboard-usage-service{font-size:13px}.dashboard-usage-demand>.dashboard-muted{font-size:12px;margin-top:4px}.dashboard-usage-state{gap:6px}
  .dashboard-order-list{gap:12px}.dashboard-order{padding:15px 18px;gap:8px}.dashboard-order-head>b{font-size:14px}.dashboard-order-head>.dashboard-badge{font-size:11px;padding:3px 7px}.dashboard-order>p{font-size:12px}
@@ -229,7 +229,7 @@ body.mf-app.dashboard-page{--mf-sidebar-width:180px;--dash-blue:#327fce;--dash-l
  .dashboard-metric strong{font-size:25px}.dashboard-metric small{font-size:9px}
  .dashboard-bottom{grid-template-columns:1fr .85fr 1.15fr;gap:10px}.dashboard-bottom .dashboard-panel>header{gap:5px}.dashboard-bottom h2{font-size:13px;gap:6px}.dashboard-bottom h2 .dashboard-icon{width:22px;height:22px}.dashboard-bottom .dashboard-action{font-size:10px;padding:3px 5px}.dashboard-bottom .dashboard-action .ui-icon{width:11px;height:11px}
  .dashboard-bottom .dashboard-row>.dashboard-icon{width:25px;height:27px}.dashboard-bottom .dashboard-row{gap:7px;padding:6px}.dashboard-bottom .dashboard-row p{-webkit-line-clamp:1}
- .dashboard-business a{padding:6px;gap:4px}.dashboard-business span{font-size:10px}.dashboard-business strong{font-size:20px}.dashboard-business .ui-icon{display:none}
+ .dashboard-business :is(a,div){padding:6px;gap:4px}.dashboard-business span{font-size:10px}.dashboard-business strong{font-size:20px}.dashboard-business .ui-icon{display:none}
  .dashboard-grid>section:nth-last-child(-n+2) .dashboard-row p{-webkit-line-clamp:1}
  .dashboard-grid>section:nth-last-child(-n+2) .dashboard-row{padding:6px 8px;min-height:0}
  .dashboard-order{padding:7px 9px;gap:3px}.dashboard-service-card{padding:9px}.dashboard-service-card>div{gap:6px}.dashboard-service-card .dashboard-icon{width:28px;height:28px}

@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from urllib.parse import quote
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -84,20 +85,21 @@ def create_app(control_root=None,start_runtime=True,simulate=None,identity=None)
     async def account_gate(request:Request,call_next):
         path=request.url.path
         test_client=bool(request.client and request.client.host=='testclient')
-        login_page='/static/portal/login.html'
         public_api=path in ('/api/health','/api/auth/login','/api/auth/register','/api/auth/logout','/api/auth/password','/api/auth/session')
         if not test_client and not public_api:
             user=app.state.accounts.principal(request.cookies.get('mf_session'))
             if path.startswith('/api/') and not user:
                 return JSONResponse({'error':'请先登录平台'},status_code=401,headers={'Cache-Control':'no-store'})
-            if (path=='/' or path.endswith('.html')) and not user and path!=login_page:
-                from urllib.parse import quote
+            is_page=platform_routes.is_workspace_page(path)
+            is_login=path.rstrip('/') in platform_routes.WORKSPACE_LOGINS
+            if is_page and not is_login and (not user or user.get('must_change_password')):
                 target=path+('?' + request.url.query if request.url.query else '')
-                return RedirectResponse(login_page+'?return='+quote(target,safe=''),status_code=303)
-            if user and user.get('must_change_password') and (path.startswith('/api/') and path not in ('/api/auth/password','/api/auth/logout','/api/auth/session')):
+                login_page=platform_routes.workspace_login(path)
+                change='&change=1' if user else ''
+                return RedirectResponse(login_page+'?return='+quote(target,safe='')+change,
+                                        status_code=303,headers={'Cache-Control':'no-store'})
+            if user and user.get('must_change_password') and path.startswith('/api/'):
                 return JSONResponse({'error':'首次登录后请先修改临时密码'},status_code=403,headers={'Cache-Control':'no-store'})
-            if user and user.get('must_change_password') and path.endswith('.html') and path not in (login_page,):
-                return RedirectResponse(login_page+'?change=1',status_code=303)
             if user and int(user.get('level',1))<4:
                 legacy_private=path.startswith(('/api/external/','/api/patients','/api/search','/api/query/',
                     '/api/services/','/api/data-services','/api/circulation/','/api/tasks','/api/security/'))

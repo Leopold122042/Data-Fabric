@@ -19,6 +19,7 @@ def create_router(runtime,identity):
                 raise DomainError('请求必须为有效JSON对象')
             if not isinstance(body,dict):raise DomainError('请求必须为JSON对象')
     router=APIRouter(prefix='/api/management',tags=['A 管理域'],dependencies=[Depends(json_object)])
+    query_actions=APIRouter(prefix='/api/portal',tags=['用户工作台'],dependencies=[Depends(json_object)])
     m=runtime.management
     def who(request,roles=None,action=None):
         user=identity.principal(request)
@@ -334,6 +335,7 @@ def create_router(runtime,identity):
         user=who(request,action='demand.gaps');own('demand',oid,user);return m.intake.gaps(oid)
 
     @router.post('/demands/{oid}/confirm')
+    @query_actions.post('/query-demands/{oid}/confirm')
     async def confirm(oid:str,request:Request):
         user=who(request,action='demand.confirm');own('demand',oid,user);body=await request.json()
         flow=max((x for x in m.store.list('intake_flow') if x.get('demand_id')==oid),key=lambda x:x['updated_at'],default=None)
@@ -544,6 +546,7 @@ def create_router(runtime,identity):
                 'note':'仅生成待确认链路；未生成任务规格、未执行查询、未触发服务、未授予权限。'}
 
     @router.post('/intake/flows/{flow_id}/clarify')
+    @query_actions.post('/queries/{flow_id}/clarify-legacy')
     async def clarify_intake_flow(flow_id:str,request:Request):
         user=who(request,action='demand.understand')
         flow=m.store.require('intake_flow',flow_id);own('demand',flow['demand_id'],user)
@@ -656,9 +659,10 @@ def create_router(runtime,identity):
                 'note':'已按勾选结果固定字段映射并重新检查目录和关联条件；若字段组合不能安全关联，会明确说明且不会生成部分查询。'}
 
     @router.post('/intake/flows/{flow_id}/confirm')
+    @query_actions.post('/queries/{flow_id}/confirm-chain')
     async def confirm_flow(flow_id:str,request:Request):
         user=who(request,action='demand.understand')
-        flow=m.store.require('intake_flow',flow_id)
+        flow=m.store.require('intake_flow',flow_id);own('demand',flow['demand_id'],user)
         needs_cloud_session=any(str(resource.get('source_id','')).startswith('cloud-') or
                                 resource.get('source_id')=='connected-cloud' for resource in flow.get('resources',[]))
         external_catalog=intake_flow.external_catalog(request) if needs_cloud_session else ()
@@ -803,6 +807,7 @@ def create_router(runtime,identity):
                 'note':'新规格和待确认方案已留痕；仅创建目录逻辑视图与固定方案，未读取源数据行、未执行查询、未授予权限。'}
 
     @router.post('/intake/flows/{flow_id}/confirm-execution-plan')
+    @query_actions.post('/queries/{flow_id}/confirm-plan')
     async def confirm_intake_execution_plan(flow_id:str,request:Request):
         user=who(request,action='plan.confirm')
         flow=m.store.require('intake_flow',flow_id);own('demand',flow['demand_id'],user)
@@ -835,6 +840,7 @@ def create_router(runtime,identity):
         return {'flow':visible,'plan':plan,'note':'方案已确认；需求方可提交授权申请，平台方也可直接授权。查询仍需单独确认提交。'}
 
     @router.post('/intake/flows/{flow_id}/request-execution-authorization')
+    @query_actions.post('/queries/{flow_id}/request-authorization')
     async def request_intake_execution_authorization(flow_id:str,request:Request):
         user=who(request,roles=('requester',),action='demand.health_request')
         flow=m.store.require('intake_flow',flow_id);own('demand',flow['demand_id'],user)
@@ -992,28 +998,37 @@ def create_router(runtime,identity):
                     '并登记本次授权；查询尚未执行，请单独确认提交。'}
 
     @router.post('/intake/flows/{flow_id}/submit-query')
+    @query_actions.post('/queries/{flow_id}/submit')
     async def submit_intake_query(flow_id:str,request:Request):
         user=who(request,roles=('requester','platform'),action='plan.run')
-        flow=m.store.require('intake_flow',flow_id);own('demand',flow['demand_id'],user)
         body=await request.json()
-        if body.get('expected_version')!=flow['version']:raise DomainError('链路版本已变化，请刷新后重试',409)
-        retrying=flow.get('state')=='query_failed'
-        if flow.get('state')!='awaiting_query_submission' and not retrying:
-            raise DomainError('当前流程没有待提交或可重试的受控查询',409)
-        if body.get('confirmed') is not True:raise DomainError('需明确确认后才会提交查询')
-        if not flow.get('execution_authorized') or not flow.get('grant_id'):
-            raise DomainError('尚未登记本次执行授权，不能提交查询',403)
-        authorization_request=flow.get('authorization_request') or {}
-        platform_direct=(user['role']=='platform' and authorization_request.get('direct_platform_approval') is True
-            and authorization_request.get('requester_id')==user['id'])
-        if user['role']!='requester' and not platform_direct:
-            raise DomainError('只有本次授权申请人或直接批准本次查询的平台方可提交',403)
-        if user['role']=='requester' and authorization_request.get('requester_id') not in (None,user['id']):
-            raise DomainError('当前账号不是本次授权申请人，不能提交查询',403)
-        plan=runtime.execution.get(flow.get('execution_plan_id',''),flow.get('execution_plan_version'))
-        runtime.execution.current(plan)
-        require_plan_scope(user,runtime,plan)
-        with runtime.execution.lock:
+        with runtime.execution.lock,m.store.lock:
+            flow=m.store.require('intake_flow',flow_id);own('demand',flow['demand_id'],user)
+            if body.get('expected_version')!=flow['version']:raise DomainError('链路版本已变化，请刷新后重试',409)
+            retrying=flow.get('state')=='query_failed'
+            if flow.get('state')!='awaiting_query_submission' and not retrying:
+                raise DomainError('当前流程没有待提交或可重试的受控查询',409)
+            if body.get('confirmed') is not True:raise DomainError('需明确确认后才会提交查询')
+            if not flow.get('execution_authorized') or not flow.get('grant_id'):
+                raise DomainError('尚未登记本次执行授权，不能提交查询',403)
+            authorization_request=flow.get('authorization_request') or {}
+            requester_id=authorization_request.get('requester_id')
+            if authorization_request.get('authorization_basis')=='account_level':
+                if not retrying or requester_id!=user['id']:
+                    raise DomainError('只有原提交账号可重试此查询',403)
+                grant=runtime.execution.store.require('grant',flow['grant_id'])
+                if grant.get('authorization_basis')!='account_level' or grant.get('subject')!=user['id']:
+                    raise DomainError('本次查询缺少匹配的账户等级授权',403)
+                if grant.get('account_level')!=level_for(user):
+                    raise DomainError('账户权限等级已变化，请按当前权限重新发起查询并确认意图',403)
+            elif user['role']=='platform':
+                if authorization_request.get('direct_platform_approval') is not True or requester_id!=user['id']:
+                    raise DomainError('只有本次授权申请人或直接批准本次查询的平台方可提交',403)
+            elif requester_id not in (None,user['id']):
+                raise DomainError('当前账号不是本次授权申请人，不能提交查询',403)
+            plan=runtime.execution.get(flow.get('execution_plan_id',''),flow.get('execution_plan_version'))
+            runtime.execution.current(plan)
+            require_plan_scope(user,runtime,plan)
             if retrying:
                 prior=runtime.execution.store.require('job',flow.get('job_id',''))
                 if (prior.get('state') not in ('failed','interrupted','cancelled')
@@ -1044,6 +1059,7 @@ def create_router(runtime,identity):
                 steps.append(item)
             saved=m.store.save('intake_flow',flow_id,{**flow,'steps':steps,'state':'query_queued',
                 'job_id':job['id'],'job_state':job['state'],'execution_submitted_by':user['id'],
+                'query_error':None,'delivery_id':None,
                 'execution_submitted_at':job.get('created_at') or job['updated_at']},flow['version'],user['id'],
                 '用户在原方案和授权范围内重试受控查询' if retrying else '用户单独确认并提交受控查询')
         saved=intake_flow.reconcile_execution(saved,user['id'])
@@ -1051,6 +1067,7 @@ def create_router(runtime,identity):
                 'note':'受控查询已在原授权范围内'+('重试' if retrying else '提交')+'；结果将在此流程进度中更新。'}
 
     @router.post('/intake/flows/{flow_id}/read-delivery')
+    @query_actions.post('/queries/{flow_id}/result')
     async def read_intake_delivery(flow_id:str,request:Request):
         user=who(request,action='delivery.read')
         flow=m.store.require('intake_flow',flow_id);own('demand',flow['demand_id'],user)
@@ -1128,4 +1145,7 @@ def create_router(runtime,identity):
     def events(request:Request,after:int=0):
         user=who(request);require_resource(user,'event');return {'items':m.store.events(after)}
 
-    return router
+    routes=APIRouter()
+    routes.include_router(router)
+    routes.include_router(query_actions)
+    return routes

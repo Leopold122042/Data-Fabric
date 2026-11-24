@@ -2,7 +2,12 @@ import {icon} from './shared/icons.js';
 import {distribution,format,stagePresentation,authorizationSummary} from './dashboard-model.js';
 
 export const node=(tag,text='',cls='')=>{const el=document.createElement(tag);el.textContent=text;el.className=cls;return el;};
-export const link=(text,url,cls='')=>{const el=node('a',text,cls);el.href=url;return el;};
+export function link(text,target,cls=''){
+  const el=node(target?(typeof target==='function'?'button':'a'):'div',text,cls);
+  if(typeof target==='function'){el.type='button';el.onclick=target;}
+  else if(target)el.href=target;
+  return el;
+}
 export function iconBox(name,tone='blue'){const el=node('span','','dashboard-icon');el.dataset.tone=tone;el.append(icon(name));return el;}
 export function action(label,url,iconName='arrow'){
   const el=url?link('',url,'dashboard-action'):node('button','','dashboard-action');
@@ -23,7 +28,7 @@ export function row(parent,title,detail,url,label='查看',symbol='file',tone='b
 }
 export function metric(parent,label,value,url,note='当前记录',symbol='chart',tone='blue'){
   const el=link('',url,'dashboard-metric'),body=node('div','','dashboard-metric-body');el.dataset.tone=tone;
-  body.append(node('span',label),node('strong',format(value)),node('small',note));el.append(iconBox(symbol,tone),body,icon('arrow','dashboard-metric-arrow'));parent.append(el);
+  body.append(node('span',label),node('strong',format(value)),node('small',note));el.append(iconBox(symbol,tone),body);if(url)el.append(icon('arrow','dashboard-metric-arrow'));parent.append(el);
 }
 
 // Values stay visible. The tooltip supplements the chart for pointer and keyboard users.

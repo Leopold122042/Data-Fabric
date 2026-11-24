@@ -1,4 +1,4 @@
-import {placeSources, routeSources, softenPath} from './topic1-layout.js?v=0.1.42';
+import {focusLayout, overviewLayout, seededRandom} from './topic1-layout.js?v=0.1.44';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -21,8 +21,22 @@ const openalexLabels = {
   openalex_references: '引用关系', openalex_yearly: '年度统计'
 };
 const registered = relation => relation.kind === 'confirmed' || relation.kind === 'reference';
-const sourceLabel = source => sourceNames[String(source).toLowerCase()] || source;
+function sourceLabel(source) {
+  const id = String(source ?? '').toLowerCase();
+  return Object.hasOwn(sourceNames, id) ? sourceNames[id] : source || '未登记来源';
+}
 const sessions = new WeakMap();
+const medicalSources = new Set(['his', 'lis', 'pacs', 'iot', 'emr', 'src-clinical-operations']);
+const galaxyHues = [187, 35, 213, 173, 46, 202];
+
+function galaxyFor(source) {
+  const id = String(source ?? '').toLowerCase();
+  if (medicalSources.has(id)) return {id: 'group:medical', name: '合成医疗演示', hue: galaxyHues[0]};
+  if (id === 'doris-nju') return {id: 'source:doris-nju', name: sourceLabel(source), hue: galaxyHues[1]};
+  if (id === 'openalex') return {id: 'source:openalex', name: sourceLabel(source), hue: galaxyHues[2]};
+  const hash = [...id].reduce((value, char) => (value * 31 + char.codePointAt(0)) >>> 0, 0);
+  return {id: 'source:' + id, name: sourceLabel(source), hue: galaxyHues[3 + hash % 3]};
+}
 
 export async function renderKnowledgeGraph(host) {
   if (!host) return;
@@ -32,7 +46,7 @@ export async function renderKnowledgeGraph(host) {
   const session = {controller: new AbortController()};
   sessions.set(host, session);
   const {signal} = session.controller;
-  host.innerHTML = '<div class="kg-loading" role="status">正在读取目录并整理字段关联…</div>';
+  host.innerHTML = '<div class="kg-loading" role="status">正在载入星图…</div>';
 
   try {
     const response = await fetch('/api/portal/catalog?include_relations=true', {
@@ -41,10 +55,15 @@ export async function renderKnowledgeGraph(host) {
     if (!response.ok) throw new Error('目录接口返回 ' + response.status);
     const catalog = await response.json();
     if (signal.aborted) return;
-    const tables = (catalog.tables || []).map(table => {
+    const catalogTables = catalog.tables || [];
+    const maxFields = catalogTables.reduce((max, table) => Math.max(max, table.fields.length), 1);
+    const tables = catalogTables.map(table => {
       const shortName = (table.physical_name || table.name).replace(/^cdm\./, '').split('(')[0];
       const display = table.label && table.label !== table.name ? table.label : openalexLabels[table.name] || shortName;
-      return {...table, shortName, display, fieldsById: new Map(table.fields.map(field => [field.id, field]))};
+      // Scale the visible area with field count while keeping the smallest planets clickable.
+      const planetDiameter = Math.sqrt(10 ** 2 + (26 ** 2 - 10 ** 2) * table.fields.length / maxFields);
+      return {...table, shortName, display, planetDiameter, galaxy: galaxyFor(table.source),
+        fieldsById: new Map(table.fields.map(field => [field.id, field]))};
     }).sort((a, b) => sourceRank(a.source) - sourceRank(b.source)
       || String(a.source).localeCompare(String(b.source)) || a.name.localeCompare(b.name, 'zh-CN'));
     const tableMap = new Map(tables.map((table, index) => [table.id, {...table, index}]));
@@ -71,60 +90,65 @@ function sourceRank(source) {
 }
 
 function mountGraph(host, session, tables, relations) {
-  if (!tables.length) {
-    host.innerHTML = '<p class="kg-empty">当前账户没有可查看的逻辑表。</p>';
-    return;
-  }
   const preferred = tables.find(table => table.source === 'his' && table.shortName === 'patient');
   const state = {tables, relations, table: preferred || tables[0], fieldId: null,
-    search: '', source: '', filter: 'all', mode: 'overview', sourceLink: null};
+    search: '', source: '', filter: 'all', mode: 'overview', overviewFilters: {}, details: true};
   const sources = [...new Set(tables.map(table => table.source))];
-  const confirmed = relations.filter(registered).length;
-  host.innerHTML = `<section class="kg-panel" aria-labelledby="kg-title">
-    <header class="kg-heading"><div><p class="kg-eyebrow">数据目录与字段关系</p><h2 id="kg-title">字段与逻辑表知识图谱</h2>
-      <p class="kg-overview-help">每个色块对应一个数据源。点击跨来源连线，查看相连的表和字段。</p>
-      <p class="kg-focus-help">点击表查看字段，点击字段查看它连接的表。总图中同一对表共用一条线。</p></div>
-      <div class="kg-counts"><strong>${tables.length}</strong><span>张表</span><i></i>
-        <strong>${confirmed}</strong><span>条已登记关系</span><i></i>
-        <strong>${relations.length - confirmed}</strong><span>组候选</span></div>
-    </header>
+  host.innerHTML = `<section class="kg-panel" aria-label="数据世界">
     <div class="kg-toolbar">
       <div class="kg-modes" role="group" aria-label="图谱视图">
         <button type="button" data-graph-mode="overview">全部表关系</button>
-        <button type="button" data-graph-mode="focus">选中表关系</button>
+        <button type="button" data-graph-mode="focus" ${tables.length ? '' : 'disabled'}>选中表关系</button>
       </div>
       <label>来源<select class="kg-search" data-graph-source>
         <option value="">全部来源</option>${sources.map(source => `<option value="${esc(source)}">${esc(sourceLabel(source))}</option>`).join('')}
       </select></label>
-      <label>连线<select class="kg-search" data-graph-filter>
+      <label>查找<input class="kg-search" data-graph-search type="search" placeholder="表名、字段或来源"></label>
+      <label class="kg-relation-filter">连线<select class="kg-search" data-graph-filter>
         <option value="all">全部关系</option><option value="registered">已确认与已登记</option>
         <option value="candidates">同名与语义候选</option>
       </select></label>
-      <label>查找<input class="kg-search" data-graph-search type="search" placeholder="表名、字段或来源"></label>
+      <button type="button" class="kg-command" data-graph-details aria-controls="kg-fields">字段详情</button>
+      <p class="kg-counts" aria-live="polite"></p>
     </div>
-    <div class="kg-layout"><div class="kg-graph-scroll" aria-label="逻辑表关系图">
-      <div class="kg-canvas"><svg class="kg-edges" aria-hidden="true"></svg><svg class="kg-source-network" aria-label="来源分区与连接"></svg><div class="kg-source-grid"></div></div>
-    </div><div class="kg-source-link-detail" hidden aria-live="polite"></div><aside class="kg-inspector" aria-live="polite"></aside></div>
-    <footer class="kg-legend">
-      <span><i class="kg-legend-line kg-solid"></i>已确认关联或已登记参照</span>
-      <span><i class="kg-legend-line"></i>同名或语义候选</span>
-      <small>候选线供核对字段口径。跨表查询还需满足平台的关联与权限规则。</small>
-    </footer>
+    <div class="kg-layout"><div class="kg-scene" aria-label="逻辑表星图">
+      <div class="kg-atlas"></div>
+      <footer class="kg-legend">
+        <span><i></i>已确认或已登记</span>
+        <span><i class="kg-legend-candidate"></i>同名或语义候选</span>
+      </footer>
+    </div><aside id="kg-fields" class="kg-inspector" aria-label="字段与关联详情"></aside></div>
   </section>`;
 
   const draw = () => renderGraph(host, state);
   const {signal} = session.controller;
   const search = host.querySelector('[data-graph-search]');
+  const sourceSelect = host.querySelector('[data-graph-source]');
+  const setBrowseFilters = ({source = '', search: term = '', input = term} = {}) => {
+    state.source = source;
+    state.search = term;
+    sourceSelect.value = source;
+    search.value = input;
+  };
+  const switchMode = mode => {
+    if (mode === state.mode) return;
+    if (mode === 'focus') {
+      state.overviewFilters = {source: state.source, search: state.search, input: search.value};
+      setBrowseFilters();
+    } else {
+      setBrowseFilters(state.overviewFilters);
+    }
+    state.mode = mode;
+  };
+
   search.addEventListener('input', () => {
     state.search = search.value.trim().toLowerCase();
-    state.sourceLink = null;
     draw();
   }, {signal});
-  host.querySelector('[data-graph-source]').addEventListener('change', event => {
-    state.source = event.target.value;
-    state.sourceLink = null;
+  sourceSelect.addEventListener('change', () => {
+    state.source = sourceSelect.value;
     const next = tables.find(table => table.source === state.source);
-    if (next && state.table.source !== state.source) {
+    if (state.mode === 'focus' && next && state.table.source !== state.source) {
       state.table = next;
       state.fieldId = null;
     }
@@ -132,66 +156,50 @@ function mountGraph(host, session, tables, relations) {
   }, {signal});
   host.querySelector('[data-graph-filter]').addEventListener('change', event => {
     state.filter = event.target.value;
-    state.sourceLink = null;
     draw();
-  }, {signal});
-  const toggleSourceLink = (route, keepFocus = false) => {
-    const key = route.dataset.sourceLink;
-    state.sourceLink = state.sourceLink === key ? null : key;
-    draw();
-    if (keepFocus) {
-      const replacement = [...host.querySelectorAll('[data-source-link]')]
-        .find(item => item.dataset.sourceLink === key);
-      replacement?.focus({preventScroll: true});
-    } else if (state.sourceLink) {
-      host.querySelector('.kg-source-link-detail').scrollIntoView({block: 'nearest'});
-    }
-  };
-  host.addEventListener('keydown', event => {
-    const route = event.target.closest('[data-source-link]');
-    if (route && (event.key === 'Enter' || event.key === ' ')) {
-      event.preventDefault();
-      toggleSourceLink(route, true);
-    }
   }, {signal});
   host.addEventListener('click', event => {
-    const route = event.target.closest('[data-source-link]');
-    if (route) {
-      toggleSourceLink(route);
-      return;
-    }
-    if (event.target.closest('[data-source-link-close]')) {
-      state.sourceLink = null;
-      draw();
-      return;
-    }
     const mode = event.target.closest('[data-graph-mode]');
     const node = event.target.closest('[data-table-index]');
     const field = event.target.closest('[data-field-index]');
     const related = event.target.closest('[data-related-table]');
+    const details = event.target.closest('[data-graph-details]');
+    const start = node?.querySelector('.kg-orb').getBoundingClientRect();
     if (mode) {
-      state.mode = mode.dataset.graphMode;
+      switchMode(mode.dataset.graphMode);
     } else if (node || related) {
       state.table = tables[Number(node?.dataset.tableIndex ?? related.dataset.relatedTable)];
       state.fieldId = related?.dataset.relatedField || null;
-      state.sourceLink = null;
-      if (related) {
-        state.source = '';
-        state.search = '';
-        search.value = '';
-        host.querySelector('[data-graph-source]').value = '';
-      }
+      switchMode('focus');
+      setBrowseFilters();
     } else if (field) {
       const id = state.table.fields[Number(field.dataset.fieldIndex)]?.id;
       state.fieldId = state.fieldId === id ? null : id;
-      state.mode = 'focus';
+    } else if (details) {
+      state.details = !state.details;
     } else {
       return;
     }
     draw();
+    if (node || related) {
+      const selected = host.querySelector('.kg-planet.is-selected');
+      if (node) {
+        host.querySelector('.kg-toolbar').scrollIntoView({block: 'nearest'});
+        flyToPlanet(start, selected.querySelector('.kg-orb'));
+      }
+      selected.focus({preventScroll: true});
+    } else if (field) {
+      host.querySelector(`[data-field-index="${Number(field.dataset.fieldIndex)}"]`)?.focus({preventScroll: true});
+    }
+  }, {signal});
+  host.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || state.mode !== 'focus' || event.target.matches('input, select')) return;
+    switchMode('overview');
+    draw();
+    host.querySelector('[data-graph-mode="overview"]').focus();
   }, {signal});
   if (globalThis.ResizeObserver) {
-    const panel = host.querySelector('.kg-graph-scroll');
+    const panel = host.querySelector('.kg-scene');
     session.width = panel.clientWidth;
     session.observer = new ResizeObserver(() => {
       if (panel.clientWidth === session.width) return;
@@ -200,42 +208,64 @@ function mountGraph(host, session, tables, relations) {
     });
     session.observer.observe(panel);
   }
+  window.addEventListener('resize', draw, {signal});
   draw();
 }
 
-function buildPairs(relations, visible, focus, fieldId) {
-  const pairs = new Map();
+function neighboursFor(relations, visible, table, fieldId) {
+  const neighbours = new Map();
   for (const relation of relations) {
-    const members = relation.members.filter(member => visible.has(member.table.id));
-    if (fieldId && !members.some(member => member.field.id === fieldId)) continue;
-    const indexes = [...new Set(members.map(member => member.table.index))].sort((a, b) => a - b);
-    for (let i = 0; i < indexes.length; i++) {
-      for (let j = i + 1; j < indexes.length; j++) {
-        const [a, b] = [indexes[i], indexes[j]];
-        if (focus != null && a !== focus && b !== focus) continue;
-        const key = a + ':' + b;
-        if (!pairs.has(key)) pairs.set(key, {a, b, links: []});
-        pairs.get(key).links.push(relation);
-      }
+    if (!relation.members.some(member => member.table.id === table.id && (!fieldId || member.field.id === fieldId))) continue;
+    const partners = new Set(relation.members.map(member => member.table).filter(other => other.id !== table.id && visible.has(other.id)));
+    for (const partner of partners) {
+      if (!neighbours.has(partner)) neighbours.set(partner, []);
+      neighbours.get(partner).push(relation);
     }
   }
-  return [...pairs.values()];
+  return [...neighbours].sort(([a], [b]) => a.index - b.index);
 }
 
 function renderGraph(host, state) {
   const {tables, table, search, source, fieldId, mode} = state;
-  const relations = state.relations.filter(relation => state.filter === 'all'
-    || (state.filter === 'registered') === registered(relation));
   const focus = mode === 'focus';
-  host.classList.toggle('kg-overview', !focus);
+  const panel = host.querySelector('.kg-panel');
+  panel.classList.toggle('kg-is-focus', focus);
   host.querySelectorAll('[data-graph-mode]').forEach(button =>
     button.setAttribute('aria-pressed', String(button.dataset.graphMode === mode)));
+  const details = host.querySelector('[data-graph-details]');
+  details.setAttribute('aria-expanded', String(state.details && focus));
+  const aside = host.querySelector('.kg-inspector');
+  aside.hidden = !focus || !state.details;
 
-  const visible = new Set(tables.filter(item => (!source || item.source === source)
-    && (!search || [item.source, sourceLabel(item.source), item.display, item.name,
-      ...item.fields.flatMap(field => [field.name, field.label, field.definition])].join(' ').toLowerCase().includes(search)))
-    .map(item => item.id));
-  // Keep the other end of a matching relation visible while searching.
+  const scene = host.querySelector('.kg-scene');
+  const atlas = scene.querySelector('.kg-atlas');
+  const counts = host.querySelector('.kg-counts');
+  const width = scene.clientWidth;
+  if (width < 120) return;
+  const pageTop = scene.getBoundingClientRect().top + window.scrollY;
+  const minHeight = Math.max(420, Math.ceil(document.documentElement.clientHeight - pageTop - 22));
+  const matched = tables.filter(item => (!source || item.source === source)
+    && (!search || [item.source, sourceLabel(item.source), item.galaxy.name, item.display, item.name, item.physical_name,
+      ...item.fields.flatMap(field => [field.name, field.label, field.definition])].join(' ').toLowerCase().includes(search)));
+  if (!focus) {
+    const galaxies = new Map();
+    for (const item of matched) {
+      const {galaxy} = item;
+      if (!galaxies.has(galaxy.id)) galaxies.set(galaxy.id, {...galaxy, tables: []});
+      galaxies.get(galaxy.id).tables.push(item);
+    }
+    const layout = overviewLayout([...galaxies.values()], width, minHeight);
+    atlas.style.height = layout.height + 'px';
+    const empty = tables.length ? '没有符合筛选条件的逻辑表。' : '当前账户没有可查看的逻辑表。';
+    atlas.innerHTML = starfield(width, layout.height) + (layout.groups.length
+      ? layout.groups.map(renderGalaxy).join('') : `<p class="kg-empty kg-no-matches">${empty}</p>`);
+    counts.textContent = `${galaxies.size} 个来源组 · ${matched.length} 张表`;
+    return;
+  }
+
+  const relations = state.relations.filter(relation => state.filter === 'all'
+    || (state.filter === 'registered') === registered(relation));
+  const visible = new Set(matched.map(item => item.id));
   if (search) {
     const matches = new Set(visible);
     for (const relation of relations) {
@@ -244,22 +274,97 @@ function renderGraph(host, state) {
       }
     }
   }
-  if (focus) visible.add(table.id);
-  const pairs = buildPairs(relations, visible, focus ? table.index : null, focus ? fieldId : null);
-  const neighbours = new Set(pairs.flatMap(pair => [pair.a, pair.b]));
-  const shown = tables.filter(item => visible.has(item.id) && (!focus || item.id === table.id || neighbours.has(item.index)));
-  if (focus) renderCanvas(host, shown, pairs, state);
-  else renderSourceOverview(host, shown, pairs, state);
-  host.querySelector('.kg-inspector').innerHTML = inspector(table, relations, fieldId);
+  const neighbours = neighboursFor(relations, visible, table, fieldId);
+  const layout = focusLayout(neighbours.length, width, minHeight);
+  atlas.style.height = layout.height + 'px';
+  atlas.innerHTML = starfield(width, layout.height) + nebula(0, 0, width, layout.height, table.galaxy.hue, -17)
+    + relationLayer(neighbours, layout)
+    + planet(table, layout.center, layout.core.width, true)
+    + neighbours.map(([item], index) => planet(item, layout.points[index], layout.labelWidth)).join('');
+  counts.textContent = `${table.display} · ${neighbours.length} 张关联表`;
+  const oldScroll = aside.dataset.table === table.id ? aside.scrollTop : 0;
+  const fieldListOpen = aside.dataset.table !== table.id || aside.querySelector('details')?.open;
+  aside.innerHTML = inspector(table, relations, fieldId);
+  aside.querySelector('.kg-table-fields').open = fieldListOpen;
+  aside.dataset.table = table.id;
+  aside.scrollTop = oldScroll;
 }
 
-function tableNode(table, state, count) {
-  const selected = state.table.id === table.id;
-  return `<button type="button" class="kg-table-node ${selected ? 'is-selected' : ''}" data-table-index="${table.index}"
-    aria-pressed="${selected}" title="${esc(table.physical_name || table.name)}">
-    <span class="kg-table-source">${esc(sourceLabel(table.source))}</span>
-    <strong>${esc(table.display)}</strong><small>${table.fields.length} 个字段 · ${count} 张关联表</small>
+function planet(table, point, width, selected = false) {
+  const size = (table.planetDiameter + (selected ? 22 : 0)).toFixed(2);
+  return `<button type="button" class="kg-planet ${selected ? 'is-selected' : ''}" data-table-index="${table.index}"
+    ${selected ? 'aria-current="true"' : ''}
+    aria-label="${esc(table.display)}，${esc(sourceLabel(table.source))}，${table.fields.length} 个字段"
+    title="${esc(table.display)} · ${esc(sourceLabel(table.source))} · ${table.fields.length} 个字段"
+    style="left:${point.x}px; top:${point.y}px; width:${width}px; --kg-hue:${table.galaxy.hue}; --kg-planet-size:${size}px">
+    <span class="kg-planet-marker" aria-hidden="true"><i class="kg-orb"></i></span>
+    <strong>${esc(table.display)}</strong>
+    ${selected ? `<small>${esc(sourceLabel(table.source))}</small>` : ''}
   </button>`;
+}
+
+function flyToPlanet(start, orb) {
+  if (!orb?.animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const end = orb.getBoundingClientRect();
+  const x = start.left + start.width / 2 - end.left - end.width / 2;
+  const y = start.top + start.height / 2 - end.top - end.height / 2;
+  if (Math.abs(y) > window.innerHeight * .85) return;
+  orb.animate([{transform: `translate(${x}px,${y}px) scale(${start.width / end.width})`},
+    {transform: 'none'}], {duration: 390, easing: 'cubic-bezier(.22,.72,.25,1)'});
+}
+
+function starfield(width, height) {
+  const random = seededRandom('medfabric-atlas-dust');
+  const dots = Array.from({length: Math.min(800, Math.ceil(width * height / 1700))}, () => {
+    const x = Math.round(random() * width), y = Math.round(random() * height);
+    return `<circle cx="${x}" cy="${y}" r="${(.32 + random() * 1.05).toFixed(2)}" opacity="${(.1 + random() * .45).toFixed(2)}"/>`;
+  });
+  return `<svg class="kg-starfield" width="${width}" height="${height}" aria-hidden="true">${dots.join('')}</svg>`;
+}
+
+function nebula(x, y, width, height, hue, angle) {
+  return `<div class="kg-nebula" aria-hidden="true" style="left:${x}px; top:${y}px; width:${width}px; height:${height}px; --kg-hue:${hue}; --kg-tilt:${angle}deg"></div>`;
+}
+
+function renderGalaxy(layout) {
+  const {group, x, y, width, height, core, center, labelWidth, points} = layout;
+  const tilt = group.id === 'group:medical' ? -14 : group.id === 'source:doris-nju' ? 6 : 12;
+  return `<section class="kg-galaxy" data-galaxy="${esc(group.id)}" aria-label="${esc(group.name)}"
+    style="left:${x}px; top:${y}px; width:${width}px; height:${height}px; --kg-hue:${group.hue}">
+    ${nebula(0, 0, width, height, group.hue, tilt)}
+    <div class="kg-galaxy-core" style="left:${center.x}px;top:${center.y}px;width:${core.width}px">
+      <h2 title="${esc(group.name)}">${esc(group.name)}</h2><span>${group.tables.length} 张表</span>
+    </div>
+    ${group.tables.map((table, i) => planet(table, points[i], labelWidth)).join('')}
+  </section>`;
+}
+
+function relationLayer(neighbours, layout) {
+  const {width, height, center, points, core, labelWidth} = layout;
+  const labels = [];
+  const edges = neighbours.map(([table, links], i) => {
+    const end = points[i], start = center;
+    const dx = end.x - start.x, dy = end.y - start.y;
+    const bend = i % 2 ? .1 : -.1;
+    const mid = {x: (start.x + end.x) / 2 + dy * bend, y: (start.y + end.y) / 2 - dx * bend};
+    const names = [...new Set(links.map(link => link.label))];
+    const label = names.length === 1 ? names[0] : names.length + ' 个字段';
+    const span = Math.min(110, label.length * 10 + 10);
+    const pos = [.51, .63, .39, .73, .29].map(t => ({
+      x: (1-t)**2 * start.x + 2*t*(1-t) * mid.x + t*t * end.x,
+      y: (1-t)**2 * start.y + 2*t*(1-t) * mid.y + t*t * end.y
+    })).find(point =>
+      (Math.abs(point.x - center.x) > (core.width + span) / 2 || Math.abs(point.y - center.y) > 51)
+      && points.every(p => Math.abs(point.x - p.x) > (labelWidth + span) / 2 || Math.abs(point.y - p.y) > 32)
+      && labels.every(p => Math.abs(point.x - p.x) > (p.span + span) / 2 || Math.abs(point.y - p.y) > 18));
+    if (pos) labels.push({...pos, span});
+    return `<g class="kg-connection ${links.some(registered) ? 'kg-connection-solid' : ''}" style="--kg-edge-hue:${table.galaxy.hue}">
+      <title>${esc(names.join('、'))}</title>
+      <path d="M${start.x},${start.y} Q${mid.x},${mid.y} ${end.x},${end.y}"/>
+      ${pos ? `<text x="${pos.x}" y="${pos.y}" dominant-baseline="middle" text-anchor="middle">${esc(label)}</text>` : ''}
+    </g>`;
+  });
+  return `<svg class="kg-edges" width="${width}" height="${height}" aria-hidden="true">${edges.join('')}</svg>`;
 }
 
 function inspector(table, relations, fieldId) {
@@ -300,177 +405,4 @@ function inspector(table, relations, fieldId) {
     <details class="kg-table-fields" open><summary>表字段</summary><div class="kg-field-list">${fields}</div></details>
     <h4 class="kg-relationship-heading">${field ? esc(field.label) : '本表'}的关联</h4>
     ${details || '<p class="kg-empty">当前筛选下没有关联字段。</p>'}`;
-}
-
-function renderCanvas(host, tables, pairs, state) {
-  const scroll = host.querySelector('.kg-graph-scroll');
-  const canvas = host.querySelector('.kg-canvas');
-  const grid = host.querySelector('.kg-source-grid');
-  const svg = host.querySelector('.kg-edges');
-  host.querySelector('.kg-source-network').innerHTML = '';
-  host.querySelector('.kg-source-link-detail').hidden = true;
-  const width = Math.max(620, scroll.clientWidth - 48);
-  const nodeHeight = 72;
-  const positions = new Map();
-  const counts = new Map();
-  for (const {a, b} of pairs) {
-    counts.set(a, (counts.get(a) || 0) + 1);
-    counts.set(b, (counts.get(b) || 0) + 1);
-  }
-  const listed = tables.filter(table => table.id !== state.table.id);
-  const w = Math.min(220, Math.floor(width * .32));
-  const height = Math.max(155, listed.length * 107 + 35);
-  positions.set(state.table.index, {x: 23, y: (height - nodeHeight) / 2, w, h: nodeHeight});
-  listed.forEach((table, index) => positions.set(table.index,
-    {x: width - w - 25, y: 28 + index * 107, w, h: nodeHeight}));
-  Object.assign(canvas.style, {width: width + 'px', minWidth: '0'});
-  Object.assign(grid.style, {minWidth: '0', width: width + 'px', height: height + 'px'});
-  grid.innerHTML = tables.map(table => tableNode(table, state, counts.get(table.index) || 0)).join('')
-    || '<p class="kg-empty">没有符合筛选条件的逻辑表。</p>';
-  for (const node of grid.querySelectorAll('[data-table-index]')) {
-    const p = positions.get(Number(node.dataset.tableIndex));
-    Object.assign(node.style, {position: 'absolute', left: p.x + 'px', top: p.y + 'px',
-      width: p.w + 'px', height: p.h + 'px'});
-  }
-  svg.setAttribute('width', String(width));
-  svg.setAttribute('height', String(height));
-  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  svg.innerHTML = pairs.map(pair => {
-    let a = positions.get(pair.a), b = positions.get(pair.b);
-    if (!a || !b) return '';
-    if (a.x > b.x || (a.x === b.x && a.y > b.y)) [a, b] = [b, a];
-    const solid = pair.links.some(registered);
-    const highlighted = pair.a === state.table.index || pair.b === state.table.index;
-    const labelSet = [...new Set(pair.links.map(link => link.label))];
-    const label = labelSet.length === 1 ? labelSet[0] : labelSet.length + ' 个字段';
-    const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2;
-    const mid = (x1 + x2) / 2;
-    const path = `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`;
-    const labelX = x2 - Math.min(72, (x2 - x1) / 4);
-    const labelY = y2 - 7;
-    const classes = ['kg-edge-group', solid ? 'kg-edge-registered' : 'kg-edge-candidate',
-      highlighted ? 'kg-edge-highlight' : ''].join(' ');
-    return `<g class="${classes}"><title>${esc(labelSet.join('、'))}</title><path d="${path}"/>
-      <text x="${labelX}" y="${labelY}" text-anchor="middle">${esc(label)}</text></g>`;
-  }).join('');
-}
-
-const sourceHues = [163, 198, 221, 142, 257, 39, 181, 233];
-
-function withinSourcePath(a, b, index) {
-  const middleA = a.y + a.h / 2, middleB = b.y + b.h / 2;
-  const laneOffset = (index % 5 - 2) * 3;
-  if (middleA === middleB) {
-    const [left, right] = a.x < b.x ? [a, b] : [b, a];
-    return `M ${left.x + left.w} ${middleA} H ${right.x}`;
-  }
-  const sharedColumn = a.column === b.column;
-  const dirA = sharedColumn ? (a.column === a.columns - 1 ? -1 : 1) : (a.x < b.x ? 1 : -1);
-  const dirB = sharedColumn ? dirA : -dirA;
-  const x1 = dirA > 0 ? a.x + a.w : a.x, x2 = dirB > 0 ? b.x + b.w : b.x;
-  const gutter = sharedColumn ? x1 + dirA * (14 + laneOffset) : (x1 + x2) / 2 + laneOffset;
-  return softenPath([{x: x1, y: middleA}, {x: gutter, y: middleA},
-    {x: gutter, y: middleB}, {x: x2, y: middleB}]);
-}
-
-function renderSourceOverview(host, tables, pairs, state) {
-  const scroll = host.querySelector('.kg-graph-scroll');
-  const canvas = host.querySelector('.kg-canvas');
-  const grid = host.querySelector('.kg-source-grid');
-  const network = host.querySelector('.kg-source-network');
-  host.querySelector('.kg-edges').innerHTML = '';
-
-  const sources = new Map(), byIndex = new Map(), counts = new Map();
-  for (const table of tables) {
-    if (!sources.has(table.source)) sources.set(table.source, {source: table.source, tables: [], ports: []});
-    sources.get(table.source).tables.push(table);
-    byIndex.set(table.index, table);
-  }
-  const blocks = [...sources.values()];
-  const routes = new Map(), local = [];
-  for (const pair of pairs) {
-    counts.set(pair.a, (counts.get(pair.a) || 0) + 1);
-    counts.set(pair.b, (counts.get(pair.b) || 0) + 1);
-    const a = byIndex.get(pair.a).source, b = byIndex.get(pair.b).source;
-    if (a === b) {
-      local.push(pair);
-      continue;
-    }
-    const ordered = [a, b].sort();
-    const key = JSON.stringify(ordered);
-    if (!routes.has(key)) {
-      const [first, second] = ordered.map(source => sources.get(source));
-      routes.set(key, {key, first, second, pairs: [], registered: false, start: {target: second}, end: {target: first}});
-    }
-    const route = routes.get(key);
-    route.pairs.push(pair);
-    route.registered ||= pair.links.some(registered);
-  }
-
-  const width = Math.max(blocks.length > 1 ? 610 : 280, scroll.clientWidth - 48);
-  const routeList = [...routes.values()];
-  const {height, tables: positions} = placeSources(blocks, routeList, width);
-  routeSources(blocks, routeList, width, height);
-  Object.assign(canvas.style, {width: width + 'px', minWidth: '0'});
-  Object.assign(grid.style, {minWidth: '0', width: width + 'px', height: height + 'px'});
-
-  grid.innerHTML = [...blocks].sort((a, b) => a.y - b.y || a.x - b.x).flatMap(block => [
-    `<header class="kg-overview-source-title" style="left:${block.x + 14}px; top:${block.y + 17}px;
-      width:${block.w - 28}px; --kg-source-hue:${sourceHues[sourceRank(block.source) % sourceHues.length]}">
-      <b>${esc(sourceLabel(block.source))}</b><span>${block.tables.length} 张表</span></header>`,
-    ...block.tables.map(table => tableNode(table, state, counts.get(table.index) || 0))
-  ]).join('') || '<p class="kg-empty">没有符合筛选条件的逻辑表。</p>';
-  for (const node of grid.querySelectorAll('[data-table-index]')) {
-    const p = positions.get(Number(node.dataset.tableIndex));
-    Object.assign(node.style, {position: 'absolute', left: p.x + 'px', top: p.y + 'px',
-      width: p.w + 'px', height: p.h + 'px'});
-  }
-
-  network.setAttribute('width', String(width));
-  network.setAttribute('height', String(height));
-  network.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  const selected = routes.get(state.sourceLink);
-  const activeBlocks = selected ? [selected.first, selected.second] : [];
-  const blockShapes = blocks.map(block => {
-    const hue = sourceHues[sourceRank(block.source) % sourceHues.length];
-    return `<rect class="kg-overview-source-card ${activeBlocks.includes(block) ? 'kg-source-active' : ''}"
-      data-source-region="${esc(block.source)}" style="--kg-source-hue:${hue}"
-      x="${block.x}" y="${block.y}" width="${block.w}" height="${block.h}" rx="${block.tables.length === 1 ? 24 : 17}"/>`;
-  }).join('');
-  const localPaths = local.map((pair, index) => {
-    const type = pair.links.some(registered) ? 'kg-edge-registered' : 'kg-edge-candidate';
-    const active = pair.a === state.table.index || pair.b === state.table.index;
-    const path = withinSourcePath(positions.get(pair.a), positions.get(pair.b), index);
-    return `<g class="kg-edge-group kg-overview-inner ${type} ${active ? 'kg-edge-highlight' : ''}"><path d="${path}"/></g>`;
-  }).join('');
-  const crossPaths = routeList.sort((a, b) => Number(a === selected) - Number(b === selected)).map(route => {
-    if (!route.track) return '';
-    const path = softenPath(route.track);
-    const a = route.start.point, b = route.end.point;
-    const label = sourceLabel(route.first.source) + ' ↔ ' + sourceLabel(route.second.source);
-    const active = route === selected;
-    const tone = route.registered ? 'kg-edge-registered' : 'kg-edge-candidate';
-    return `<g class="kg-edge-group kg-overview-route ${tone} ${active ? 'kg-route-selected' : ''} ${selected && !active ? 'kg-route-muted' : ''}"
-      role="button" tabindex="0" aria-pressed="${active}" aria-label="${esc(label)}，${route.pairs.length} 对表"
-      data-source-link="${esc(route.key)}">
-      <title>${esc(label)} · ${route.pairs.length} 对表</title>
-      <path class="kg-route-ink" d="${path}"/>
-      <circle cx="${a.x}" cy="${a.y}" r="3.5"/><circle cx="${b.x}" cy="${b.y}" r="3.5"/>
-      <path class="kg-route-hit" d="${path}"/>
-    </g>`;
-  }).join('');
-  network.innerHTML = blockShapes + localPaths + crossPaths;
-
-  const detail = host.querySelector('.kg-source-link-detail');
-  detail.hidden = !selected;
-  if (!selected) {
-    detail.innerHTML = '';
-    return;
-  }
-  const heading = sourceLabel(selected.first.source) + ' ↔ ' + sourceLabel(selected.second.source);
-  const tableButton = table => `<button type="button" data-related-table="${table.index}">${esc(table.display)}</button>`;
-  detail.innerHTML = `<div class="kg-source-link-heading"><h4>${esc(heading)}</h4>
-    <button type="button" class="kg-retry" data-source-link-close>收起</button></div>
-    <ul>${selected.pairs.map(pair => `<li>${tableButton(byIndex.get(pair.a))} <span aria-hidden="true">↔</span>
-      ${tableButton(byIndex.get(pair.b))}<small>${esc([...new Set(pair.links.map(link => link.label))].join('、'))}</small></li>`).join('')}</ul>`;
 }

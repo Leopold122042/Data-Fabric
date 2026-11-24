@@ -147,5 +147,5 @@ export function renderTopicThree(host){
   host.querySelectorAll('[data-result]').forEach(el=>el.addEventListener('click',()=>run(async()=>{ui.result=await request(`/cases/${encodeURIComponent(state().case.id)}/result`);},'已按当前账户权限读取交付结果。')));
  };
  redraw();
- (async()=>{try{const providerInfo=await request('/api/portal/ai/providers').catch(()=>({providers:[]}));ui.providers=providerInfo.providers||[];await refresh();redraw();}catch(error){reportError(error);}})();
+ (async()=>{try{const providerInfo=await request('/ai/providers').catch(()=>({providers:[]}));ui.providers=providerInfo.providers||[];await refresh();redraw();}catch(error){reportError(error);}})();
 }

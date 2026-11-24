@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>账户权限 · 管理后台</title>
+<link rel="stylesheet" href="/static/workspace.css">
+<link rel="stylesheet" href="/static/management/module.css">
+<link rel="stylesheet" href="/static/shared/platform-shell.css">
+<link rel="stylesheet" href="/static/management/accounts.css?v=0.1.45">
+<script defer src="/static/shared/platform-shell.js?v=0.1.45"></script>
+</head><body class="mf-app"><div class="mf-shell"><aside class="mf-sidebar" aria-label="管理导航"></aside>
+<main class="mf-main"><header class="mf-topbar"><span id="identity">账户权限</span><span id="connection">正在读取账户…</span></header>
+<div class="mf-content"><section class="page-heading"><div><h1>账户与数据权限</h1><p>等级由管理员调整。数据目录、知识图谱、查询和服务使用同一账户范围。</p></div></section>
+<div class="level-guide" id="level-guide"></div>
+<section class="account-create"><div><h2>新建账户</h2><p>新账户固定从1级开始；创建后可在账户列表中调整。</p></div>
+<form id="create-form"><label>账号<input name="username" required minlength="3" maxlength="40" autocomplete="off"></label><label>显示名称<input name="display_name" required maxlength="80"></label><label>临时密码<input name="password" required minlength="10" maxlength="128" autocomplete="new-password"></label><button class="primary" type="submit">创建1级账户</button></form><p class="form-message" id="create-message" role="status"></p></section>
+<section class="accounts-panel"><div class="accounts-head"><div><h2>现有账户</h2><p>等级变更会即时作用于目录、图谱和下一次执行核验。</p></div><button id="refresh" class="secondary" type="button">刷新</button></div><div id="accounts-list" class="accounts-list"><p class="loading">正在读取账户…</p></div></section>
+<section class="accounts-panel"><div class="accounts-head"><div><h2>账户审计记录</h2><p>记录登录、密码变更、账户建立、等级调整和停用操作。</p></div></div><div id="account-audit" class="accounts-list"><p class="loading">正在读取审计记录…</p></div></section>
+</div></main></div>
+<script type="module" src="/static/management/accounts.js?v=0.1.45"></script></body></html>

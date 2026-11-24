@@ -1,12 +1,39 @@
-import {enterPage,headers,currentAccess} from './shared/access.js?v=0.1.28';
+import {workspaceFor} from './shared/workspaces.js?v=0.1.45';
+import {enterPage,headers,currentAccess} from './shared/access.js?v=0.1.45';
 import {dashboardRoles} from './shared/dashboard-guide.js?v=0.1.28';
 import {icon} from './shared/icons.js';
-import {format,statusName,eventName,distribution,orderURL,executionURL} from './dashboard-model.js';
-import {node,link,iconBox,action,badge,panel,empty,row,metric,bars,stages,authorizationChart} from './dashboard-components.js?v=20261102';
+import {format,statusName,eventName,distribution,orderURL as manageOrder,executionURL as manageExecution} from './dashboard-model.js';
+import {node,link,iconBox,action,badge,panel,empty,row,metric,bars,stages,authorizationChart} from './dashboard-components.js?v=0.1.45';
 
 const $=s=>document.querySelector(s),root=$('#dashboard-root');
 const setText=(selector,value)=>{const element=$(selector);if(element)element.textContent=value;};
-const paths={resources:'/static/platform/resources.html',services:'/static/management/services.html',catalog:'/static/management/catalog.html',orders:'/static/management/work-orders.html',events:'/static/platform/events.html',risk:'/static/platform/security.html',medical:'/static/platform/medical-overview.html'};
+const adminWorkspace=workspaceFor(location.pathname)==='admin';
+const paths=adminWorkspace?{resources:'/static/platform/resources.html',services:'/static/management/services.html',catalog:'/static/management/catalog.html',orders:'/static/management/work-orders.html',events:'/static/platform/events.html',risk:'/static/platform/security.html',medical:'/static/platform/medical-overview.html'}:{
+ resources:'/static/portal/knowledge-graph.html',catalog:'/static/portal/knowledge-graph.html',
+ services:'/user/services',medical:medicalSummary
+};
+const orderURL=id=>adminWorkspace?manageOrder(id):null;
+const executionURL=(kind,id)=>adminWorkspace?manageExecution(kind,id):null;
+
+async function medicalSummary(){
+ const body=node('div','正在读取统计…');
+ openDetail('科室与诊断',body);
+ try{
+  const response=await fetch('/api/medical-overview',{headers:headers(),cache:'no-store'});
+  const data=await response.json();
+  if(!response.ok)throw Error(data.error||'无法读取医学统计');
+  body.replaceChildren();
+  for(const [title,rows] of [
+   ['科室数据分布',data.dept_distribution.map(r=>r.name+' · '+format(r.patients)+' 人 · '+format(r.visits)+' 次就诊 · '+format(r.abnormal_items)+' 项关联异常检验 · '+format(r.studies)+' 项关联影像')],
+   ['主要诊断',data.top_diags.map(r=>r.name+' · '+format(r.n)+' 次')],
+   ['来源记录规模',data.sources.map(r=>r.name+' · '+format(r.rows)+' 条')]
+  ]){
+   const list=node('ul');
+   for(const text of rows)list.append(node('li',text));
+   body.append(node('h3',title),list);
+  }
+ }catch(error){body.textContent=error.message;}
+}
 function openDetail(title,body){setText('#dashboard-dialog-title',title);$('#dashboard-dialog-body').replaceChildren(body);$('#dashboard-dialog').showModal();}
 function summary(title,lines,url,label='前往完整记录'){
  const body=node('div');for(const text of lines)body.append(node('p',text));if(url)body.append(action(label,url));openDetail(title,body);
@@ -17,9 +44,8 @@ if($('#dashboard-help'))$('#dashboard-help').replaceChildren(icon('info'),node('
 if($('#dashboard-help'))$('#dashboard-help').onclick=()=>summary('指标口径',[
  '业务数据为当前快照，各自按人、次、份和点统计。元数据事件为留存窗口，最多 800 条；核验与交付为已保存记录。',
  '首页仅显示当前身份可见的摘要。已有凭证不代表当前可读取结果，读取时重新检验授权。'
-],'/static/platform/about.html#dashboard-design','完整口径与身份分区');
+],adminWorkspace?'/static/platform/about.html#dashboard-design':null,'完整口径与身份分区');
 if($('#dashboard-refresh'))$('#dashboard-refresh').replaceChildren(icon('refresh'),node('span','刷新'));
-const footerLink=$('.dashboard-footer>a');footerLink.replaceChildren(node('span','首页设计说明'),icon('arrow'));footerLink.classList.add('dashboard-footer-link');
 
 function sourceBars(parent,d){
  return bars(parent,d.objects.by_source,d.source_names,{label:'目录对象按来源分布',tones:{his:'blue',lis:'teal',pacs:'violet',emr:'amber',iot:'cyan'},onDetail:(name,value,share)=>summary(name,[`关联目录对象 ${format(value)} 个，占当前分布 ${share}。`,d.role==='provider'?'仅统计本方服务明确引用的目录对象，不代表资源所有权。':'统计当前有效的表与字段目录对象，不代表业务数据行数。'],paths.catalog,'查看资源目录')});
@@ -96,7 +122,7 @@ function renderProvider(d,grid,metrics){
   const r=node('div','','dashboard-usage-row'),title=node('div','','dashboard-usage-demand'),heading=node('b',u.title);heading.title=u.title;
   const requester=node('span','','dashboard-muted');requester.append(icon('building'),node('span',u.requester));title.append(heading,requester);
   const service=node('div','','dashboard-usage-service');service.append(icon('database'),node('span',u.name));service.title=u.name;
-  const end=node('div','','dashboard-usage-state');end.append(badge(u.usage_state,u.usage_state==='已调用'?'teal':u.usage_state==='申请使用'?'amber':'blue'),action('查看',orderURL(u.order_id)));
+  const end=node('div','','dashboard-usage-state');end.append(badge(u.usage_state,u.usage_state==='已调用'?'teal':u.usage_state==='申请使用'?'amber':'blue'),action('查看',orderURL(u.order_id)||(()=>summary(u.title,[u.requester,u.name,u.usage_state]))));
   r.append(title,service,end);list.append(r);
  }
  if(!d.usages.length)empty(list,'尚无关联需求','network');usage.append(list,node('p','申请、编入方案与实际调用分别记录。','dashboard-note'));
@@ -113,7 +139,7 @@ function renderRequester(d,grid,metrics){
  const progress=panel('我的需求进展',paths.orders,'全部申请','route');progress.classList.add('dashboard-progress');const list=node('div','','dashboard-order-list');
  for(const o of d.orders){
   const card=node('article','','dashboard-order'),head=node('div','','dashboard-order-head'),title=node('b',o.title);title.title=o.title;
-  head.append(title,badge(o.status_label,o.status==='delivered'?'teal':o.status==='draft'?'amber':'blue'),action('查看工单',orderURL(o.id)));
+  head.append(title,badge(o.status_label,o.status==='delivered'?'teal':o.status==='draft'?'amber':'blue'),action('查看工单',orderURL(o.id)||(()=>openDetail(o.title,stages(o.stages)))));
   const next=node('p',o.next_action,'dashboard-muted');next.title=o.next_action;card.append(head,next,stages(o.stages));list.append(card);
  }
  if(!d.orders.length)empty(list,'尚无申请，可从需求受理开始。','clipboard');progress.append(list);
@@ -124,7 +150,7 @@ function renderRequester(d,grid,metrics){
  const services=panel('可申请的数据服务',paths.services,'服务目录','grid'),cards=node('div','','dashboard-service-cards');
  for(const s of d.services.slice(0,2)){
   const card=node('div','','dashboard-service-card'),head=node('div'),title=node('b',s.name);title.title=s.name;head.append(iconBox('database'),title);
-  const foot=node('div');foot.append(badge(statusName(s.lifecycle),'teal'),action('查看服务',paths.services+'?selected='+encodeURIComponent(s.id)));card.append(head,foot);cards.append(card);
+  const foot=node('div');foot.append(badge(statusName(s.lifecycle),'teal'),action('查看服务',adminWorkspace?paths.services+'?selected='+encodeURIComponent(s.id):paths.services));card.append(head,foot);cards.append(card);
  }
  if(!d.services.length)empty(cards,'暂无可见的已发布服务','database');services.append(cards);grid.append(progress,results,services,todoPanel(d));
 }

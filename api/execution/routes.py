@@ -150,7 +150,10 @@ def create_router(runtime,identity):
             e.current(p);value=e.delivery.read(oid,user['id'],p)
             grant=e.store.require('grant',value['grant_id'])
             return project_result(value['result'],user,grant.get('min_group_size',5))
+    portal_exports=APIRouter(prefix='/api/portal',tags=['用户工作台'],route_class=ExecutionRoute)
+
     @router.get('/deliveries/{oid}/download')
+    @portal_exports.get('/deliveries/{oid}/download')
     def download(oid:str,request:Request):
         import json
         user=who(request,action='delivery.download');d=owned('delivery',oid,user);p=e.get(d['plan_id'],d['plan_version'])
@@ -194,4 +197,7 @@ def create_router(runtime,identity):
         user=who(request,action='contract.accept');item=e.store.require('contract',oid)
         if user['id'] not in item['parties']:raise DomainError('不是约定参与方',403)
         return e.update('contract',item,{'accepted':list(set(item['accepted']+[user['id']]))},user['id'])
-    return router
+    routes=APIRouter()
+    routes.include_router(router)
+    routes.include_router(portal_exports)
+    return routes

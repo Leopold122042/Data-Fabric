@@ -1,4 +1,4 @@
-import {icon} from '/static/shared/icons.js?v=0.1.28';
+import {ready} from '/static/shared/access.js?v=0.1.45';
 const $=selector=>document.querySelector(selector);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const levelNames={1:'1级 · 查询使用者',2:'2级 · 范围分析者',3:'3级 · 数据管理者',4:'4级 · 平台管理员'};
@@ -71,6 +71,6 @@ $('#create-form').addEventListener('submit',async event=>{
  }catch(error){setMessage(error.message,true);}finally{button.disabled=false;}
 });
 $('#refresh').addEventListener('click',load);
-const access=await api('/api/access');
+const access=await ready();
 if(access.principal?.level!==4){$('#accounts-list').innerHTML='<p class="empty">当前账户不是4级管理员。</p>';throw Error('只有4级管理员可以管理账户。');}
 load();
