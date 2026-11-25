@@ -37,3 +37,4 @@ __pycache__/
 *.py[cod]
 /.data.initialize.lock
 /.data-init-*/
+management/intake/semantic_query.py
