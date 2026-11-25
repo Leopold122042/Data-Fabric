@@ -19,8 +19,7 @@ async function runLive(button) {
       return;
     }
     const data = await response.json();
-    output.textContent = data.suppressed ? '记录数少于 5 条，结果已隐藏。' :
-      '当前记录数 ' + Number(data.count).toLocaleString('zh-CN');
+    output.textContent = '当前记录数 ' + Number(data.count).toLocaleString('zh-CN');
   } catch {
     output.textContent = '实时服务暂不可用，请稍后重试。';
   } finally {
@@ -55,8 +54,9 @@ async function load() {
             <p>${esc(service.description)}</p>
             <div class="service-meta">
               <span>输入：${esc(service.input)}</span>
-              ${service.live_call ? '' : `<span>${esc(service.id)}</span>`}
+              ${service.live_call || service.query_text ? '' : `<span>${esc(service.id)}</span>`}
             </div>
+            ${service.query_text ? `<p><a class="button small" href="/user?page=ask&question=${encodeURIComponent(service.query_text)}">打开统计</a></p>` : ''}
             ${service.live_call ? `
               <p><button type="button" data-live-service="${esc(service.id)}">实时查询</button></p>
               <p data-live-result aria-live="polite"></p>` : ''}

@@ -4,7 +4,7 @@ from datetime import datetime,timezone
 from platform_core.storage import DomainError,new_id,now
 from platform_core.accounts import BOOTSTRAP_ACCOUNTS
 from execution.security.control import Security,timestamp
-from execution.delivery import Delivery
+from execution.delivery import Delivery, DeliveryQualityError
 from execution.query.engine import Queries
 from execution.medical import aggregate
 from contracts.execution.constraints import fingerprint,normalize
@@ -78,7 +78,8 @@ class Execution:
                 if service.get('visibility')=='approval':raise DomainError('审批型服务缺少外部审批适配器',503)
                 services[service['id']]=service['version']
             if op=='view':
-                view=self.store.require('view',n.get('view_id',''));self.queries.sources(view)
+                view=self.store.require('view',n.get('view_id',''))
+                self.queries.sources(view)
                 if view['output_mode']!=mode:raise DomainError('视图与方案粒度不一致')
                 views[view['id']]=view['version']
             params=n.get('params',{})
@@ -134,7 +135,7 @@ class Execution:
         if policy is None:
             policy={'version':1,'scope':{'kind':'medical'},'window_kind':'fixture','deadline_at':'9999-01-01T00:00:00+00:00',
                     'purpose':purpose,'output_mode':'aggregate','circulation_modes':['controlled_compute','api','download'],
-                    'quality_min_complete':1,'max_rows':200,'min_group_size':5}
+                    'quality_min_complete':1,'max_rows':200,'min_group_size':0}
         definition={'name':body.get('name') or '本地方案','created_by':(old or {}).get('created_by',actor),'scenario':body.get('scenario','custom'),
             'workflow_id':'WF-'+oid,'workflow_version':(old or {}).get('version',0)+1,
             'spec_id':sid,'spec_version':spec['version'] if spec else None,'purpose':purpose,'output_mode':mode,'nodes':compiled,'order':ordered,
@@ -227,6 +228,7 @@ class Execution:
         return self.security.check(job['grant_id'],plan,job['actor'],job['purpose'],stage)[0]
     def run(self,job):
         start=time.perf_counter();plan=self.get(job['plan_id'],job['plan_version']);results={};node_states={};delivery=None;error=None
+        error_kind=None
         timeline=list(job['timeline']);previous=self.store.get('job',job.get('retry_of','')) if job.get('retry_of') else None
         try:
             for nid in plan['order']:
@@ -279,7 +281,9 @@ class Execution:
                 self.guard(job,plan,'delivery_commit')
                 delivery=self.delivery.create(output,plan,job['grant_id'],job['actor'],job['id'])
             state='success';timeline.append({'stage':'delivered','time':now(),'delivery_id':delivery['id']})
-        except DomainError as exc:state='failed';error=str(exc)
+        except DomainError as exc:
+            state='failed';error=str(exc)
+            if isinstance(exc,DeliveryQualityError):error_kind='delivery_quality'
         except Exception:state='failed';error='执行异常，未交付结果'
         for node in plan['nodes']:
             if node['id'] not in node_states:node_states[node['id']]={'status':'blocked','reason':error}
@@ -288,11 +292,11 @@ class Execution:
             'execution_policy_digest':plan.get('execution_policy_digest'),
             'environment':self.store.environment,'status':state,'task_scope':'plan:'+plan['id'],'actor':job['actor'],'latency_ms':round((time.perf_counter()-start)*1000,3),
             'authorization':'allowed' if delivery else 'not_delivered','delivered':delivery is not None,'quality_passed':True if delivery else None,
-            'delivery_id':delivery['id'] if delivery else None,'error':error,'nodes':node_states}
+            'delivery_id':delivery['id'] if delivery else None,'error':error,'error_kind':error_kind,'nodes':node_states}
         if delivery:evidence.update(delivered_at=delivery['receipt']['issued_at'],authorized_until=delivery['receipt']['expires_at'])
         self.evidence.record(evidence)
         with self.lock:
-            active=self.store.require('job',job['id']);return self.update('job',active,{'state':state,'error':error,'nodes':node_states,'timeline':timeline,'delivery_id':evidence['delivery_id']})
+            active=self.store.require('job',job['id']);return self.update('job',active,{'state':state,'error':error,'error_kind':error_kind,'nodes':node_states,'timeline':timeline,'delivery_id':evidence['delivery_id']})
     def get_view(self,plan,node):return self.store.require('view',node['view_id'],plan['view_versions'][node['view_id']])
     def loop(self):
         while not self.stop.wait(.25):

@@ -8,7 +8,7 @@ const icon=name=>`<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path
 document.querySelectorAll('[data-icon]').forEach(el=>{if(!el.closest('.sidebar'))el.innerHTML=icon(el.dataset.icon);});
 const names={home:'总览',ask:'自然语言查询',query:'专业查询'};
 const states={awaiting_chain_confirmation:'需要补充查询意图',waiting_manual_spec_confirmation:'确认查询意图',waiting_field_classification:'待处理目录变化',awaiting_execution_plan:'准备查询方案',awaiting_plan_confirmation:'待确认方案',awaiting_authorization_request:'待处理授权',awaiting_platform_authorization:'等待审批',authorization_declined:'申请未通过',awaiting_query_submission:'可以运行',query_queued:'排队中',query_running:'查询中',query_completed:'已完成',query_failed:'查询未完成',attention:'需要处理',waiting_authorization:'等待连接',completed:'已完成'};
-let catalog=[],catalogLoaded=false,flow=null,demand=null,delivery=null,canDownload=false,poll=null,routeGeneration=0,busy=false,toastTimer=null;
+let catalog=[],catalogLoaded=false,flow=null,demand=null,delivery=null,canDownload=false,canRecount=false,poll=null,routeGeneration=0,busy=false,toastTimer=null;
 let builder={table:'',join:'',fields:[],filters:[],order:'',direction:'desc',limit:100,sqlOverride:null};
 const date=v=>{if(!v)return '—';const d=new Date(v);return Number.isNaN(d.valueOf())?'—':new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(d);};
 const page=()=>new URL(location.href).searchParams.get('page')||'home';
@@ -42,23 +42,50 @@ function ask(initial=''){const enabled=allowed('demand.create'),generation=route
  $('#ask-form').onsubmit=e=>{e.preventDefault();const text=$('#question').value.trim(),provider=$('#ai-provider').value;if(!text||!provider)return;task($('#ask-submit'),async()=>{const gen=routeGeneration;$('#ask-error').innerHTML=loading('正在使用所选模型理解问题并匹配数据…');try{const result=await api('/api/portal/queries',{text,provider});if(gen!==routeGeneration){toast('查询已准备好，可在总览的最近查询中打开');return;}go('ask',result.flow.id);}catch(error){$('#ask-error').innerHTML=errorBox(error);throw error;}});};
  api('/api/portal/ai/providers').then(config=>{if(generation!==routeGeneration)return;const select=$('#ai-provider'),status=$('#ai-provider-status'),submit=$('#ask-submit'),providers=config.providers||[],available=providers.filter(item=>item.configured);select.innerHTML=providers.map(item=>`<option value="${esc(item.id)}" ${item.configured?'':'disabled'}>${esc(item.name)}${item.model?' · '+esc(item.model):''}${item.configured?'':'（未配置）'}</option>`).join('');let stored='';try{stored=localStorage.getItem('mf.ai.provider')||'';}catch{}const selected=available.find(item=>item.id===stored)||available.find(item=>item.id===config.default)||available[0];if(selected){select.value=selected.id;select.disabled=!enabled;submit.disabled=!enabled;status.textContent='本次使用 '+selected.name+'；仅向模型发送需求文字和当前可见目录元数据。';}else{select.disabled=true;submit.disabled=true;status.textContent='当前没有已配置的 AI 接口，请联系平台管理员。';}select.onchange=()=>{try{localStorage.setItem('mf.ai.provider',select.value);}catch{}const item=available.find(value=>value.id===select.value);if(item)status.textContent='本次使用 '+item.name+'；仅向模型发送需求文字和当前可见目录元数据。';};}).catch(error=>{if(generation!==routeGeneration)return;$('#ai-provider-status').textContent=error.message||'读取 AI 接口失败';$('#ask-error').innerHTML=errorBox(error);});
 }
-function outputFields(f){return f.professional_preview?.output_fields?.map(x=>({field_name:x.name,classification:x.classification}))||f.field_lookup?.output_fields||[];}
+const calculationLabels={row_count:'记录数',person_count:'去重人数',diabetes_count:'去重人数',doris_people_count:'去重人数'};
+const calculationLabel=f=>calculationLabels[f.professional_preview?.calculation?.kind];
+const cohortLabels={diabetes_all:'糖尿病（ICD‑10 E10–E14）',diabetes_type2:'2 型糖尿病（ICD‑10 E11）',diabetes_type1:'1 型糖尿病（ICD‑10 E10）',
+ diagnosis:'Doris 诊断数据集',lab:'Doris 检验数据集'};
+function outputFields(f){if(calculationLabel(f))return [{field_name:'count',label:calculationLabel(f)}];return f.professional_preview?.output_fields?.map(x=>({field_name:x.name,classification:x.classification}))||f.field_lookup?.output_fields||[];}
 function operationSummary(f){
  const shape=f.professional_preview;if(!shape)return '';
  const label=id=>catalog.flatMap(t=>t.fields).find(x=>x.id===id)?.label||id;
- const ops={'=':'等于','!=':'不等于','<':'早于 / 小于','<=':'不晚于 / 不大于','>':'晚于 / 大于','>=':'不早于 / 不小于'};
- const conditions=shape.filters.map(x=>`${label(x.field)} ${ops[x.op]||x.op} ${x.value}`).join('；');
+ const ops={'=':'等于','!=':'不等于','<':'早于 / 小于','<=':'不晚于 / 不大于','>':'晚于 / 大于','>=':'不早于 / 不小于',in:'属于',prefix:'开头为'};
+ const conditions=shape.filters.map(x=>`${label(x.field)} ${ops[x.op]||x.op} ${Object.hasOwn(cohortLabels,x.value)?cohortLabels[x.value]:x.value}`).join('；');
+ const links=shape.join_path||[];
+ const path=links.length?`<div class="notice operation-summary"><strong>关联路径</strong><ol>${links.map(edge=>
+  `<li>${esc(edge.from_table+'.'+edge.from_field)} → ${esc(edge.to_table+'.'+edge.to_field)} <small>${esc(edge.basis)}</small></li>`).join('')}</ol></div>`:'';
+ const calculation=calculationLabel(f);
+ if(calculation){
+  const scope=['diabetes_count','doris_people_count'].includes(shape.calculation.kind)?cohortLabels[shape.filters[0]?.value]:conditions;
+  const minimum=f.draft?.execution_constraints?.min_group_size ?? 5;
+  return path+`<div class="notice operation-summary"><strong>统计方式 · ${esc(calculation)}</strong><p>${esc(scope||'整张表')}</p><p>${minimum===0?'本次交付实际'+esc(calculation)+'。':`本次交付一个汇总值。少于 ${minimum} 时隐藏具体数量。`}</p></div>`;
+ }
  const order=shape.order_by?.map(x=>`${label(x.field)}${x.direction==='desc'?'降序':'升序'}`).join('、');
- return `<div class="notice operation-summary"><strong>实际查询条件（同时满足）</strong><p>${esc(conditions)}</p><p>${order?'排序：'+esc(order)+'；':''}最多返回 ${shape.max_rows} 条，不足时返回实际记录。</p></div>`;
+ return path+`<div class="notice operation-summary"><strong>实际查询条件（同时满足）</strong><p>${esc(conditions)}</p><p>${order?'排序：'+esc(order)+'；':''}最多返回 ${shape.max_rows} 条，不足时返回实际记录。</p></div>`;
 }
 function technical(f){const sql=f.query_validation?.normalized_sql||f.query_draft||f.draft?.query_draft;return `<details class="details"><summary>查看查询详情</summary>${sql?`<pre>${esc(sql)}</pre>`:'<p>查询草案尚未生成。</p>'}<ul>${(f.steps||[]).map(s=>`<li>${esc(s.label||s.capability)}：${esc(s.detail||states[s.status]||s.status)}</li>`).join('')}</ul><p>查询编号：${esc(f.id)}</p></details>`;}
-async function loadFlow(id,gen){await loadCatalog();const result=await api('/api/portal/queries/'+encodeURIComponent(id));if(gen!==routeGeneration)return;flow=result.flow;demand=result.demand;canDownload=result.can_download;renderFlow();if(flow.state==='query_completed'&&allowed('delivery.read'))await readResult(gen);schedulePoll();}
-function schedulePoll(){clearTimeout(poll);if(flow&&['query_queued','query_running','awaiting_platform_authorization','waiting_manual_spec_confirmation'].includes(flow.state)){const id=flow.id,gen=routeGeneration;poll=setTimeout(async()=>{try{const result=await api('/api/portal/queries/'+id);if(gen!==routeGeneration)return;if(result.flow.state!==flow.state||result.flow.version!==flow.version){flow=result.flow;demand=result.demand;canDownload=result.can_download;renderFlow();if(flow.state==='query_completed')await readResult(gen);}schedulePoll();}catch(error){if(gen===routeGeneration)toast(error.message,true);}},4000);}}
-function renderFlow(){const f=flow,outputs=outputFields(f);const pending=(f.field_bindings||[]).filter(b=>b.status!=='suggested');const title=states[f.state]||'查询准备中';const briefText=f.query_mode==='semantic'?f.draft.object_scope:f.professional_preview?`按 ${f.professional_preview.filters.length} 个条件筛选，最多返回 ${f.professional_preview.max_rows} 条记录。`:(f.field_lookup?.name?`按姓名“${f.field_lookup.name}”精确筛选，返回下列字段。`:f.draft?.object_scope||'正在核对查询内容与可用数据。');
+async function loadFlow(id,gen){await loadCatalog();const result=await api('/api/portal/queries/'+encodeURIComponent(id));if(gen!==routeGeneration)return;flow=result.flow;demand=result.demand;canDownload=result.can_download;canRecount=result.can_recount;renderFlow();if(flow.state==='query_completed'&&allowed('delivery.read'))await readResult(gen);schedulePoll();}
+function schedulePoll(){clearTimeout(poll);if(flow&&['query_queued','query_running','awaiting_platform_authorization','waiting_manual_spec_confirmation'].includes(flow.state)){const id=flow.id,gen=routeGeneration;poll=setTimeout(async()=>{try{const result=await api('/api/portal/queries/'+id);if(gen!==routeGeneration)return;if(result.flow.state!==flow.state||result.flow.version!==flow.version){flow=result.flow;demand=result.demand;canDownload=result.can_download;canRecount=result.can_recount;renderFlow();if(flow.state==='query_completed')await readResult(gen);}schedulePoll();}catch(error){if(gen===routeGeneration)toast(error.message,true);}},4000);}}
+function renderFlow(){const f=flow,outputs=outputFields(f);const pending=(f.field_bindings||[]).filter(b=>b.status!=='suggested');const title=states[f.state]||'查询准备中';const briefText=(f.query_mode==='semantic'||calculationLabel(f))?f.draft.object_scope:f.professional_preview?`按 ${f.professional_preview.filters.length} 个条件筛选，最多返回 ${f.professional_preview.max_rows} 条记录。`:(f.field_lookup?.name?`按姓名“${f.field_lookup.name}”精确筛选，返回下列字段。`:f.draft?.object_scope||'正在核对查询内容与可用数据。');
  const guidanceStates=['awaiting_chain_confirmation','waiting_manual_spec_confirmation','awaiting_plan_confirmation','attention','waiting_field_classification'];
  const guidanceHtml=f.query_mode==='semantic'&&guidanceStates.includes(f.state)&&(f.user_guidance||f.verified_guidance)?`<div class="notice query-guidance" role="status"><strong>本次查询提示</strong>${f.user_guidance?`<p>AI说明：${esc(f.user_guidance)}</p>`:''}${f.verified_guidance?`<p>平台核验：${esc(f.verified_guidance)}</p>`:''}</div>`:'';
- $('#main').innerHTML=heading(f.query_mode==='professional'?'专业查询':'自然语言查询','查询内容、必要确认和结果，在这里完成。',`<a class="button small" href="?page=${f.query_mode==='professional'?'query':'ask'}">${icon('plus')} 新建查询</a>`)+`<section class="conversation"><div class="user-bubble">${esc((f.request_text||'').split('\n用户针对')[0])}</div><div class="assistant-head"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>数据助手 ${badge(f.state)}${f.ai_provider?`<span class="ai-model-badge">${esc(modelName(f.ai_provider))}${f.ai_model?' · '+esc(f.ai_model):''}</span>`:''}</div><div class="answer-card"><h2>${pending.length?'还有 '+pending.length+' 项需要你确认':esc(title)}</h2><p>${esc(briefText)}</p>${guidanceHtml}${operationSummary(f)}${outputs.length?`<div class="chips">${outputs.map(o=>`<span class="chip">${icon('check')}${esc(fieldLabel(o.field_name))}</span>`).join('')}</div>`:''}<div id="flow-content"></div><div id="action-error" role="alert"></div>${technical(f)}</div><div id="results"></div></section>`;
+ const confirmed=f.clarification_answers||[];
+ const confirmedHtml=confirmed.length&&['awaiting_chain_confirmation','attention'].includes(f.state)
+  ?`<div class="chips" aria-label="已确认口径">${confirmed.map(item=>`<span class="chip" title="${esc(item.question)}">${icon('check')}${esc(item.answer)}</span>`).join('')}</div>`:'';
+ $('#main').innerHTML=heading(f.query_mode==='professional'?'专业查询':'自然语言查询','查询内容、必要确认和结果，在这里完成。',`<a class="button small" href="?page=${f.query_mode==='professional'?'query':'ask'}">${icon('plus')} 新建查询</a>`)+`<section class="conversation"><div class="user-bubble">${esc((f.request_text||'').split(/\n用户(?:补充：|针对)/)[0])}</div><div class="assistant-head"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>数据助手 ${badge(f.state)}${f.ai_provider?`<span class="ai-model-badge">${esc(modelName(f.ai_provider))}${f.ai_model?' · '+esc(f.ai_model):''}</span>`:''}</div><div class="answer-card"><h2>${pending.length?'还有 '+pending.length+' 项需要你确认':esc(title)}</h2><p>${esc(briefText)}</p>${guidanceHtml}${confirmedHtml}${operationSummary(f)}${outputs.length?`<div class="chips">${outputs.map(o=>`<span class="chip">${icon('check')}${esc(o.label||fieldLabel(o.field_name))}</span>`).join('')}</div>`:''}<div id="flow-content"></div><div id="action-error" role="alert"></div>${technical(f)}</div><div id="results"></div></section>`;
  const host=$('#flow-content');
+ if(f.query_mode==='semantic'&&f.state==='attention'){
+  const saved=f.clarification_answers?.length;
+  host.innerHTML=`<div class="actions">${saved?'<button class="button primary" id="retry-understanding-saved">保留答案并重试</button>':''}<button class="button" id="revise">修改需求</button></div>`;
+  button('retry-understanding-saved',async()=>{
+   const response=await queryAction(f.id,'retry-understanding',{expected_version:f.version});
+   await useFlow(response.flow);
+  });
+  $('#revise').onclick=()=>{go('ask');ask((f.request_text||'').split('\n用户补充：')[0]);};
+  return;
+ }
+
  if(f.state==='awaiting_chain_confirmation'&&pending.length){renderClarifications(host,pending);return;}
  if(f.state==='query_completed'){host.innerHTML='<p>查询已完成。正在读取当前权限允许查看的结果。</p>';return;}
  if(['query_queued','query_running'].includes(f.state)){host.innerHTML=loading(f.state==='query_queued'?'查询已提交，正在排队…':'正在查询数据，请稍候…');return;}
@@ -67,9 +94,11 @@ function renderFlow(){const f=flow,outputs=outputFields(f);const pending=(f.fiel
   return;
  }
  if(f.state==='waiting_manual_spec_confirmation'){
-  const tableNames=(f.professional_preview?.tables||[]).map(table=>table.name||table);
+  const tableNames=(f.professional_preview?.tables||[]).map(table=>catalog.find(t=>t.id===table.id)?.label||table.name||table);
   const level=currentAccess().principal?.level||1;
-  host.innerHTML=`<div class="notice operation-summary"><strong>当前权限：${level}级</strong><p>${esc(currentAccess().principal?.visibility||'按账户等级控制结果查看范围')}</p><p>可用表：${esc(tableNames.join('、')||'已按账户范围匹配')}</p><p>字段库中的现有字段已统一确认；这次只需确认查询意图。确认后平台会自动按你的权限执行。</p></div><div class="actions"><button class="button primary" id="confirm-intent">确认意图并执行 ${icon('arrow')}</button><button class="button" id="revise">修改需求</button></div>`;
+  const quality=f.draft?.execution_constraints?.quality_min_complete===0
+   ?'<p>空值按数据源的实际结果保留，以「—」显示。</p>':'';
+  host.innerHTML=`<div class="notice operation-summary"><strong>当前权限：${level}级</strong><p>${esc(currentAccess().principal?.visibility||'按账户等级控制结果查看范围')}</p><p>可用表：${esc(tableNames.join('、')||'已按账户范围匹配')}</p>${quality}<p>字段库中的现有字段已统一确认；这次只需确认查询意图。确认后平台会自动按你的权限执行。</p></div><div class="actions"><button class="button primary" id="confirm-intent">确认意图并执行 ${icon('arrow')}</button><button class="button" id="revise">修改需求</button></div>`;
   button('confirm-intent',async()=>{const result=await api('/api/portal/queries/'+encodeURIComponent(f.id)+'/execute',{expected_version:f.version,confirmed:true});await useFlow(result.flow);});
   $('#revise').onclick=()=>{const text=f.request_text.split('\n')[0];if(f.query_mode==='professional'){builder.sqlOverride=f.query_draft;go('query');}else{go('ask');ask(text);}};return;
  }
@@ -90,22 +119,61 @@ function renderFlow(){const f=flow,outputs=outputFields(f);const pending=(f.fiel
  if(f.state==='awaiting_query_submission'||f.state==='query_failed'){
   const retrying=f.state==='query_failed',principal=currentAccess().principal;
   const authorization=f.authorization_request;
-  const failure=f.query_error?errorBox(f.query_error):'';
+  const qualityFailed=retrying&&f.query_error_kind==='delivery_quality';
+  const error=f.query_error==='交付复核未通过：quality'
+   ?'数据已经读取，部分输出字段为空，完整率未达到本次交付要求。':f.query_error;
+  const failure=error?errorBox(error):'';
   if(retrying&&f.execution_submitted_by&&f.execution_submitted_by!==principal?.id){
    host.innerHTML=failure+'<p>请使用原提交账号重试本次查询。</p>';return;
   }
   if(retrying&&authorization?.authorization_basis==='account_level'&&authorization.account_level!==principal?.level){
    host.innerHTML=failure+'<p>账户权限等级已变化，请按当前权限重新发起查询并确认意图。</p>';return;
   }
+  if(qualityFailed&&f.professional_preview&&f.query_draft&&allowed('demand.create')){
+   host.innerHTML=failure+'<p>可以用相同的筛选条件和输出字段，新建一条保留空值的查询草案。</p><div class="actions"><button id="keep-missing" class="button primary">保留空值，重新确认</button></div>';
+   button('keep-missing',async()=>{
+    const result=await api('/api/portal/professional',{sql:f.query_draft,confirmed:true,allow_missing:true});
+    go('query',result.flow.id);
+   });
+   return;
+  }
   host.innerHTML=`${failure||'<p>本次访问权限已就绪。点击运行后读取数据。</p>'}<div class="actions"><button id="run-query" class="button primary">${icon('arrow')}${retrying?'重试本次查询':'运行查询'}</button></div>`;
   button('run-query',async()=>{const r=await queryAction(f.id,'submit',{expected_version:f.version,confirmed:true});await useFlow(r.flow);});return;
  }
  const blockers=(f.steps||[]).filter(s=>['gap','blocked','waiting_authorization'].includes(s.status));host.innerHTML=`<div class="notice">${esc(f.query_error||f.execution_output_blocker||blockers.map(s=>s.detail).join('；')||'当前查询还需要处理目录或执行条件。你的输入已保存。')}</div><div class="actions"><button class="button" id="retry-understanding">重新描述问题</button></div>`;$('#retry-understanding').onclick=()=>{go('ask');ask(f.request_text.split('\n')[0]);};
 }
-function renderClarifications(host,bindings){host.innerHTML=bindings.map((b,i)=>`<fieldset class="clarify" data-binding="${i}"><legend>${esc(b.phrase||'查询口径')}</legend><p>${esc(b.question||'请选择本次需要的字段。')}</p>${(b.candidates||[]).map(c=>`<label class="choice"><input type="checkbox" value="${esc(c.field_id)}" ${((b.selected_field_ids||[]).includes(c.field_id)||b.suggested_field_id===c.field_id)?'checked':''}><span>${esc(c.field_label||c.field_name)}<small>${esc(c.table_name||c.table)} · ${esc(c.definition||'')}</small></span></label>`).join('')}${!(b.candidates||[]).length||['sql_missing','model_missing','missing','combination_unresolved'].includes(b.status)?`<textarea class="field-input" rows="2" aria-label="${esc(b.phrase)}的补充说明" placeholder="请补充这项口径…"></textarea>`:''}</fieldset>`).join('')+'<div class="actions"><button class="button primary" id="resolve">确认选择并继续</button></div>';
- button('resolve',async()=>{const answers=bindings.map((b,i)=>{const box=host.querySelector(`[data-binding="${i}"]`);return {intent_id:b.intent_id,selected_field_ids:[...box.querySelectorAll('input:checked')].map(x=>x.value),answer:box.querySelector('textarea')?.value.trim()||''};});for(let i=0;i<answers.length;i++){if(bindings[i].candidates?.length&&!answers[i].selected_field_ids.length)throw Error('请为“'+bindings[i].phrase+'”选择字段');if(!bindings[i].candidates?.length&&!answers[i].answer)throw Error('请补充“'+bindings[i].phrase+'”');}const r=flow.query_mode==='semantic'?await api('/api/portal/queries/'+flow.id+'/clarify',{expected_version:flow.version,answers}):await queryAction(flow.id,'clarify-legacy',{expected_version:flow.version,answers});await useFlow(r.flow,true);});
+function renderClarifications(host,bindings){
+ host.innerHTML=bindings.map((binding,index)=>{
+  const choices=binding.options||[];
+  const fields=binding.candidates||[];
+  const content=choices.length?choices.map(choice=>`<label class="choice"><input type="radio" name="option-${index}" value="${esc(choice.id)}" ${choice.recommended?'checked':''}><span>${esc(choice.label)}${choice.recommended?'<small>推荐口径</small>':''}</span></label>`).join(''):
+   fields.map(field=>`<label class="choice"><input type="checkbox" value="${esc(field.field_id)}" ${((binding.selected_field_ids||[]).includes(field.field_id)||binding.suggested_field_id===field.field_id)?'checked':''}><span>${esc(field.field_label||field.field_name)}<small>${esc(field.table_name||field.table)} · ${esc(field.definition||'')}</small></span></label>`).join('');
+  const needsText=!choices.length&&(!fields.length||['sql_missing','model_missing','missing','combination_unresolved'].includes(binding.status));
+  return `<fieldset class="clarify" data-binding="${index}"><legend>${esc(binding.phrase||'查询口径')}</legend><p>${esc(binding.question||'请选择本次需要的字段。')}</p>${content}${needsText?`<textarea class="field-input" rows="2" aria-label="${esc(binding.phrase)}的补充说明" placeholder="请补充这项口径…"></textarea>`:''}</fieldset>`;
+
+ }).join('')+'<div class="actions"><button class="button primary" id="resolve">确认选择并继续</button><button class="button" id="edit-clarification">修改需求</button></div>';
+ $('#edit-clarification').onclick=()=>{const request=(flow.request_text||'').split('\n用户补充：')[0];go('ask');ask(request);};
+ button('resolve',async()=>{
+  const answers=bindings.map((binding,index)=>{
+   const box=host.querySelector(`[data-binding="${index}"]`);
+   if(binding.options?.length){
+    const chosen=box.querySelector('input[type=radio]:checked');
+    if(!chosen)throw Error('请选择查询口径');
+    return {intent_id:binding.intent_id,option_id:chosen.value};
+   }
+   const selected_field_ids=[...box.querySelectorAll('input:checked')].map(input=>input.value);
+   const answer=box.querySelector('textarea')?.value.trim()||'';
+   if(binding.candidates?.length&&!selected_field_ids.length)throw Error('请为“'+binding.phrase+'”选择字段');
+   if(!binding.candidates?.length&&!answer)throw Error('请补充“'+binding.phrase+'”');
+   return {intent_id:binding.intent_id,selected_field_ids,answer};
+  });
+  const payload={expected_version:flow.version,answers};
+  const response=flow.query_mode==='semantic'?await queryAction(flow.id,'clarify',payload):
+   await queryAction(flow.id,'clarify-legacy',payload);
+  await useFlow(response.flow,true);
+ });
 }
-async function useFlow(next,replace=false){flow=next;delivery=null;const url=new URL(location.href);url.searchParams.set('flow',flow.id);history.replaceState(null,'',url);const response=await api('/api/portal/queries/'+flow.id);flow=response.flow;demand=response.demand;canDownload=response.can_download;renderFlow();if(flow.state==='query_completed')await readResult(routeGeneration);schedulePoll();}
+async function useFlow(next,replace=false){flow=next;delivery=null;const url=new URL(location.href);url.searchParams.set('flow',flow.id);history.replaceState(null,'',url);const response=await api('/api/portal/queries/'+flow.id);flow=response.flow;demand=response.demand;canDownload=response.can_download;canRecount=response.can_recount;renderFlow();if(flow.state==='query_completed')await readResult(routeGeneration);schedulePoll();}
 async function advance(){let f=flow;
  if(f.state==='awaiting_chain_confirmation'){
   const ids=[...new Set((f.steps||[]).flatMap(s=>s.candidates||[]).map(x=>x.id).filter(Boolean))];
@@ -120,10 +188,21 @@ async function advance(){let f=flow;
 }
 async function readResult(gen){try{const r=await queryAction(flow.id,'result',{});if(gen!==routeGeneration)return;delivery=r;flow=r.flow;$('#flow-content').innerHTML='<p>查询已完成。以下为本次授权范围内的实际返回结果。</p>';renderResult();}catch(error){if(gen===routeGeneration){$('#results').innerHTML=errorBox(error)+'<button class="button" id="read-again">重新读取结果</button>';button('read-again',()=>readResult(gen));}}}
 function renderResult(){const result=delivery.result||{},columns=result.columns||[],original=result.rows||[];let filtered=original.slice(),sortIndex=-1,ascending=true;
- $('#results').innerHTML=`<section class="panel result-panel"><div class="result-head"><div><h2>查询结果 <span class="status ok">已完成</span></h2><small id="result-count">${result.suppressed?'结果受当前权限保护':`返回 ${original.length} 条 · ${(columns.length)} 个字段`}</small></div><div class="result-tools"><input type="search" id="result-search" placeholder="筛选当前结果…" aria-label="筛选当前结果"><button id="copy-result" class="button small">${icon('copy')}复制</button>${canDownload&&allowed('delivery.download')?`<button id="export-result" class="button small">${icon('download')}导出</button>`:''}</div></div><div class="table-scroll"><table class="result-table"><thead><tr>${columns.map((c,i)=>`<th><button data-sort="${i}" title="按${esc(fieldLabel(c))}排序">${esc(fieldLabel(c))}<span>↕</span></button></th>`).join('')}</tr></thead><tbody id="result-rows"></tbody></table></div><div id="empty-result" class="empty" hidden></div><div class="result-foot"><span>仅展示本次已授权的返回记录</span><span>有效至 ${esc(date(delivery.expires_at))}</span></div></section>`;
- function paint(){const q=$('#result-search').value.toLocaleLowerCase();filtered=original.filter(row=>row.some(v=>String(v??'').toLocaleLowerCase().includes(q)));if(sortIndex>=0)filtered.sort((a,b)=>{const av=a[sortIndex],bv=b[sortIndex];const order=av==null?1:bv==null?-1:typeof av==='number'&&typeof bv==='number'?av-bv:String(av).localeCompare(String(bv),'zh-CN',{numeric:true});return ascending?order:-order;});$('#result-rows').innerHTML=filtered.map(row=>'<tr>'+row.map(v=>`<td>${v==null?'<span title="缺失值">—</span>':esc(v)}</td>`).join('')+'</tr>').join('');$('#result-count').textContent=result.suppressed?'结果受当前权限保护':q?`显示 ${filtered.length} / ${original.length} 条 · ${columns.length} 个字段`:`返回 ${original.length} 条 · ${columns.length} 个字段`;const empty=$('#empty-result');empty.hidden=filtered.length>0;empty.textContent=result.message||(original.length?'当前筛选没有匹配记录，试试其他关键词。':'查询已执行，当前数据源没有满足本次筛选与关联条件的记录。');}
+ const calculation=calculationLabels[result.calculation];
+ const resultLabel=name=>name==='count'&&calculation?calculation:fieldLabel(name);
+ const resultStatus=q=>result.suppressed?(calculation?'低于最小交付门槛':'结果受当前权限保护'):
+  calculation?'汇总交付':q?`显示 ${filtered.length} / ${original.length} 条 · ${columns.length} 个字段`:`返回 ${original.length} 条 · ${columns.length} 个字段`;
+ $('#results').innerHTML=`<section class="panel result-panel"><div class="result-head"><div><h2>查询结果 <span class="status ok">已完成</span></h2><small id="result-count">${resultStatus('')}</small></div><div class="result-tools"><input type="search" id="result-search" placeholder="筛选当前结果…" aria-label="筛选当前结果"><button id="copy-result" class="button small">${icon('copy')}复制</button>${canDownload&&allowed('delivery.download')?`<button id="export-result" class="button small">${icon('download')}导出</button>`:''}</div></div><div class="table-scroll"><table class="result-table"><thead><tr>${columns.map((c,i)=>`<th><button data-sort="${i}" title="按${esc(resultLabel(c))}排序">${esc(resultLabel(c))}<span>↕</span></button></th>`).join('')}</tr></thead><tbody id="result-rows"></tbody></table></div><div id="empty-result" class="empty" hidden></div><div class="result-foot"><span>${calculation?'本次仅交付汇总值':'仅展示本次已授权的返回记录'}</span><span>有效至 ${esc(date(delivery.expires_at))}</span></div></section>`;
+ function paint(){const q=$('#result-search').value.toLocaleLowerCase();filtered=original.filter(row=>row.some(v=>String(v??'').toLocaleLowerCase().includes(q)));if(sortIndex>=0)filtered.sort((a,b)=>{const av=a[sortIndex],bv=b[sortIndex];const order=av==null?1:bv==null?-1:typeof av==='number'&&typeof bv==='number'?av-bv:String(av).localeCompare(String(bv),'zh-CN',{numeric:true});return ascending?order:-order;});$('#result-rows').innerHTML=filtered.map(row=>'<tr>'+row.map(v=>`<td>${v==null?'<span title="缺失值">—</span>':esc(v)}</td>`).join('')+'</tr>').join('');$('#result-count').textContent=resultStatus(q);const empty=$('#empty-result');empty.hidden=filtered.length>0;empty.textContent=result.message||(original.length?'当前筛选没有匹配记录，试试其他关键词。':'查询已执行，当前数据源没有满足本次筛选与关联条件的记录。');}
  $('#result-search').oninput=paint;document.querySelectorAll('[data-sort]').forEach(el=>el.onclick=()=>{const i=Number(el.dataset.sort);ascending=sortIndex===i?!ascending:true;sortIndex=i;document.querySelectorAll('[data-sort] span').forEach(s=>s.textContent='↕');el.querySelector('span').textContent=ascending?'↑':'↓';paint();});paint();
- button('copy-result',async()=>{await navigator.clipboard.writeText([columns.map(fieldLabel),...filtered].map(row=>row.map(v=>String(v??'').replace(/[\t\r\n]/g,' ')).join('\t')).join('\n'));toast('已复制当前筛选后的结果');});
+ if(result.suppressed&&canRecount){
+  $('#empty-result').insertAdjacentHTML('afterend','<div class="actions"><button class="button small" id="recount">按最新规则重新统计</button></div>');
+  button('recount',async()=>{
+   const response=await queryAction(flow.id,'recount',{expected_version:flow.version});
+   await useFlow(response.flow);
+  });
+ }
+ button('copy-result',async()=>{await navigator.clipboard.writeText([columns.map(resultLabel),...filtered].map(row=>row.map(v=>String(v??'').replace(/[\t\r\n]/g,' ')).join('\t')).join('\n'));toast('已复制当前筛选后的结果');});
  button('export-result',async()=>{const r=await fetch('/api/portal/deliveries/'+encodeURIComponent(delivery.delivery_id)+'/download',{method:'GET',headers:headers()});if(!r.ok){let reason;try{reason=(await r.json()).error;}catch{}throw Error(reason||'当前结果不允许导出');}const url=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=url;a.download='查询结果.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
 }
 const quote=value=>'"'+String(value).replaceAll('"','""')+'"';
@@ -139,8 +218,8 @@ function renderBuilder(){const host=$('#builder-main'),tables=builderTables(),fi
  document.querySelectorAll('[data-field]').forEach(el=>el.onchange=()=>{if(el.checked&&builder.fields.length>=10){el.checked=false;toast('最多选择10个字段',true);return;}builder.fields=el.checked?[...builder.fields,el.dataset.field]:builder.fields.filter(x=>x!==el.dataset.field);changed();});
  if($('#join-table'))$('#join-table').onchange=()=>{builder.join=$('#join-table').value;const ids=new Set(builderFields().map(f=>f.id));builder.fields=builder.fields.filter(id=>ids.has(id));builder.filters=builder.filters.filter(f=>ids.has(f.field));builder.sqlOverride=null;renderBuilder();};
  document.querySelectorAll('[data-filter-field]').forEach(el=>el.onchange=()=>{builder.filters[Number(el.dataset.filterField)].field=el.value;changed();});document.querySelectorAll('[data-filter-value]').forEach(el=>el.oninput=()=>{builder.filters[Number(el.dataset.filterValue)].value=el.value;changed();});document.querySelectorAll('[data-remove]').forEach(el=>el.onclick=()=>{builder.filters.splice(Number(el.dataset.remove),1);builder.sqlOverride=null;renderBuilder();});$('#add-filter').onclick=()=>{if(builder.filters.length>=20||!fields.length)return;builder.filters.push({field:fields[0].id,value:''});builder.sqlOverride=null;renderBuilder();};$('#sort-field').onchange=()=>{builder.order=$('#sort-field').value;changed();};$('#sort-direction').onchange=()=>{builder.direction=$('#sort-direction').value;changed();};$('#row-limit').onchange=()=>{builder.limit=Number($('#row-limit').value);changed();};$('#sql-editor').oninput=()=>{builder.sqlOverride=$('#sql-editor').value;$('#pro-preview').replaceChildren();};$('#regenerate-sql').onclick=()=>{builder.sqlOverride=null;$('#sql-editor').value=buildSQL();$('#pro-preview').replaceChildren();};
- button('preview-query',async()=>{if(builder.sqlOverride===null&&builder.filters.some(f=>!String(f.value).trim()))throw Error('请填写筛选值，或删除空白条件');const sql=buildSQL();if(!sql.trim())throw Error('请选择输出字段和筛选条件');$('#pro-error').replaceChildren();try{const r=await api('/api/portal/professional/preview',{sql});$('#pro-preview').innerHTML=`<div class="answer-card"><h2>查询已准备好</h2><p>从 ${esc(r.tables.join(' + '))} 按 ${r.filters.length} 个条件筛选，最多返回 ${r.max_rows} 条。</p><div class="chips">${r.outputs.map(f=>`<span class="chip">${esc(f.label)}</span>`).join('')}</div><details class="details"><summary>核对查询 SQL</summary><pre>${esc(r.sql)}</pre></details><div class="actions"><button id="save-pro" class="button primary">确认意图并执行</button></div></div>`;button('save-pro',async()=>{const saved=await api('/api/portal/professional',{sql:r.sql,confirmed:true});const executed=await api('/api/portal/queries/'+encodeURIComponent(saved.flow.id)+'/execute',{expected_version:saved.flow.version,confirmed:true});await useFlow(executed.flow);});$('#pro-preview').scrollIntoView({behavior:'smooth',block:'nearest'});}catch(error){$('#pro-error').innerHTML=errorBox(error);throw error;}});
+ button('preview-query',async()=>{if(builder.sqlOverride===null&&builder.filters.some(f=>!String(f.value).trim()))throw Error('请填写筛选值，或删除空白条件');const sql=buildSQL();if(!sql.trim())throw Error('请选择输出字段和筛选条件');$('#pro-error').replaceChildren();try{const r=await api('/api/portal/professional/preview',{sql});$('#pro-preview').innerHTML=`<div class="answer-card"><h2>查询已准备好</h2><p>从 ${esc(r.tables.join(' + '))} 按 ${r.filters.length} 个条件${r.calculation?'计算汇总值':'筛选，最多返回 '+r.max_rows+' 条'}。</p><div class="chips">${r.outputs.map(f=>`<span class="chip">${esc(f.label)}</span>`).join('')}</div><details class="details"><summary>核对查询 SQL</summary><pre>${esc(r.sql)}</pre></details><div class="actions"><button id="save-pro" class="button primary">确认意图并执行</button></div></div>`;button('save-pro',async()=>{const saved=await api('/api/portal/professional',{sql:r.sql,confirmed:true});const executed=await api('/api/portal/queries/'+encodeURIComponent(saved.flow.id)+'/execute',{expected_version:saved.flow.version,confirmed:true});await useFlow(executed.flow);});$('#pro-preview').scrollIntoView({behavior:'smooth',block:'nearest'});}catch(error){$('#pro-error').innerHTML=errorBox(error);throw error;}});
 }
-async function renderRoute(){clearTimeout(poll);const gen=++routeGeneration;busy=false;flow=null;delivery=null;const p=Object.hasOwn(names,page())?page():'home';setText('#page-label',names[p]);document.title=names[p]+' · 数据编织平台';document.querySelectorAll('#nav a').forEach(a=>{const active=a.dataset.page===p;a.classList.toggle('active',active);if(active)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});$('#main').innerHTML=loading();const id=new URL(location.href).searchParams.get('flow');try{if(id){await loadFlow(id,gen);}else if(p==='home')await home(gen);else if(p==='ask')ask();else if(p==='query')await professional(gen);}catch(error){if(gen===routeGeneration)$('#main').innerHTML=heading('暂时无法加载','你的查询记录仍保留在平台中。')+errorBox(error)+'<button class="button" id="retry-page">重试</button>';button('retry-page',renderRoute);}}
+async function renderRoute(){clearTimeout(poll);const gen=++routeGeneration;busy=false;flow=null;delivery=null;const p=Object.hasOwn(names,page())?page():'home';setText('#page-label',names[p]);document.title=names[p]+' · 数据编织平台';document.querySelectorAll('#nav a').forEach(a=>{const active=a.dataset.page===p;a.classList.toggle('active',active);if(active)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});$('#main').innerHTML=loading();const id=new URL(location.href).searchParams.get('flow');try{if(id){await loadFlow(id,gen);}else if(p==='home')await home(gen);else if(p==='ask')ask(new URLSearchParams(location.search).get('question')||'');else if(p==='query')await professional(gen);}catch(error){if(gen===routeGeneration)$('#main').innerHTML=heading('暂时无法加载','你的查询记录仍保留在平台中。')+errorBox(error)+'<button class="button" id="retry-page">重试</button>';button('retry-page',renderRoute);}}
 bindRole();
 try{await ready();const principal=currentAccess().principal||{},name=principal.display_name||principal.username||'当前账户';setText('#identity',name);setText('#avatar',name.slice(0,1));if($('#connection'))$('#connection').innerHTML='<span class="status-dot"></span>工作空间已连接';await renderRoute();}catch(error){setText('#connection','连接暂不可用');$('#main').innerHTML=errorBox(error);}

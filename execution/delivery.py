@@ -11,6 +11,10 @@ def canonical(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,s
 def digest(value):return hashlib.sha256(canonical(value)).hexdigest()
 
 
+class DeliveryQualityError(DomainError):
+    pass
+
+
 class Delivery:
     def __init__(self,store,security):
         self.store,self.security=store,security
@@ -41,10 +45,28 @@ class Delivery:
         granularity=not aggregate or (shape and 'count' in columns and all(type(r[columns.index('count')]) is int and r[columns.index('count')]>=grant['min_group_size'] for r in rows))
         return {'format':shape,'quality':quality is True,'authorization':grant['status']=='active' and timestamp(grant['expires_at'])>datetime.now(timezone.utc),
                 'sensitive_information':sensitive,'granularity':granularity,'subsequent_purpose':bool(plan['purpose']) and plan['purpose']==grant['purpose']}
+
+    def require_checks(self,result,plan,grant,quality=None):
+        checks=self.checks(result,plan,grant,quality)
+        failed=[name for name,passed in checks.items() if not passed]
+        if failed==['quality'] and result['rows']:
+            columns=result['columns']
+            rows=result['rows']
+            missing={name:sum(row[index] is None for row in rows) for index,name in enumerate(columns)}
+            total=len(rows)*len(columns)
+            completeness=(total-sum(missing.values()))/total
+            threshold=plan.get('quality_min_complete',1)
+            if completeness<threshold:
+                details='、'.join(f'{name}（{count} 条）' for name,count in missing.items() if count)
+                raise DeliveryQualityError(
+                    f'已读取 {len(rows)} 条记录。输出字段完整率为 {completeness:.1%}，'
+                    f'本次方案要求 {threshold:.1%}。含空值的字段：{details}。',403)
+        if failed:raise DomainError('交付复核未通过：'+', '.join(failed),403)
+        return checks
+
     def create(self,result,plan,grant_id,actor,run_id,quality=None):
         grant,decision=self.security.check(grant_id,plan,actor,plan['purpose'],'delivery')
-        checks=self.checks(result,plan,grant,quality)
-        if not all(checks.values()):raise DomainError('交付复核未通过：'+', '.join(k for k,v in checks.items() if not v),403)
+        checks=self.require_checks(result,plan,grant,quality)
         if len(result['rows'])>grant['max_rows']:raise DomainError('交付行数超出授权',403)
         oid=new_id('DEL')
         quality_policy=plan.get('execution_policy') or {}
@@ -74,8 +96,7 @@ class Delivery:
             raise DomainError('交付凭证未绑定当前输出及执行条件，请重新执行',403)
         # Previously stored results must not bypass the current output boundary.
         grant=self.store.require('grant',d['grant_id'])
-        checks=self.checks(d['result'],plan,grant)
-        if not all(checks.values()):raise DomainError('交付复核未通过：'+', '.join(k for k,v in checks.items() if not v),403)
+        self.require_checks(d['result'],plan,grant)
         if len(d['result']['rows'])>grant['max_rows']:raise DomainError('交付行数超出授权',403)
         return d
     def destroy(self,oid,actor):

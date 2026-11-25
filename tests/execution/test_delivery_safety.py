@@ -44,8 +44,11 @@ class DeliverySafetyTests(unittest.TestCase):
 
     def test_medical_aggregate_is_preserved(self):
         result = aggregate()
-        self.assertEqual(result['rows'], [['40—49岁', '类别甲', 5]])
-        self.assertTrue(all(self.check(result).values()))
+        self.assertEqual(result['rows'], [['30—39岁','类别甲',3],['40—49岁','类别甲',5],['50—59岁','类别乙',4]])
+        self.assertTrue(all(self.delivery.checks(result,self.plan,{**self.grant,'min_group_size':0}).values()))
+        historical=aggregate(5)
+        self.assertEqual(historical['rows'],[['40—49岁','类别甲',5]])
+        self.assertTrue(all(self.check(historical).values()))
 
     def test_previous_alias_and_nested_bypasses_are_rejected(self):
         examples = [

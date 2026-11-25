@@ -10,8 +10,19 @@ from platform_core.access import (require_action, require_resource, can_read_man
     project_result, level_for, account_permission)
 from management.intake.flow import IntakeFlow
 from management.catalog.field_library import FieldLibrary
-from management.intake.professional import professional_shape
+from management.intake.professional import professional_shape, workbench_policy
+from management.intake.calculations import CALCULATION_LABELS, DIABETES_COUNTS, DIAGNOSIS, DIABETES_AGE
 from execution.security.output_policy import field_classification
+
+
+def plan_preview(shape, plan):
+    calculation=shape.get('calculation')
+    columns=['count'] if calculation else [field['name'] for field in shape['output_fields']]
+    return {'output_columns':columns,
+            'output_description':CALCULATION_LABELS[calculation['kind']] if calculation else '、'.join(columns),
+            'table':' + '.join(table['name'] for table in shape['tables']),
+            'filters':shape['filters'],'output_mode':plan['output_mode'],
+            'join_path':shape.get('join_path',[])}
 
 
 def create_router(runtime, identity):
@@ -39,6 +50,12 @@ def create_router(runtime, identity):
                 'allowed_tables':[table['name'] for table in available_tables],
                 'scope_limited':permission['level']<4}
 
+    def can_recount(flow,principal):
+        shape=flow.get('professional_preview') or {}
+        policy=(flow.get('draft') or {}).get('execution_constraints') or {}
+        return (flow['state']=='query_completed' and flow.get('created_by')==principal['id']
+                and policy.get('min_group_size',5)>0 and bool(shape.get('calculation')))
+
     @router.get('/services')
     def services(request:Request):
         principal=user(request);require_resource(principal,'demand')
@@ -65,11 +82,33 @@ def create_router(runtime, identity):
                 registered.append({'id':item['id'],'name':item.get('name',item['id']),'category':'已发布数据服务','description':item.get('description',''),'status':'已发布','input':'按服务规格'})
         level=level_for(principal)
         doris=runtime.management.catalog.doris
+        from management.intake.semantic_query import supported_diabetes_services, people_count_options, supports_diabetes_details
+        available=catalog(principal)
+        if supports_diabetes_details(available):
+            registered.append({'id':'fn.diabetes_age_details','name':'糖尿病患者年龄明细（模拟 HIS）',
+                'category':'实时统计','description':'按诊断范围列出患者编号、年龄和年龄计算口径。',
+                'status':'可调用','input':'选择 ICD‑10 诊断范围','query_text':'模拟糖尿病患者年龄和编号'})
+        if people_count_options(available):
+            registered.append({'id':'fn.people_count','name':'数据集人数统计','category':'实时统计',
+                'description':'选择数据集，在医疗数据中统计去重患者，在 OpenAlex 中统计去重作者。',
+                'status':'可调用','input':'选择数据集和人员口径','query_text':'统计人数'})
+        if level==4:
+            supported=supported_diabetes_services(available)
+            for table,service_id,name,description,question in (
+                (DIABETES_COUNTS,'fn.diabetes_people','糖尿病去重人数','在数据源按患者去重，返回具体人数。','糖尿病有多少人'),
+                (DIAGNOSIS,'fn.diabetes_records','糖尿病诊断记录数','按所选诊断编码范围统计实际记录条数。','糖尿病诊断记录数'),
+                (DIABETES_AGE,'fn.diabetes_age','糖尿病患者年龄统计','按患者编号关联诊断与出生日期，查看关联覆盖和平均周岁。','糖尿病患者平均年龄'),
+            ):
+                if table in supported:
+                    connected=any(t['name']==table and t['connected'] for t in available)
+                    registered.append({'id':service_id,'name':name,'category':'实时统计',
+                        'description':description,
+                        'status':'可调用' if connected else '待连接','input':'选择 ICD‑10 诊断范围','query_text':question})
         if level==4 and doris:
             for source,alias,service_id in doris.services():
                 _, table=source.tables[alias]
                 registered.append({'id':service_id,'name':f'{table} 记录数',
-                    'category':'实时统计','description':'实时统计记录数，少于 5 条时隐藏。',
+                    'category':'实时统计','description':'实时统计记录数。',
                     'status':'可调用' if doris.status(source.id)=='connected' else '待连接',
                     'input':'无参数','live_call':True})
         minimum={'fn.age':3,'fn.date_range':1,'fn.stats':1,'fn.abnormal':1,
@@ -189,13 +228,27 @@ def create_router(runtime, identity):
     def get_query(flow_id:str,request:Request):
         principal=user(request);flow=owned(flow_id,principal)
         flow=intake.reconcile_execution(flow,principal['id'])
+        if (flow.get('query_mode')=='semantic' and flow['state']=='awaiting_chain_confirmation'
+                and flow.get('created_by')==principal['id'] and level_for(principal)==4
+                and 'clarification_answers' not in flow and '\n用户补充：' in flow.get('request_text','')):
+            from management.intake.semantic_query import prepare, query_dialogue, legacy_diabetes_choice
+            available=catalog(principal)
+            with store.atomic():
+                flow=store.require('intake_flow',flow_id)
+                selected=legacy_diabetes_choice(flow,available)
+                if selected:
+                    require_action(principal,'demand.understand')
+                    text,history=query_dialogue(flow)
+                    flow=prepare(runtime,text,principal['id'],available,flow,selected_intent=selected,
+                                 clarifications=history,permission_context=query_permission_context(principal,available))
         plan=runtime.execution.store.get('plan',flow.get('execution_plan_id',''),flow.get('execution_plan_version'))
         if plan:
             require_plan_scope(principal,runtime,plan)
         elif flow.get('query_draft'):
             shape=professional_shape(flow['query_draft'],store)
             require_table_scope(principal,shape['tables'])
-        return {'flow':flow,'can_download':bool(plan and plan.get('circulation_mode')=='download'
+        return {'flow':flow,'can_recount':can_recount(flow,principal),
+                'can_download':bool(plan and plan.get('circulation_mode')=='download'
                 and can_read_execution(runtime,'plan',plan,principal)),
                 'demand':store.require('demand',flow['demand_id'])}
 
@@ -222,21 +275,51 @@ def create_router(runtime, identity):
         if body.get('expected_version')!=flow['version']:raise DomainError('查询已变化，请刷新',409)
         answers=body.get('answers')
         if not isinstance(answers,list) or len(answers)!=len(flow['field_bindings']):raise DomainError('请回答必要的查询问题')
-        byid={a.get('intent_id'):a.get('answer') for a in answers if isinstance(a,dict)}
+        byid={a['intent_id']:a for a in answers if isinstance(a,dict) and isinstance(a.get('intent_id'),str)}
+        from management.intake.semantic_query import prepare, query_dialogue
+        text,history=query_dialogue(flow)
         additions=[]
+        selected_intent=None
         for binding in flow['field_bindings']:
-            answer=byid.get(binding['intent_id'])
+            response=byid.get(binding['intent_id'],{})
+            if binding.get('options'):
+                choice=next((item for item in binding['options'] if item['id']==response.get('option_id')),None)
+                if choice is None:raise DomainError('请选择页面列出的查询口径')
+                answer=choice['label']
+                selected_intent=choice.get('intent') or selected_intent
+            else:
+                answer=response.get('answer')
             if not isinstance(answer,str) or not 1<=len(answer.strip())<=2000:raise DomainError('请填写查询口径')
-            additions.append(binding['question']+'：'+answer.strip())
-        text=flow['request_text']+'\n用户补充：'+'；'.join(additions)
-        if len(text)>12000:raise DomainError('补充内容过长，请重新描述需求')
-        from management.intake.semantic_query import prepare
+            additions.append({'question':binding['question'],'answer':answer.strip(),
+                              **({'decision_key':binding['decision_key']} if binding.get('decision_key') else {})})
+        history=[*history,*additions]
+        if len(text)+sum(len(item['question'])+len(item['answer']) for item in history)>12000:
+            raise DomainError('补充内容过长，请重新描述需求')
         available=catalog(principal)
         updated=await run_in_threadpool(prepare,runtime,text,principal['id'],available,flow,
                                         provider=flow.get('ai_provider'),
-                                        permission_context=query_permission_context(principal,available))
+                                        permission_context=query_permission_context(principal,available),
+                                        selected_intent=selected_intent,clarifications=history)
         shape=updated.get('professional_preview') or {}
         require_table_scope(principal,shape.get('tables') or ([shape['table']] if shape.get('table') else []))
+        return {'flow':updated}
+
+    @router.post('/queries/{flow_id}/retry-understanding')
+    async def retry_understanding(flow_id:str,request:Request):
+        principal=user(request,'demand.understand')
+        flow=owned(flow_id,principal)
+        body=await request.json()
+        if (flow.get('query_mode')!='semantic' or flow['state']!='attention'
+                or flow.get('created_by')!=principal['id'] or body.get('expected_version')!=flow['version']):
+            raise DomainError('请刷新当前查询后重试',409)
+        from management.intake.semantic_query import prepare, query_dialogue
+        text,history=query_dialogue(flow)
+        available=catalog(principal)
+        updated=await run_in_threadpool(prepare,runtime,text,principal['id'],available,flow,
+                                        permission_context=query_permission_context(principal,available),
+                                        clarifications=history)
+        shape=updated.get('professional_preview') or {}
+        require_table_scope(principal,shape.get('tables',[]))
         return {'flow':updated}
 
     @router.post('/professional/preview')
@@ -245,27 +328,63 @@ def create_router(runtime, identity):
         body=await request.json();shape=professional_shape(body.get('sql'),store)
         require_table_scope(principal,shape['tables'])
         definitions=FieldLibrary(store).confirmed()
-        return {'sql':shape['sql'],'outputs':[{'name':f['name'],'label':definitions[f['id']]['label'],
-            'classification':field_classification(f)} for f in shape['output_fields']],
+        calculation=shape.get('calculation')
+        outputs=([{'name':'count','label':CALCULATION_LABELS[calculation['kind']],'classification':'aggregate'}]
+                 if calculation else [{'name':f['name'],'label':definitions[f['id']]['label'],
+                    'classification':field_classification(f)} for f in shape['output_fields']])
+        return {'sql':shape['sql'],'outputs':outputs,'calculation':calculation,
             'filters':shape['filters'],'max_rows':shape['max_rows'],'tables':[t['name'] for t in shape['tables']],
             'order_by':shape['order_by']}
+
+    @router.post('/queries/{flow_id}/recount')
+    async def recount(flow_id:str,request:Request):
+        principal=user(request,'demand.create')
+        flow=owned(flow_id,principal)
+        body=await request.json()
+        if body.get('expected_version')!=flow['version'] or not can_recount(flow,principal):
+            raise DomainError('请刷新后重新核对统计范围及账户权限',409)
+        shape=professional_shape(flow['query_draft'],store)
+        require_table_scope(principal,shape['tables'])
+        if flow['query_mode']=='semantic':
+            require_action(principal,'demand.understand')
+            from management.intake.semantic_query import prepare, compile_intent, query_dialogue
+            intent=flow.get('semantic_intent')
+            checked=compile_intent(intent,store,{t['id'] for t in catalog(principal)}) if intent else None
+            if not checked or checked['sql']!=shape['sql']:
+                raise DomainError('保存的查询意图已变化，请重新描述需求',409)
+            available=catalog(principal)
+            text,history=query_dialogue(flow)
+            updated=await run_in_threadpool(prepare,runtime,text,principal['id'],available,
+                provider=flow.get('ai_provider'),permission_context=query_permission_context(principal,available),
+                selected_intent=intent,clarifications=history)
+        else:
+            require_resource(principal,'object')
+            updated=save_professional_flow(shape,principal)
+        return {'flow':updated}
 
     @router.post('/professional')
     async def save_professional(request:Request):
         principal=user(request,'demand.create');require_resource(principal,'object')
         body=await request.json()
         if body.get('confirmed') is not True:raise DomainError('请先核对查询范围与输出字段')
+        allow_missing=body.get('allow_missing',False)
+        if type(allow_missing) is not bool:raise DomainError('请选择是否保留空值')
         shape=professional_shape(body.get('sql'),store)
         require_table_scope(principal,shape['tables'])
+        return {'flow':save_professional_flow(shape,principal,allow_missing)}
+
+    def save_professional_flow(shape,principal,allow_missing=False):
         today=datetime.now(ZoneInfo('Asia/Shanghai')).date();end=today+timedelta(days=7)
-        policy={'scope':{'kind':'lookup','filters':shape['filters']},'time_field':None,'output_mode':'object',
-                'field_outputs':[f['id'] for f in shape['output_fields']],'circulation_modes':['controlled_compute'],
-                'quality_min_complete':1,'max_rows':shape['max_rows'],'min_group_size':5}
+        policy=workbench_policy(shape,allow_missing)
         definitions=FieldLibrary(store).confirmed()
-        title='查询 '+ '、'.join(definitions[f['id']]['label'] for f in shape['output_fields'])
-        draft={'title':title,'entry':'goal','object_scope':'按已确认 SQL 的条件筛选，最多返回 '+str(shape['max_rows'])+' 条',
+        calculation=shape.get('calculation')
+        title=('统计'+CALCULATION_LABELS[calculation['kind']] if calculation else
+               '查询 '+'、'.join(definitions[f['id']]['label'] for f in shape['output_fields']))
+        scope=title if calculation else '按已确认 SQL 的条件筛选，最多返回 '+str(shape['max_rows'])+' 条'
+        draft={'title':title,'entry':'goal','object_scope':scope,
                'time_start':today.isoformat(),'time_end':end.isoformat(),'deadline':end.isoformat(),
-               'purpose':'自主数据查询','quality':'完整','delivery':'对象级','execution_constraints':policy,
+               'purpose':'自主数据查询','quality':'完整率' if allow_missing else '完整',
+               'delivery':'汇总' if calculation else '对象级','execution_constraints':policy,
                'cost':'','attachments':[],'service_ids':[],'query_draft':shape['sql']}
         demand=runtime.management.intake.save({**draft,'portal_mode':'professional'},principal['id'])
         resources=[{**store.require('object',oid),'review_status':'human_confirmed'}
@@ -276,7 +395,7 @@ def create_router(runtime, identity):
             'clarification_questions':[],'query_validation':{'status':'valid_pending_human_confirmation','normalized_sql':shape['sql'],'errors':[]},
             'steps':[{'id':'query','capability':'data_query','label':'查询数据','status':'waiting_manual_spec_confirmation'}],
             'output_preference':'catalog_field','execution_authorized':False,'professional_preview':shape},0,principal['id'],'用户确认专业查询草案')
-        return {'flow':flow}
+        return flow
 
     @router.post('/queries/{flow_id}/confirm')
     @router.post('/professional/{flow_id}/confirm')
@@ -288,9 +407,8 @@ def create_router(runtime, identity):
             raise DomainError('请刷新后确认本次查询范围',409)
         if flow.get('query_mode')=='semantic':
             from management.intake.semantic_query import compile_intent
-            checked=compile_intent(flow['semantic_intent'],store)
+            checked=compile_intent(flow['semantic_intent'],store,{t['id'] for t in catalog(principal)})
             if not checked or checked['sql']!=flow['query_draft']:raise DomainError('查询意图与草案不一致，请重新理解查询',409)
-        professional_shape(flow['query_draft'],store)
         checked=professional_shape(flow['query_draft'],store)
         require_table_scope(principal,checked['tables'])
         flow={**flow,'resources':[{**r,'review_status':'human_confirmed'} for r in flow['resources']]}
@@ -304,9 +422,7 @@ def create_router(runtime, identity):
             updated=store.save('intake_flow',flow['id'],{**flow,'state':'awaiting_plan_confirmation',
                 'spec_id':spec['id'],'spec_version':spec['version'],'execution_plan_id':plan['id'],
                 'execution_plan_version':plan['version'],'execution_view_id':view['id'],
-                'execution_plan_preview':{'output_columns':[f['name'] for f in shape['output_fields']],
-                    'output_description':'、'.join(f['name'] for f in shape['output_fields']),
-                    'table':' + '.join(t['name'] for t in shape['tables']),'filters':shape['filters'],'output_mode':'object'},
+                'execution_plan_preview':plan_preview(shape,plan),
                 'steps':[{'id':'query','capability':'data_query','label':'查询数据','status':'awaiting_plan_confirmation'}]},
                 flow['version'],principal['id'],'专业查询规格已确认并建立固定方案')
         return {'flow':updated}
@@ -325,6 +441,11 @@ def create_router(runtime, identity):
         if flow.get('query_validation',{}).get('status') not in ('valid_pending_human_confirmation','valid'):
             raise DomainError('查询范围未通过结构校验，请重新描述需求',409)
         shape=professional_shape(flow.get('query_draft'),store)
+        if flow.get('query_mode')=='semantic':
+            from management.intake.semantic_query import compile_intent
+            checked=compile_intent(flow['semantic_intent'],store,{t['id'] for t in catalog(principal)})
+            if not checked or checked['sql']!=shape['sql']:
+                raise DomainError('查询意图与草案不一致，请重新理解查询',409)
         require_table_scope(principal,shape['tables'])
         confirmed=FieldLibrary(store).confirmed()
         if any(field_id not in confirmed for field_id in shape['fields']):
@@ -411,10 +532,7 @@ def create_router(runtime, identity):
             updated=store.save('intake_flow',flow_id,{**flow_for_plan,'spec_id':spec['id'],
                 'spec_version':spec['version'],'execution_plan_id':plan['id'],
                 'execution_plan_version':plan['version'],'execution_view_id':view['id'],
-                'execution_plan_preview':{'output_columns':[field['name'] for field in shape['output_fields']],
-                    'output_description':'、'.join(field['name'] for field in shape['output_fields']),
-                    'table':' + '.join(table['name'] for table in shape['tables']),
-                    'filters':shape['filters'],'output_mode':plan['output_mode']},
+                'execution_plan_preview':plan_preview(shape,plan),
                 'state':'query_queued','steps':steps,'plan_confirmed_by':principal['id'],
                 'plan_confirmed_version':plan['version'],'execution_authorized':True,'grant_id':grant['id'],
                 'authorization_request':{'id':auth.get('request_id') or grant['id'],'status':'approved',

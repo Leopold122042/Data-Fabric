@@ -43,6 +43,51 @@ class SemanticQueryTest(PortalTest):
         intent=self.intent(filters=[{'field':'observations.value','op':'>=','value':3}],limit=10)
         self.assertEqual(self.finish(self.ask(intent)),[[12.0],[4.0],[3.0]])
 
+    def test_collection_range_and_prefix_bind_to_the_source(self):
+        intent=self.intent(filters=[
+            {'field':'observations.cohort','op':'IN','value':['A','B']},
+            {'field':'observations.value','op':'between','value':[2,4]},
+            {'field':'observations.observed_at','op':'prefix','value':'2026-01'}],limit=10)
+        flow=self.ask(intent)
+        self.assertEqual(flow['state'],'waiting_manual_spec_confirmation')
+        self.assertEqual(self.finish(flow),[[4.0],[3.0],[2.0]])
+
+    def test_age_details_use_a_derived_value_and_deduplicate_diagnoses(self):
+        db=sqlite3.connect(self.data/'his.db')
+        db.executescript("""
+        CREATE TABLE patient(patient_id TEXT PRIMARY KEY,birth_date TEXT);
+        CREATE TABLE visit(visit_id INTEGER PRIMARY KEY,patient_id TEXT,diagnosis_code TEXT);
+        INSERT INTO patient VALUES ('P001','1980-'), ('P002','1984-12-08');
+        INSERT INTO visit VALUES (1,'P001','E11.9'),(2,'P001','E11.1'),(3,'P002','I10');
+        """)
+        db.close()
+        self.m.catalog.ingest('his',SQLiteSource(self.data/'his.db').snapshot())
+        library=FieldLibrary(self.m.store)
+        for field in library.items():
+            if field['status']=='confirmed':
+                continue
+            row=self.m.store.require('object',field['id'])
+            self.m.catalog.annotate(field['id'],{'expected_version':row['version'],'classification':'internal'},'demo-platform')
+            saved=library.save(field['id'],{'expected_version':field['version'],'label':field['name'],
+                'definition':'模拟医疗字段','basis':'测试源'},'demo-platform')
+            library.save(field['id'],{'expected_version':saved['version'],'confirmation_note':'已核对'},'demo-platform',confirm=True)
+        flow=self.post('/api/portal/queries',{'text':'得糖尿病的人，他们各自的年龄和编号'})['flow']
+        self.assertTrue(flow['field_bindings'][0]['options'][0]['label'].startswith('模拟 HIS'))
+        url='/api/portal/queries/'+flow['id']
+        flow=self.post(url+'/clarify',{'expected_version':flow['version'],
+            'answers':[{'intent_id':'operation-0','option_id':'diabetes_all'}]})['flow']
+        self.assertEqual(len(flow['professional_preview']['join_path']),1)
+        self.assertTrue(flow['professional_preview']['distinct'])
+        running=self.post(url+'/execute',{'expected_version':flow['version'],'confirmed':True})['flow']
+        job=self.e.run(self.e.store.require('job',running['job_id']))
+        self.assertEqual(job['state'],'success',job.get('error'))
+        self.client.get(url,headers={'X-Demo-Role':'platform'})
+        outputs=self.post(url+'/result',{})['result']['rows']
+        self.assertEqual(len(outputs),1)
+        patient,age,basis=outputs[0]
+        self.assertEqual((patient,basis),('P001','按出生年份估算'))
+        self.assertIsInstance(age,int)
+
     def test_question_preserves_original_request(self):
         f=self.ask(self.intent(questions=['缺少排序时间依据，是否返回全部匹配记录？']))
         self.assertIsNone(f['query_draft'])
@@ -52,9 +97,109 @@ class SemanticQueryTest(PortalTest):
                 'expected_version':f['version'],'answers':[{'intent_id':'operation-0','answer':'保留A组条件，按数值降序'}]})['flow']
         self.assertEqual(updated['id'],f['id'])
         self.assertEqual(updated['demand_id'],f['demand_id'])
-        self.assertIn(f['request_text'],model.call_args.args[0])
-        self.assertIn('保留A组条件',model.call_args.args[0])
+        self.assertEqual(f['request_text'],model.call_args.args[0])
+        self.assertEqual(model.call_args.kwargs['clarifications'][0]['answer'],'保留A组条件，按数值降序')
         self.assertEqual(self.finish(updated),[[2.0],[1.0]])
+
+    def test_executable_choice_enters_confirmation_without_another_model_call(self):
+        candidate=self.intent()
+        draft=self.intent(questions=['按哪个时间口径？'],
+            choices=[[{'label':'早于 1 月 3 日','intent':candidate}]])
+        flow=self.ask(draft)
+        option=flow['field_bindings'][0]['options'][0]
+        self.assertIn('intent',option)
+        with patch('management.intake.semantic_query.interpret',side_effect=AssertionError('口径已确定')):
+            ready=self.post('/api/portal/queries/'+flow['id']+'/clarify',{'expected_version':flow['version'],
+                'answers':[{'intent_id':'operation-0','option_id':option['id']}]})['flow']
+        self.assertEqual(ready['state'],'waiting_manual_spec_confirmation')
+        self.assertEqual(ready['clarification_answers'][0]['answer'],'早于 1 月 3 日')
+        self.assertEqual(ready['semantic_intent']['filters'],candidate['filters'])
+        self.assertFalse(self.e.store.list('job'))
+
+    def test_answered_question_is_not_asked_again_even_when_reworded(self):
+        flow=self.ask(self.intent(questions=['用哪个口径？'],question_keys=['filter.status']))
+        repeated=self.intent(questions=['请确认统计采用哪种状态'],question_keys=['filter.status'])
+        with patch('management.intake.semantic_query.interpret',return_value=repeated) as model:
+            url='/api/portal/queries/'+flow['id']
+            stalled=self.post(url+'/clarify',{'expected_version':flow['version'],
+                'answers':[{'intent_id':'operation-0','answer':'已确认的状态'}]})['flow']
+        self.assertEqual(model.call_count,2)
+        self.assertEqual(stalled['state'],'attention')
+        self.assertFalse(stalled['field_bindings'])
+        self.assertEqual(stalled['clarification_answers'][0]['answer'],'已确认的状态')
+        with patch('management.intake.semantic_query.interpret',return_value=self.intent()) as model:
+            ready=self.post(url+'/retry-understanding',{'expected_version':stalled['version']})['flow']
+        self.assertEqual(model.call_args.kwargs['clarifications'],stalled['clarification_answers'])
+        self.assertEqual(ready['state'],'waiting_manual_spec_confirmation')
+
+    def test_follow_up_keeps_distinct_questions_and_prior_choices(self):
+        draft=self.intent(questions=['先确认组别。'],question_keys=['filter.group'],choices=[['A 组','B 组']])
+        flow=self.ask(draft)
+        follow=self.intent(questions=['先确认组别？','再选择日期范围。'],
+            question_keys=['filter.group','filter.date'],choices=[['A 组','B 组'],['1 月 3 日之前']])
+        url='/api/portal/queries/'+flow['id']
+        with patch('management.intake.semantic_query.interpret',return_value=follow):
+            revised=self.post(url+'/clarify',{'expected_version':flow['version'],
+                'answers':[{'intent_id':'operation-0','option_id':'choice-0'}]})['flow']
+        self.assertEqual(revised['clarification_questions'],['再选择日期范围。'])
+        self.assertEqual(revised['field_bindings'][0]['options'][0]['label'],'1 月 3 日之前')
+        with patch('management.intake.semantic_query.interpret',return_value=self.intent()) as model:
+            ready=self.post(url+'/clarify',{'expected_version':revised['version'],
+                'answers':[{'intent_id':'operation-0','option_id':'choice-0'}]})['flow']
+        self.assertEqual(ready['state'],'waiting_manual_spec_confirmation')
+        self.assertEqual([item['answer'] for item in model.call_args.kwargs['clarifications']],['A 组','1 月 3 日之前'])
+
+    def test_finds_intermediate_table_instead_of_asking_for_a_join_key(self):
+        db=sqlite3.connect(self.data/'his.db')
+        db.executescript("""
+        CREATE TABLE example_patient (patient_id TEXT PRIMARY KEY, birth_year INTEGER);
+        CREATE TABLE example_visit (encounter_key TEXT PRIMARY KEY, person_key TEXT REFERENCES example_patient(patient_id));
+        CREATE TABLE example_diagnosis (code TEXT, encounter_key TEXT REFERENCES example_visit(encounter_key));
+        INSERT INTO example_patient VALUES ('known', 1980), ('other', 1990);
+        INSERT INTO example_visit VALUES ('first','known'), ('second','other');
+        INSERT INTO example_diagnosis VALUES ('E11.9','first'), ('I10','second');
+        """)
+        db.close()
+        self.m.catalog.ingest('his',SQLiteSource(self.data/'his.db').snapshot())
+        library=FieldLibrary(self.m.store)
+        for field in library.items():
+            if field['status']=='confirmed':
+                continue
+            item=self.m.store.require('object',field['id'])
+            self.m.catalog.annotate(field['id'],{'expected_version':item['version'],'classification':'internal'},'demo-platform')
+            draft=library.save(field['id'],{'expected_version':field['version'],'label':field['name'],
+                'definition':'模拟中间表关联','basis':'测试源声明的外键'},'demo-platform')
+            library.save(field['id'],{'expected_version':draft['version'],'confirmation_note':'已验证'},'demo-platform',confirm=True)
+        intent=self.intent(entity='example_diagnosis',outputs=['example_patient.birth_year'],
+            filters=[{'field':'example_diagnosis.code','op':'=','value':'E11.9'}],order_by=[],
+            questions=['缺少已确认的患者关联，请提供关联键'])
+        flow=self.ask(intent,'查询诊断编码 E11.9 的患者出生年份')
+        self.assertEqual(flow['state'],'waiting_manual_spec_confirmation')
+        self.assertFalse(flow['field_bindings'])
+        links=flow['professional_preview']['join_path']
+        self.assertEqual([(edge['from_table'],edge['to_table']) for edge in links],
+            [('example_diagnosis','example_visit'),('example_visit','example_patient')])
+        url='/api/portal/queries/'+flow['id']
+        submitted=self.post(url+'/execute',{'confirmed':True,'expected_version':flow['version']})['flow']
+        job=self.e.run(self.e.store.require('job',submitted['job_id']))
+        self.assertEqual(job['state'],'success',job.get('error'))
+        self.client.get(url,headers={'X-Demo-Role':'platform'})
+        self.assertEqual(self.post(url+'/result',{})['result']['rows'],[[1980]])
+        db=sqlite3.connect(self.data/'his.db')
+        db.execute("INSERT INTO example_diagnosis VALUES ('E11.9','first')")
+        db.commit()
+        db.close()
+        intent={**intent,'selection':'count_people','outputs':[],
+                'summary':'统计匹配诊断的去重人数','limit':1}
+        flow=self.ask(intent,'诊断编码 E11.9 有多少人？')
+        self.assertEqual(flow['state'],'waiting_manual_spec_confirmation')
+        self.assertEqual(len(flow['professional_preview']['join_path']),2)
+        url='/api/portal/queries/'+flow['id']
+        submitted=self.post(url+'/execute',{'confirmed':True,'expected_version':flow['version']})['flow']
+        job=self.e.run(self.e.store.require('job',submitted['job_id']))
+        self.assertEqual(job['state'],'success',job.get('error'))
+        self.client.get(url,headers={'X-Demo-Role':'platform'})
+        self.assertEqual(self.post(url+'/result',{})['result']['rows'],[[1]])
 
     def test_unsupported_operation_never_dropped(self):
         f=self.ask(self.intent(filters=[{'field':'observations.value','op':'OR','value':2}]))

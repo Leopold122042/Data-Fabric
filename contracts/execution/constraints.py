@@ -9,6 +9,7 @@ import math
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from platform_core.storage import DomainError
+from contracts.execution.filters import filter_values
 
 
 def fingerprint(value):
@@ -51,20 +52,34 @@ def has_cost_constraint(value):
     return True
 
 
+def validate_calculation(value):
+    if (not isinstance(value,dict) or set(value)!={'kind','table','field'}
+            or not isinstance(value['table'],str) or not value['table']):
+        raise DomainError('统计方案缺少明确的计算类型、逻辑表或字段')
+    kind,field=value['kind'],value['field']
+    if kind not in ('row_count','person_count','diabetes_count','doris_people_count'):
+        raise DomainError('当前支持记录数和患者去重人数统计')
+    if kind=='row_count':
+        if field is not None:raise DomainError('记录数无需指定统计字段')
+    elif not isinstance(field,str) or not field:
+        raise DomainError('去重人数统计需要登记的统计字段')
+    return dict(value)
+
+
 def normalize(specification):
     raw = specification.get('execution_constraints')
     if not isinstance(raw, dict) or not raw:
         raise DomainError('规格缺少已确认的执行条件，请在需求受理页补充范围、时间字段和交付规则后重新确认', 409)
     allowed = {'scope', 'time_field', 'output_mode', 'circulation_modes',
                'quality_min_complete', 'max_rows', 'min_group_size', 'identifier_output', 'field_output',
-               'field_outputs'}
+               'field_outputs', 'calculation'}
     if set(raw) - allowed:
         raise DomainError('存在尚不支持的执行条件，不能忽略后继续执行')
     scope = raw.get('scope')
     if not isinstance(scope, dict) or set(scope) - {'kind', 'filters', 'all_rows'}:
         raise DomainError('对象范围需明确选择数据行范围或当前元数据快照')
     kind = scope.get('kind')
-    if kind not in ('rows', 'lookup', 'metadata'):
+    if kind not in ('rows', 'lookup', 'aggregate_lookup', 'metadata'):
         raise DomainError('对象范围类型不支持')
     filters = scope.get('filters', [])
     if not isinstance(filters, list) or len(filters) > 20:
@@ -73,11 +88,9 @@ def normalize(specification):
     for condition in filters:
         if not isinstance(condition, dict) or set(condition) != {'field', 'op', 'value'}:
             raise DomainError('范围条件必须包含字段、比较方式和值')
-        if not isinstance(condition['field'], str) or not condition['field'] or condition['op'] not in ('=', '!=', '<', '<=', '>', '>='):
+        if not isinstance(condition['field'], str) or not condition['field'] or not isinstance(condition['op'],str):
             raise DomainError('范围条件字段或比较方式非法')
-        value = condition['value']
-        if type(value) not in (str, int, float) or (isinstance(value, float) and not math.isfinite(value)):
-            raise DomainError('范围条件只接受文本或有限数值')
+        filter_values(condition['op'],condition['value'])
         checked.append(dict(condition))
     if 'all_rows' in scope and type(scope['all_rows']) is not bool:
         raise DomainError('全部对象选项必须是明确的布尔值')
@@ -92,6 +105,9 @@ def normalize(specification):
             raise DomainError('对象查询必须使用一个或多个非空比较条件，且不能查询全部对象')
         if raw.get('time_field'):
             raise DomainError('对象查询的日期条件应放在 filters 中，不绑定独立执行时间字段')
+    elif kind == 'aggregate_lookup':
+        if bool(checked)==bool(scope.get('all_rows')) or raw.get('time_field'):
+            raise DomainError('统计需要明确的筛选条件，或确认按整张表计算')
     elif checked or raw.get('time_field') or scope.get('all_rows'):
         raise DomainError('元数据快照不接受患者范围条件；请使用数据行查询')
     mode = raw.get('output_mode')
@@ -103,6 +119,12 @@ def normalize(specification):
         raise DomainError('交付形态说明与执行规则不一致或尚不支持，请明确选择汇总/对象级')
     if kind == 'lookup' and mode != 'object':
         raise DomainError('精确查询必须使用对象级受控输出')
+    calculation=None
+    if kind=='aggregate_lookup':
+        if mode!='aggregate':raise DomainError('统计查询只允许汇总交付')
+        calculation=validate_calculation(raw.get('calculation'))
+    elif 'calculation' in raw:
+        raise DomainError('仅统计规格可绑定计算口径')
     field_output=raw.get('field_output')
     field_outputs=raw.get('field_outputs')
     identifier_output=raw.get('identifier_output')
@@ -125,8 +147,8 @@ def normalize(specification):
     modes = raw.get('circulation_modes')
     if not isinstance(modes, list) or not modes or any(m not in ('controlled_compute', 'api', 'download') for m in modes):
         raise DomainError('需明确允许的交付方式')
-    if kind == 'lookup' and set(modes) != {'controlled_compute'}:
-        raise DomainError('患者精确查询结果只允许受控计算查看')
+    if kind in ('lookup','aggregate_lookup') and set(modes) != {'controlled_compute'}:
+        raise DomainError('当前查询结果只允许受控计算查看')
     quality = number(raw.get('quality_min_complete', 1), '完整率', 0, 1)
     quality_requirement = str(specification.get('quality', '')).strip()
     quality_label = quality_requirement.rstrip('。.!！?？ ').strip().lower()
@@ -143,7 +165,7 @@ def normalize(specification):
     if start >= end:
         raise DomainError('执行时间窗必须非空且起点早于终点')
     deadline = instant(specification.get('deadline'), end_of_date=True)
-    if kind in ('metadata', 'lookup'):
+    if kind in ('metadata', 'lookup', 'aggregate_lookup'):
         deadline = min(deadline, end)
     policy = {'version': 1, 'scope': {'kind': kind, 'filters': checked,
               'all_rows': scope.get('all_rows', False)},
@@ -153,7 +175,7 @@ def normalize(specification):
               'output_mode': mode, 'circulation_modes': sorted(set(modes)),
               'quality_min_complete': quality,
               'max_rows': number(raw.get('max_rows', 200), '最大交付行数', 1, 200, True),
-              'min_group_size': number(raw.get('min_group_size', 5), '最小分组记录数', 5, 100000, True),
+              'min_group_size': number(raw.get('min_group_size', 5), '最小分组记录数',0,100000,True),
               'source_specification_digest': fingerprint(specification)}
     if not quality_is_completeness:
         # Preserve the request in the immutable execution policy while making clear
@@ -167,4 +189,6 @@ def normalize(specification):
         policy['field_output'] = field_output
     if field_outputs is not None:
         policy['field_outputs'] = list(field_outputs)
+    if calculation:
+        policy['calculation']=calculation
     return policy

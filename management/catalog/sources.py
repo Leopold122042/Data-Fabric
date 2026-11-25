@@ -2,6 +2,7 @@
 import csv
 import json
 import sqlite3
+from collections import defaultdict
 from pathlib import Path
 from management.store import DomainError
 
@@ -20,7 +21,23 @@ class SQLiteSource:
                 if name in self.hidden_tables:continue
                 columns=[{'name':r[1],'type':r[2],'nullable':not bool(r[3]),'default':r[4],'primary_key':bool(r[5])}
                          for r in con.execute('PRAGMA table_info('+sql_identifier(name)+')')]
+                keys=defaultdict(list)
+                for index,_,target,local,remote,*_ in con.execute('PRAGMA foreign_key_list('+sql_identifier(name)+')'):
+                    keys[index].append((target,local,remote))
+                foreign_keys=[]
+                for key in keys.values():
+                    # Composite references require conjunction. Do not publish partial edges.
+                    if len(key)!=1:
+                        continue
+                    target,local,remote=key[0]
+                    if remote is None:
+                        primary=[r[1] for r in con.execute('PRAGMA table_info('+sql_identifier(target)+')') if r[5]]
+                        if len(primary)!=1:
+                            continue
+                        remote=primary[0]
+                    foreign_keys.append({'from':local,'table':target,'to':remote})
                 result[name]={'columns':[c['name'] for c in columns],'column_details':columns,
+                    'foreign_keys':foreign_keys,
                     'rows':con.execute('SELECT COUNT(*) FROM '+sql_identifier(name)).fetchone()[0]}
             return {'tables':result}
         finally:con.close()

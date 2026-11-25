@@ -1082,7 +1082,8 @@ def create_router(runtime,identity):
                 flow['version'],user['id'],'用户读取受控查询交付结果')
         grant=runtime.execution.store.require('grant',delivery['grant_id'])
         return {'flow':flow,'delivery_id':delivery['id'],
-                'result':project_result(delivery['result'],user,grant.get('min_group_size',5)),
+                'result':project_result(delivery['result'],user,grant.get('min_group_size',5),
+                                        calculation=plan.get('execution_policy',{}).get('calculation')),
                 'issued_at':delivery['receipt']['issued_at'],'expires_at':delivery['receipt']['expires_at'],
                 'checks':delivery['receipt']['checks']}
 

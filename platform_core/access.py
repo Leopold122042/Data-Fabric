@@ -24,7 +24,7 @@ LEVEL_TABLES = {
         'patient', 'dossier'},
     4: {'*'},
 }
-LEVEL_VISIBILITY = {1: '仅查看满足最小样本数的查询计数',
+LEVEL_VISIBILITY = {1: '查看授权范围内的查询计数',
                     2: '可查看授权范围内的脱敏明细',
                     3: '可查看全部数据表的脱敏明细',
                     4: '可查看全部字段和原始明细'}
@@ -132,15 +132,21 @@ def filter_catalog(tables, user):
     return [table for table in tables if can_access_table(user, table)]
 
 
-def project_result(result, user, min_group_size=5):
+def project_result(result, user, min_group_size=5, *, calculation=None):
     """Apply the account's output tier at every result read boundary."""
     level = level_for(user)
-    if level >= 4:
+    if level >= 4 and not calculation:
         return result
     if not isinstance(result, dict) or not isinstance(result.get('rows'), list):
         return {'columns': [], 'rows': [], 'message': '查询可能已执行，但当前权限不允许展示该结果结构；请联系管理员核对结果查看范围。'}
     rows = result['rows']
     columns = result.get('columns', [])
+    if calculation:
+        visible=(columns==['count'] and len(rows)==1 and isinstance(rows[0],list) and len(rows[0])==1
+                 and type(rows[0][0]) is int and rows[0][0]>=min_group_size)
+        return {'columns':['count'],'rows':rows if visible else [],'calculation':calculation['kind'],
+                'suppressed':not visible,'message':'' if visible else
+                    f'统计已完成。当前口径未达到 {min_group_size} 的最小交付门槛，具体数量已隐藏。'}
     if level == 1:
         count = len(rows)
         return {'columns': ['符合条件的记录数'],

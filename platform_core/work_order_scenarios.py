@@ -58,7 +58,7 @@ def seed_work_orders(runtime):
             'authorization_evidence': '签发绑定用途与方案版本的授权，交付前复核有效期及参与方确认',
             'execution_constraints': {'scope': {'kind': 'metadata'}, 'output_mode': 'object',
                 'circulation_modes': ['controlled_compute'], 'quality_min_complete': 1,
-                'max_rows': 60, 'min_group_size': 5}, **context}, REQUESTER)
+                'max_rows': 60, 'min_group_size': 0}, **context}, REQUESTER)
         discuss(demand['id'], 'requester', '本次申请仅核对课题所需数据来源的目录覆盖，输出来源名称与表数量；'
                 '队列筛选、字段明细及患者纳入条件将在后续研究用数申请中另行确认。')
         discuss(demand['id'], 'provider', '已核对目录覆盖核验服务的输出口径：返回当前接入来源的结构摘要，'

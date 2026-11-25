@@ -60,9 +60,10 @@ class Security:
         if mode not in ('aggregate','object'):raise DomainError('输出粒度非法')
         if mode!=policy['output_mode'] or body['purpose']!=policy['purpose']:raise DomainError('授权不得放宽规格的用途或输出粒度',403)
         if timestamp(body['expires_at'])>instant(policy['deadline_at']):raise DomainError('授权期限不得超过规格交付时限',403)
-        min_group=number(body.get('min_group_size',policy['min_group_size']),'最小分组记录数',5,100000,True)
+        minimum=policy['min_group_size']
+        min_group=number(body.get('min_group_size',minimum),'最小分组记录数',0,100000,True)
         max_rows=number(body.get('max_rows',policy['max_rows']),'最大交付行数',1,200,True)
-        if min_group<policy['min_group_size'] or max_rows>policy['max_rows']:raise DomainError('授权不得放宽规格的分组或行数限制',403)
+        if min_group<minimum or max_rows>policy['max_rows']:raise DomainError('授权不得放宽规格的分组或行数限制',403)
         data={k:body[k] for k in ('subject','purpose','plan_id','plan_version','expires_at')}
         data.update(mode=mode,status='active',scope='local-demo',min_group_size=min_group,max_rows=max_rows,
                     execution_policy_digest=plan['execution_policy_digest'],plan_digest=fingerprint(plan))
@@ -122,7 +123,8 @@ class Security:
                 if self.plan_validator:self.plan_validator(plan)
                 from execution.constraints import verify_plan_policy
                 policy=verify_plan_policy(plan)
-                if timestamp(grant['expires_at'])>instant(policy['deadline_at']) or grant['max_rows']>policy['max_rows'] or grant['min_group_size']<policy['min_group_size']:
+                minimum=policy['min_group_size']
+                if timestamp(grant['expires_at'])>instant(policy['deadline_at']) or grant['max_rows']>policy['max_rows'] or grant['min_group_size']<minimum:
                     raise DomainError('授权放宽了规格的期限或输出限制',403)
                 from execution.security.output_policy import output_authorization_requirements
                 requirements=output_authorization_requirements(plan)

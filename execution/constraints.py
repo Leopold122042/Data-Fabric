@@ -18,17 +18,21 @@ def check_window(policy, stage):
 
 
 def compile_node(policy, node, view=None, service=None):
-    if policy['scope']['kind'] in ('rows', 'lookup'):
+    if policy['scope']['kind'] in ('rows', 'lookup', 'aggregate_lookup'):
         if node['operation'] != 'view':
             raise DomainError('该服务尚不能落实对象范围和时间窗，请使用绑定字段的逻辑视图', 409)
         if node['params'] or node['inputs']:
             raise DomainError('受控视图不接受覆盖范围的节点参数或上游输入')
+        if policy.get('calculation')!=view.get('calculation'):
+            raise DomainError('视图统计口径与已确认规格不一致',403)
         required = {c['field'] for c in policy['scope']['filters']}
         if policy.get('time_field'):
             required.add(policy['time_field'])
         if policy.get('field_output'):
             required.add(policy['field_output'])
         required.update(policy.get('field_outputs', []))
+        measure=(policy.get('calculation') or {}).get('field')
+        if measure:required.add(measure)
         if not required <= set(view['field_versions']):
             raise DomainError('视图缺少规格要求的范围字段或时间字段，不能执行', 409)
         return {'filters': policy['scope']['filters'], 'time_field': policy.get('time_field'),

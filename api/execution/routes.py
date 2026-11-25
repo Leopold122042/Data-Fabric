@@ -141,7 +141,8 @@ def create_router(runtime,identity):
             if p['circulation_mode']=='api':
                 return {**{k:v for k,v in value.items() if k!='result'},'reference':'/api/execution/deliveries/'+oid+'/data'}
             grant=e.store.require('grant',value['grant_id'])
-            return {**value,'result':project_result(value.get('result'),user,grant.get('min_group_size',5))}
+            return {**value,'result':project_result(value.get('result'),user,grant.get('min_group_size',5),
+                calculation=p.get('execution_policy',{}).get('calculation'))}
     @router.get('/deliveries/{oid}/data')
     def referenced_data(oid:str,request:Request):
         user=who(request,action='delivery.reference');d=owned('delivery',oid,user);p=e.get(d['plan_id'],d['plan_version'])

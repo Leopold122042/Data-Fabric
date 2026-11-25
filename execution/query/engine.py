@@ -1,13 +1,44 @@
 """Bounded federated queries with catalog-bound fields and separate values."""
 import hashlib,json,sqlite3,time
+from contextlib import closing
 from pathlib import Path
 import medsim
 from platform_core.storage import DomainError,new_id
 from execution.query.expressions import compile_expression,mapping_expression
 from execution.security.output_policy import field_type,field_classification
+from contracts.execution.constraints import validate_calculation
+from management.intake.calculations import person_identifier, summary_count_kind, SUMMARY_SCOPES, validate_summary_scope
+from contracts.execution.filters import bind_filter, filter_values
 
 
 def quote(value):return '"'+str(value).replace('"','""')+'"'
+
+
+def load_emr(db,path,table,fields,deadline,candidate_ids=()):
+    types={'integer':' BIGINT','number':' DOUBLE','boolean':' BOOLEAN','string':' VARCHAR'}
+    declared=','.join(quote(field['name'])+types[field_type(field)] for field in fields)
+    db.execute('CREATE TABLE '+quote(table)+' ('+declared+')')
+    if candidate_ids:
+        documents=(path/(patient_id+'.json') for patient_id in candidate_ids)
+    else:
+        documents=path.glob('*.json')
+    def records():
+        for document in documents:
+            if time.monotonic()>deadline:
+                raise DomainError('本地查询超过时间预算，请增加筛选条件',503)
+            if not document.is_file() or not document.resolve().is_relative_to(path):
+                continue
+            try:
+                with document.open(encoding='utf-8') as stream:
+                    record=json.load(stream)
+            except (OSError,ValueError) as exc:
+                raise DomainError('EMR 文书文件无法解析，查询已停止') from exc
+            if not isinstance(record,dict) or (candidate_ids and str(record.get('patient_id')) not in candidate_ids):
+                continue
+            values=[record.get(field['name']) for field in fields]
+            yield tuple(json.dumps(value,ensure_ascii=False,separators=(',',':'))
+                        if isinstance(value,(dict,list)) else value for value in values)
+    db.executemany('INSERT INTO '+quote(table)+' VALUES ('+','.join('?' for _ in fields)+')',records())
 
 
 class Queries:
@@ -42,7 +73,9 @@ class Queries:
                 if gy in reached:reached.add(gx)
         if reached!=groups:raise DomainError('跨表视图必须显式关联，拒绝隐式笛卡尔积')
         for condition in body.get('filters',[]):
-            if condition.get('field') not in selected or condition.get('op') not in ('=','!=','>','>=','<','<='):raise DomainError('过滤字段或运算符非法')
+            if condition.get('field') not in selected:
+                raise DomainError('过滤字段或运算符非法')
+            filter_values(condition['op'],condition.get('value'))
         if any(x not in selected and x not in projections for x in body.get('group_by',[])):raise DomainError('分组字段不在视图中')
         oid=body.get('id') or new_id('VIEW');old=self.store.get('view',oid)
 
@@ -57,7 +90,28 @@ class Queries:
             raise DomainError('当前只支持将一个已选择的输出字段映射为患者伪名ID')
         data={'created_by':(old or {}).get('created_by',actor),'name':body.get('name') or oid,'fields':selected,'field_versions':{f['id']:f['version'] for f in fields},'mapping_versions':mapping_versions,
               'projections':projections,'output_fields':output_fields,'pseudonymize_fields':list(dict.fromkeys(pseudonymize_fields)),'joins':joins,'filters':body.get('filters',[]),'group_by':body.get('group_by',[]),'output_mode':body.get('output_mode','aggregate')}
+        if body.get('join_validation')=='catalog':
+            data['join_validation']='catalog'
+        if body.get('distinct') is True:
+            data['distinct']=True
         if data['output_mode'] not in ('aggregate','object'):raise DomainError('输出粒度非法')
+        if 'calculation' in body:
+            calculation=validate_calculation(body['calculation'])
+            table=self.management.store.require('object',calculation['table'])
+            if (data['output_mode']!='aggregate' or data['group_by'] or output_fields
+                    or table.get('kind')!='table' or table.get('status')!='active'
+                    or (calculation['kind']!='person_count' and
+                        (joins or any(f.get('parent_id')!=table['id'] for f in fields)))
+                    or (joins and data.get('join_validation')!='catalog')):
+                raise DomainError('计数视图需要已登记的数据输入和关联口径')
+            by_id={field['id']:field for field in fields}
+            measure=by_id.get(calculation['field'])
+            if calculation['kind']=='person_count' and not (measure and measure['parent_id']==table['id']
+                                                            and person_identifier(table,measure)):
+                raise DomainError('去重人数需要已确认的人员标识字段')
+            if calculation['kind'] in SUMMARY_SCOPES and not (measure and summary_count_kind(table,measure)==calculation['kind']):
+                raise DomainError('人数汇总仅可使用已登记的汇总视图')
+            data['calculation']=calculation
         if 'row_limit' in body or 'order_by' in body:
             row_limit=body.get('row_limit',200);ordering=body.get('order_by',[])
             if data['output_mode']!='object' or type(row_limit) is not int or not 1<=row_limit<=200:
@@ -83,6 +137,11 @@ class Queries:
         self.management.register_design({'object_kind':'view','object_id':oid,'object_version':result['version'],'environment':self.store.environment,'definition':result,'dependencies':selected})
         return result
     def sources(self,view):
+        if view.get('join_validation')=='catalog':
+            from management.catalog.query_links import executable_links
+            _,_,edges=executable_links(self.management.store)
+            if any(tuple(sorted(pair)) not in edges for pair in view['joins']):
+                raise DomainError('目录关联已变化，请重新核对查询路径',409)
         fields=[]
         for oid,version in view['field_versions'].items():
             f=self.management.store.require('object',oid)
@@ -115,18 +174,99 @@ class Queries:
             if not path.resolve().is_relative_to(root):raise DomainError('源不在允许的数据目录',403)
             sources.append((sid,table,path.resolve(),columns))
         return sources
+
+    def calculate(self,view,sources,constraints,min_group):
+        if len(sources)!=1:
+            raise DomainError('计数服务需要单一可用数据源')
+        source_id,table,source,fields=sources[0]
+        calculation=view['calculation']
+        summary=calculation['kind'] in SUMMARY_SCOPES
+        by_id={f['id']:f for f in fields}
+        conditions=view['filters']+constraints.get('filters',[])
+        if summary:
+            cohort=next((field['id'] for field in fields if field['name']=='cohort'),None)
+            validate_summary_scope(calculation['kind'],conditions,cohort)
+        remote=source_id.startswith('doris-')
+        if remote:
+            from management.catalog.doris import identifier
+            column=identifier
+            relation=source.table_sql(table)
+            placeholder='%s'
+        else:
+            column=quote
+            relation=quote(table)
+            placeholder='?'
+        measure=by_id.get(calculation['field'])
+        if calculation['kind']=='row_count':
+            metric='COUNT(*)'
+        elif summary:
+            metric='MAX('+column(measure['name'])+')'
+        else:
+            field=column(measure['name'])
+            if field_type(measure)=='string':
+                field="NULLIF(TRIM("+field+"), '')"
+            metric='COUNT(DISTINCT '+field+')'
+        predicates=[]
+        values=[]
+        for item in conditions:
+            predicate,args=bind_filter(column(by_id[item['field']]['name']),item['op'],item['value'],placeholder)
+            predicates.append(predicate)
+            values.extend(args)
+        sql='SELECT '+('/*+ SET_VAR(query_timeout=6) */ ' if remote else '')+metric+' FROM '+relation
+        if predicates:sql+=' WHERE '+' AND '.join(predicates)
+        if remote:
+            with source.cursor() as cursor:
+                cursor.execute(sql,tuple(values))
+                count=cursor.fetchone()[0]
+        else:
+            target=':memory:' if source_id=='emr' else source.as_uri()+'?mode=ro'
+            deadline=time.monotonic()+6
+            with closing(sqlite3.connect(target,uri=True)) as connection:
+                if source_id=='emr':
+                    load_emr(connection,source,table,fields,deadline)
+                else:
+                    from management.catalog.derived_fields import attach_age_view
+                    attach_age_view(connection,table,fields,quote)
+                connection.set_progress_handler(lambda:int(time.monotonic()>deadline),1000)
+                try:count=connection.execute(sql,values).fetchone()[0]
+                except sqlite3.OperationalError as exc:
+                    raise DomainError('源端计数无法完成，请检查数据表或缩小统计范围',503) from exc
+        if count is None and summary and min_group==0:
+            raise DomainError('Doris 未返回该口径的人数，请联系管理员检查人数汇总视图',503)
+        if count is not None and (type(count) is not int or count<0):
+            raise DomainError('源端统计结果格式不正确')
+        suppressed=count is None or count<min_group
+        result={'columns':['count'],'rows':[] if suppressed else [[count]]}
+        return result,{'cache_hit':False,'calculation':calculation['kind'],'sources':[{
+            'source_id':source_id,'table':table,'connector':'doris' if remote else 'local',
+            'pushed_filters':len(conditions)}]}
+
     def execute(self,view,mode,min_group=5,constraints=None,max_rows=200,authorized_health_fields=(),
                 authorized_identifier_fields=()):
         import duckdb
         if mode!=view['output_mode']:raise DomainError('视图输出粒度与授权不一致',403)
         sources=self.sources(view)
         constraints=constraints or {}
+        calculation=view.get('calculation')
+        if calculation and len(sources)==1:
+            return self.calculate(view,sources,constraints,min_group)
         requested_limit=view.get('row_limit')
         if requested_limit and requested_limit>max_rows:raise DomainError('查询条数超过当前授权上限',403)
         selective_fields={condition['field'] for condition in view['filters']+constraints.get('filters',[])}
         if constraints.get('time_field'):selective_fields.add(constraints['time_field'])
         sources.sort(key=lambda source:(
             not any(field['id'] in selective_fields for field in source[3]),source[0],source[1]))
+        if view.get('join_validation')=='catalog' and len(sources)>2:
+            pending=sources[1:]
+            sources=sources[:1]
+            reached={field['id'] for field in sources[0][3]}
+            while pending:
+                adjacent={right if left in reached else left for left,right in view['joins']
+                          if (left in reached)!=(right in reached)}
+                index=next(i for i,source in enumerate(pending) if any(field['id'] in adjacent for field in source[3]))
+                chosen=pending.pop(index)
+                reached.update(field['id'] for field in chosen[3])
+                sources.append(chosen)
         from execution.security.output_policy import view_output_policy,sensitive_output_allowed
         fields_by_id={f['id']:f for _,_,_,fields in sources for f in fields}
         output_policy=view_output_policy(view,fields_by_id)
@@ -169,7 +309,9 @@ class Queries:
                 for condition in view['filters']+constraints.get('filters',[]):
                     if condition['field'] in byid:
                         name=byid[condition['field']]['name']
-                        where.append(quote(name)+' '+condition['op']+' ?');params.append(condition.get('value'))
+                        predicate,args=bind_filter(quote(name),condition['op'],condition['value'],'?')
+                        where.append(predicate)
+                        params.extend(args)
                         remote_filters.append((name,condition['op'],condition.get('value')))
                 if constraints.get('time_field') in byid:
                     time_field=byid[constraints['time_field']]
@@ -209,60 +351,23 @@ class Queries:
                 if sid.startswith('doris-'):
                     remote_order=[]
                     remote_limit=source_budget+1
-                    if mode=='object' and len(sources)==1 and requested_limit:
+                    if mode=='object' and len(sources)==1 and requested_limit and not view.get('distinct'):
                         remote_order=[(byid[item['field']]['name'],item['direction'],item['nulls_first'])
                                       for item in view.get('order_by',[])]
                         remote_limit=requested_limit
                     rows=path.read(table,fields,remote_filters,remote_candidates,time_window,remote_limit,remote_order)
                 elif sid=='emr':
                     db=sqlite3.connect(':memory:')
-                    declared=','.join(quote(field['name'])+sql_types[dtype]
-                        for field,dtype in zip(fields,types))
-                    db.execute('CREATE TABLE '+quote(table)+' ('+declared+')')
-                    projected=[]
-                    if emr_patient_candidates:
-                        # Multiple confirmed equality joins are conjunctive in
-                        # SQL. Any one patient_id candidate set narrows the
-                        # file lookup; SQLite still verifies every predicate.
-                        candidate_ids=list(dict.fromkeys(str(value)
-                            for value in emr_patient_candidates[0] if value is not None))
-                        documents=[]
-                        for patient_id in candidate_ids:
-                            document=(path/(patient_id+'.json')).resolve()
-                            if document.is_relative_to(path.resolve()) and document.is_file():
-                                documents.append(document)
-                    else:
-                        documents=sorted(path.glob('*.json'))
-                    for document in documents:
-                        if time.monotonic()>deadline:
-                            db.close()
-                            raise DomainError('本地查询超过时间预算，请增加筛选条件')
-                        if not document.is_file() or not document.resolve().is_relative_to(path.resolve()):continue
-                        try:
-                            with document.open(encoding='utf-8') as stream:record=json.load(stream)
-                        except (OSError,ValueError) as exc:
-                            db.close()
-                            raise DomainError('EMR 文书文件无法解析，查询已停止') from exc
-                        if not isinstance(record,dict):continue
-                        if emr_patient_candidates:
-                            patient_field=next((field for field in fields
-                                if str(field.get('name','')).casefold()=='patient_id'),None)
-                            if (patient_field is None or
-                                    str(record.get(patient_field['name'])) not in candidate_ids):
-                                continue
-                        values=[]
-                        for field in fields:
-                            value=record.get(field['name'])
-                            if isinstance(value,(dict,list)):value=json.dumps(value,ensure_ascii=False,separators=(',',':'))
-                            elif value is not None and not isinstance(value,(str,int,float,bool,bytes)):
-                                value=str(value)
-                            values.append(value)
-                        projected.append(tuple(values))
-                    if projected:
-                        db.executemany('INSERT INTO '+quote(table)+' VALUES ('+
-                            ','.join('?' for _ in fields)+')',projected)
+                    candidates={str(value) for value in emr_patient_candidates[0]} if emr_patient_candidates else set()
+                    try:
+                        load_emr(db,path,table,fields,deadline,candidates)
+                    except Exception:
+                        db.close()
+                        raise
                 else:
                     db=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)
+                    from management.catalog.derived_fields import attach_age_view
+                    attach_age_view(db,table,fields,quote)
                 if not sid.startswith('doris-'):
                     try:
                         db.set_progress_handler(lambda:int(time.monotonic()>deadline),1000)
@@ -301,9 +406,16 @@ class Queries:
             if mode=='aggregate':names=['count_group' if name=='count' else name for name in names]
             bound=[]
             projection=[compile_expression(projections.get(oid,{'expression':{'field':oid}})['expression'],locations,bound)+' AS '+quote(name) for oid,name in zip(selected,names)]
-            if mode=='aggregate':projection.append('COUNT(*) AS count')
-            sql='SELECT '+','.join(projection)+' FROM '+tables+(' WHERE '+' AND '.join(predicates) if predicates else '')
-            if mode=='aggregate':sql+=(' GROUP BY '+','.join(str(i+1) for i in range(len(selected))) if selected else '')+' HAVING COUNT(*) >= '+str(int(min_group))
+            metric='COUNT(*)'
+            if calculation and calculation['kind']=='person_count':
+                field_id=calculation['field']
+                value=locations[field_id]
+                if field_type(fields_by_id[field_id])=='string':
+                    value="NULLIF(TRIM("+value+"), '')"
+                metric='COUNT(DISTINCT '+value+')'
+            if mode=='aggregate':projection.append(metric+' AS count')
+            sql='SELECT '+('DISTINCT ' if view.get('distinct') else '')+','.join(projection)+' FROM '+tables+(' WHERE '+' AND '.join(predicates) if predicates else '')
+            if mode=='aggregate':sql+=(' GROUP BY '+','.join(str(i+1) for i in range(len(selected))) if selected else '')+' HAVING '+metric+' >= '+str(int(min_group))
             if view.get('order_by'):
                 sql+=' ORDER BY '+','.join(locations[item['field']]+' '+item['direction'].upper()+
                     (' NULLS FIRST' if item['nulls_first'] else ' NULLS LAST') for item in view['order_by'])

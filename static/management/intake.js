@@ -250,7 +250,7 @@ setConstraintsButton=action('设置执行条件',async()=>{
   ['all_rows','已明确允许全部对象（仍限制时间窗）','checkbox'],['time_field','数据时间字段（ISO日期或带时区时间）','select',options],
   ['output_mode','输出粒度','select',[['aggregate','汇总统计'],['object','对象级（受字段分类检查）']]],
   ['allow_controlled','允许受控查看','checkbox'],['allow_api','允许API引用','checkbox'],['allow_download','允许下载','checkbox'],
-  ['quality_min_complete','完整率下限（0至1，1表示无缺失）','number',[],1],['max_rows','最大交付行数（1至200）','number',[],200],['min_group_size','最小分组记录数（至少5，医疗样例为人数）','number',[],5]
+  ['quality_min_complete','完整率下限（0至1，1表示无缺失）','number',[],1],['max_rows','最大交付行数（1至200）','number',[],200],['min_group_size','最小分组记录数（0 表示无门槛）','number',[],0]
  ],{...old,scope_kind:scope.kind||'rows',scope_field:first.field||'',scope_op:first.op||'=',scope_value:first.value??'',scope_value_type:typeof first.value==='number'?'number':'text',all_rows:scope.all_rows||false,allow_controlled:old.circulation_modes?old.circulation_modes.includes('controlled_compute'):true,allow_api:old.circulation_modes?.includes('api')||false,allow_download:old.circulation_modes?.includes('download')||false});
  if(!b)return;
  const filters=b.scope_field?[{field:b.scope_field,op:b.scope_op,value:b.scope_value_type==='number'?Number(b.scope_value):b.scope_value}]:[];

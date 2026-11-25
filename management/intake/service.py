@@ -66,6 +66,8 @@ class Intake:
             # New demand version invalidates confirmation; immutable specs remain historical.
             body={**body,'supersedes_version':old['version']}
         data={k:v for k,v in body.items() if k not in ('confirmed_by','confirmation','spec_id','state','cost_source','cost_explicit')}
+        if isinstance(data.get('execution_constraints'),dict):
+            data['execution_constraints']={'min_group_size':0,**data['execution_constraints']}
         data['state']='draft';data['created_by']=(old or {}).get('created_by',actor)
         old_cost=(old or {}).get('cost')
         if old and 'cost' not in data and 'cost' in old:

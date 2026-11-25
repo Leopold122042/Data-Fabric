@@ -1091,7 +1091,7 @@ class IntakeFlow:
             {'field':lookup['visit_type_field']['id'],'op':'=','value':'住院'}], 'all_rows':False},
             'time_field':lookup['admission_field']['id'],'output_mode':'object',
             'circulation_modes':['controlled_compute'],'quality_min_complete':1,
-            'max_rows':200,'min_group_size':5}
+            'max_rows':200,'min_group_size':0}
         object_scope=(f"按患者姓名精确匹配 {lookup['name']}，关联患者与就诊记录，筛选住院记录并返回入院时间；"
                       '姓名、患者ID仅用于匹配和关联，不作为交付字段。')
         proposal={**demand,'expected_version':demand['version'],'object_scope':object_scope,
@@ -1256,7 +1256,7 @@ class IntakeFlow:
             draft['execution_constraints']={'scope':{'kind':'lookup','filters':[
                 {'field':name_field['id'],'op':'=','value':lookup['name']}]},
                 'time_field':None,'output_mode':'object','identifier_output':'pseudonymized',
-                'circulation_modes':['controlled_compute'],'quality_min_complete':1,'max_rows':200,'min_group_size':5}
+                'circulation_modes':['controlled_compute'],'quality_min_complete':1,'max_rows':200,'min_group_size':0}
             draft['resource_recommendations']=[{'id':table['id'],'reason':lookup['reason']}]
             draft['uncertain_fields']=[item for item in draft.get('uncertain_fields',[])
                                        if not re.search(r'(?:具体.*id|患者标识字段)',str(item),re.I)]
@@ -1295,7 +1295,7 @@ class IntakeFlow:
                 {'field':name_field['id'],'op':'=','value':lookup['name']}]},
                 'time_field':None,'output_mode':'object',**output_binding,
                 'circulation_modes':['controlled_compute'],'quality_min_complete':1,
-                'max_rows':200,'min_group_size':5}
+                'max_rows':200,'min_group_size':0}
             recommendations=lookup.get('resources') or []
             if not recommendations:
                 for item,reason in ((table,lookup['reason']),(field,lookup['reason']),
@@ -1624,8 +1624,10 @@ class IntakeFlow:
                    'failed':'query_failed','cancelled':'query_failed','interrupted':'query_failed'}
         next_state=state_map.get(job.get('state'))
         if not next_state:return {**flow,'job_state':job.get('state')}
+        error_kind=job.get('error_kind')
+        if job.get('error')=='交付复核未通过：quality':error_kind='delivery_quality'
         if flow.get('state')==next_state and flow.get('delivery_id')==job.get('delivery_id'):
-            return {**flow,'job_state':job.get('state'),'query_error':job.get('error')}
+            return {**flow,'job_state':job.get('state'),'query_error':job.get('error'),'query_error_kind':error_kind}
         steps=[]
         lookup=flow.get('field_lookup') or {}
         output_fields=[item.get('field_name') for item in lookup.get('output_fields',[])
@@ -1634,6 +1636,10 @@ class IntakeFlow:
         if flow.get('output_preference')=='catalog_field_with_patient_id':
             identifier_name=lookup.get('identifier_field_name') or 'patient_id'
             if identifier_name not in output_fields:output_fields.append(identifier_name)
+        calculation=(flow.get('professional_preview') or {}).get('calculation')
+        if calculation:
+            from management.intake.calculations import CALCULATION_LABELS
+            output_fields=[CALCULATION_LABELS[calculation['kind']]]
         output_summary='本次只交付：'+'、'.join(output_fields)+'。'
         detail={'query_queued':'受控查询已进入队列，等待本地执行器。'+output_summary,
                 'query_running':'本地执行器正在按已确认方案查询。'+output_summary,
@@ -1645,7 +1651,7 @@ class IntakeFlow:
                 item.update(status=next_state,detail=detail[next_state])
             steps.append(item)
         changes={'state':next_state,'job_state':job.get('state'),'steps':steps,
-                 'delivery_id':job.get('delivery_id'),'query_error':job.get('error')}
+                 'delivery_id':job.get('delivery_id'),'query_error':job.get('error'),'query_error_kind':error_kind}
         return self.store.save('intake_flow',flow['id'],{**flow,**changes},flow['version'],actor,
             '同步受控查询执行状态与交付标记')
 
@@ -1860,7 +1866,7 @@ class IntakeFlow:
                 output_mode='object' if draft['delivery']=='对象级' else 'aggregate'
                 draft['execution_constraints']={'scope':{'kind':'rows','filters':[],'all_rows':True},
                     'time_field':time_field['id'],'output_mode':output_mode,'circulation_modes':['controlled_compute'],
-                    'quality_min_complete':1,'max_rows':200,'min_group_size':5}
+                    'quality_min_complete':1,'max_rows':200,'min_group_size':0}
                 assumptions.append('执行范围默认使用匹配表的全部记录并受时间窗限制；可在确认前修改')
                 draft['uncertain_fields']=list(dict.fromkeys(draft.get('uncertain_fields',[])+[assumptions[-1]]))
         # Store model interpretation into the demand draft so its fields are prefilled,

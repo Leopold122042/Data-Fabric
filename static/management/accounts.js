@@ -4,7 +4,7 @@ const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&
 const levelNames={1:'1级 · 查询使用者',2:'2级 · 范围分析者',3:'3级 · 数据管理者',4:'4级 · 平台管理员'};
 const auditNames={'login.succeeded':'登录成功','login.failed':'登录失败','logout':'退出登录',
  'password.changed':'密码已修改','password.reset':'密码已重置','account.created':'账户已建立','account.updated':'账户权限已调整'};
-const levelText={1:'限定5张表；可运行查询，只返回达到最小样本数的记录数。',
+const levelText={1:'限定5张表；可运行查询，返回授权范围内的记录数。',
  2:'限定11张表；可查看授权范围内的脱敏明细。',
  3:'全部13张表；可查看脱敏明细和跨表关联。',
  4:'全部13张表及原始字段；可查看完整数据并管理账户。'};

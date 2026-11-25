@@ -224,7 +224,7 @@ def seed_healthcare(runtime):
             rules = {'scope': {'kind': 'metadata'} if metadata else {'kind': 'rows', 'filters': [
                 {'field': fields[cfg['table']][field], 'op': '=', 'value': value} for field, value in cfg['scope']]},
                 'output_mode': 'object' if metadata else 'aggregate', 'circulation_modes': [cfg['mode']],
-                'quality_min_complete': 1, 'max_rows': 60, 'min_group_size': 5}
+                'quality_min_complete': 1, 'max_rows': 60, 'min_group_size': 0}
             if not metadata:
                 rules['time_field'] = fields[cfg['table']][cfg['date']]
                 if not cfg['scope']:

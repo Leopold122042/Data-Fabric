@@ -240,8 +240,10 @@ def create_field_plan(runtime,flow,specification,actor):
     spec_body=specification.get('specification') or {};policy=spec_body.get('execution_constraints') or {}
     scope=policy.get('scope') or {}
     expected_outputs=policy.get('field_outputs') or ([policy.get('field_output')] if policy.get('field_output') else [])
-    if (scope.get('kind')!='lookup' or policy.get('output_mode')!='object'
-            or not expected_outputs):
+    calculation=policy.get('calculation')
+    mode=policy.get('output_mode')
+    if not (scope.get('kind')=='lookup' and mode=='object' and expected_outputs
+            or scope.get('kind')=='aggregate_lookup' and mode=='aggregate' and calculation):
         raise DomainError('先确认精确匹配和输出字段规格，才能生成固定方案',409)
     approved_ids=[item['id'] for item in flow.get('resources',[])
         if item.get('review_status')=='human_confirmed']
@@ -252,34 +254,43 @@ def create_field_plan(runtime,flow,specification,actor):
             raise DomainError('专业查询表尚未确认',409)
     else:
         shape=field_query_shape(spec_body.get('query_draft'),runtime.management.store,approved_ids)
-    if (scope.get('filters')!=shape['filters'] or policy.get('max_rows',0)<shape['max_rows']
+    if (scope.get('filters')!=shape['filters'] or calculation!=shape.get('calculation')
+            or policy.get('max_rows',0)<shape['max_rows']
             or set(expected_outputs)!={field['id'] for field in shape['output_fields']}):
         raise DomainError('规格范围或行数上限与已确认SQL不一致',403)
     view_id='VIEW-'+flow['id']+'-FIELD';old_view=runtime.execution.store.get('view',view_id)
     view_body={'id':view_id,'expected_version':old_view['version'] if old_view else 0,
         'name':shape['table'].get('name','目录字段查询')+' · '+'、'.join(field.get('name','') for field in shape['output_fields']),
         'fields':shape['fields'],'output_fields':[field['id'] for field in shape['output_fields']],
-        'joins':shape.get('joins',[]),'filters':[],'group_by':[],'output_mode':'object'}
-    if flow.get('query_mode') in ('professional','semantic'):
+        'joins':shape.get('joins',[]),'filters':[],'group_by':[],'output_mode':mode}
+    if calculation:view_body['calculation']=calculation
+    elif flow.get('query_mode') in ('professional','semantic'):
         view_body.update(order_by=shape['order_by'],row_limit=shape['row_limit'])
+    if shape.get('joins') and flow.get('query_mode') in ('professional','semantic'):
+        view_body['join_validation']='catalog'
+    if shape.get('distinct'):
+        view_body['distinct']=True
     versions={field_id:runtime.management.store.require('object',field_id)['version']
         for field_id in shape['fields']}
     view_matches=bool(old_view and old_view.get('fields')==view_body['fields']
         and old_view.get('output_fields')==view_body['output_fields']
         and old_view.get('field_versions')==versions and old_view.get('filters')==[]
         and old_view.get('group_by')==[] and old_view.get('joins')==shape.get('joins',[])
-        and old_view.get('projections')=={} and old_view.get('output_mode')=='object'
+        and old_view.get('projections')=={} and old_view.get('output_mode')==mode
+        and old_view.get('calculation')==calculation
+        and old_view.get('join_validation')==view_body.get('join_validation')
+        and old_view.get('distinct')==view_body.get('distinct')
         and old_view.get('order_by')==view_body.get('order_by')
         and old_view.get('row_limit')==view_body.get('row_limit'))
     view=old_view if view_matches else runtime.execution.queries.define(view_body,actor)
     plan_id='PLAN-'+flow['id']+'-FIELD';old_plan=runtime.execution.store.get('plan',plan_id)
     from contracts.execution.constraints import normalize,fingerprint
     policy_digest=fingerprint(normalize(spec_body));old_nodes=(old_plan or {}).get('nodes',[])
-    output_names={field['name'] for field in shape['output_fields']}
+    output_names={'count'} if calculation else {field['name'] for field in shape['output_fields']}
     plan_matches=bool(old_plan and old_plan.get('spec_id')==specification['id']
         and old_plan.get('spec_version')==specification['version']
         and old_plan.get('view_versions',{}).get(view['id'])==view['version']
-        and old_plan.get('output_mode')=='object'
+        and old_plan.get('output_mode')==mode
         and old_plan.get('execution_policy_digest')==policy_digest
         and old_plan.get('output_node')=='field-lookup'
         and len(old_nodes)==1 and old_nodes[0].get('operation')=='view'
@@ -289,7 +300,7 @@ def create_field_plan(runtime,flow,specification,actor):
         'id':plan_id,'expected_version':old_plan['version'] if old_plan else 0,
         'name':shape['table'].get('name','目录字段')+' · '+'、'.join(sorted(output_names))+'受控查询',
         'spec_id':specification['id'],'spec_version':specification['version'],
-        'output_mode':'object','circulation_mode':policy.get('circulation_modes',['controlled_compute'])[0],
+        'output_mode':mode,'circulation_mode':policy.get('circulation_modes',['controlled_compute'])[0],
         'quality_min_complete':policy.get('quality_min_complete',1),
         'nodes':[{'id':'field-lookup','operation':'view','view_id':view['id'],'depends_on':[],'params':{}}],
         'output_node':'field-lookup'},actor)

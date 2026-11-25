@@ -167,7 +167,7 @@ def _seed_base(runtime):
             rules = {'scope': {'kind': 'metadata'} if metadata else {'kind': 'rows', 'filters': [
                 {'field': fields['cohort'], 'op': '=', 'value': cohort}]},
                 'output_mode': 'object' if metadata else 'aggregate', 'circulation_modes': [delivery],
-                'quality_min_complete': 1, 'max_rows': 20, 'min_group_size': 5}
+                'quality_min_complete': 1, 'max_rows': 20, 'min_group_size': 0}
             if not metadata:
                 rules['time_field'] = fields['observed_at']
             d = m.intake.save({'id': 'DEMO-DEMAND-' + key, 'title': title, 'entry': 'service' if metadata else 'goal',

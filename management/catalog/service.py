@@ -19,6 +19,10 @@ class Catalog:
 
     def ingest(self, source_id, snapshot):
         with self.store.atomic():
+            registration=self.store.get('source',source_id) or {}
+            if source_id in ('his','lis','pacs','iot') or registration.get('connector')=='sqlite':
+                from management.catalog.derived_fields import with_derived_age
+                snapshot=with_derived_age(snapshot)
             existing = [r for r in self.store.list('object') if r.get('source_id')==source_id]
             index = {(r['kind'],r.get('table'),r['name']): r for r in existing}
             seen = set(); changes = []
@@ -68,6 +72,9 @@ class Catalog:
                         self.store.save('mapping',mapping['id'],{**mapping,'status':'review_required'},mapping['version'],reason='源结构变化，需复核')
             from management.catalog.field_library import FieldLibrary
             FieldLibrary(self.store).sync()
+            if source_id=='his' and self.store.environment=='demo':
+                from management.catalog.derived_fields import confirm_synthetic_ages
+                confirm_synthetic_ages(self.store)
             return changes
 
     def scan_engine(self, engine):

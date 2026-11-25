@@ -17,11 +17,11 @@ from threading import BoundedSemaphore, Event, Lock, Thread
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from platform_core.storage import DomainError
+from contracts.execution.filters import OPERATORS, bind_filter
 
 IDENTIFIER = re.compile(r'[a-zA-Z0-9_]+\Z')
 SOURCE_ID = re.compile(r'[a-z][a-z0-9_]{0,39}\Z')
 SYSTEM_DATABASES = {'information_schema', 'mysql', '__internal_schema', 'sys', 'performance_schema'}
-OPERATORS = {'=', '!=', '<', '<=', '>', '>='}
 CONNECT_TIMEOUT = 3
 QUERY_TIMEOUT = 6
 MAX_RESULT_BYTES = 8 * 1024 * 1024
@@ -217,8 +217,9 @@ class DorisSource:
         for name, op, value in filters:
             if name not in column_names or op not in OPERATORS:
                 raise DomainError('Doris 筛选条件未绑定已登记字段', 403)
-            where.append(f'{identifier(name)} {op} %s')
-            args.append(value)
+            predicate,values=bind_filter(identifier(name),op,value,'%s')
+            where.append(predicate)
+            args.extend(values)
         for name, values in candidate_sets:
             if not values:
                 where.append('1=0')
@@ -263,7 +264,7 @@ class DorisSource:
         with self.cursor() as cursor:
             cursor.execute('SELECT /*+ SET_VAR(query_timeout=6) */ COUNT(*) FROM ' + self.table_sql(table))
             count = int(cursor.fetchone()[0])
-        return count if count >= 5 else None
+        return count
 
 
 class DorisSources:
