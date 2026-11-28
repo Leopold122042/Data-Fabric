@@ -144,6 +144,29 @@ class PortalTest(unittest.TestCase):
                 self.assertEqual(result['rows'],rows)
                 self.assertEqual(result['suppressed'],not rows)
 
+    def test_result_link_reads_only_its_bound_delivery(self):
+        sql="SELECT COUNT(*) FROM observations WHERE cohort='A'"
+        flow=self.post('/api/portal/professional',{'sql':sql,'confirmed':True})['flow']
+        url='/api/portal/queries/'+flow['id']
+        running=self.post(url+'/execute',{'expected_version':flow['version'],'confirmed':True})['flow']
+        job=self.e.run(self.e.store.require('job',running['job_id']))
+        self.assertEqual(job['state'],'success',job.get('error'))
+        headers={'X-Demo-Role':'platform'}
+        completed=self.client.get(url,headers=headers).json()['flow']
+        delivery_id=completed['delivery_id']
+        endpoint=url+'/result?delivery_id='+delivery_id
+        for _ in range(2):
+            result=self.client.post(endpoint,json={},headers=headers)
+            self.assertEqual(result.status_code,200,result.text)
+            self.assertEqual(result.headers['cache-control'],'no-store')
+            self.assertEqual(result.json()['result']['rows'],[[3]])
+        invalid=self.client.post(url+'/result?delivery_id=DEL-another',json={},headers=headers)
+        self.assertEqual(invalid.status_code,410)
+        denied=self.client.post(endpoint,json={},headers={'X-Demo-Role':'auditor'})
+        self.assertEqual(denied.status_code,403)
+        self.e.security.revoke(running['grant_id'],'demo-platform')
+        self.assertEqual(self.client.post(endpoint,json={},headers=headers).status_code,403)
+
     def test_diabetes_service_delivers_zero_and_other_small_counts_to_level_four(self):
         from management.intake.calculations import DIABETES_COUNTS
         from platform_core.access import project_result
@@ -172,7 +195,12 @@ class PortalTest(unittest.TestCase):
 
         for scope,count in counts.items():
             with self.subTest(scope=scope):
-                f=self.post('/api/portal/queries',{'text':'糖尿病有多少人'})['flow']
+                with patch('management.intake.semantic_query.interpret',side_effect=AssertionError('登记口径由平台提供')):
+                    f=self.post('/api/portal/queries',{'text':'糖尿病的患者有多少人','provider':'deepseek'})['flow']
+                self.assertEqual(f['state'],'awaiting_chain_confirmation')
+                options=f['field_bindings'][0]['options']
+                self.assertEqual([item['id'] for item in options],['diabetes_all','diabetes_type2','diabetes_type1'])
+                self.assertTrue(options[0]['recommended'])
                 url='/api/portal/queries/'+f['id']
                 f=self.post(url+'/clarify',{'expected_version':f['version'],
                     'answers':[{'intent_id':f['field_bindings'][0]['intent_id'],'option_id':scope}]})['flow']

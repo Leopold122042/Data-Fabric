@@ -252,6 +252,29 @@
 .fabric-portal .spinner {border-top-color: var(--fabric-blue)}
 .fabric-portal :is(select,input,textarea):not(.kg-search):focus-visible {outline-color: var(--fabric-blue)}
 .fabric-portal .ai-model-picker select:focus {outline-color: #69717b}
+.composer-actions {display: flex; align-items: center; flex-wrap: wrap; gap: 10px}
+.fabric-portal .voice-button[aria-pressed="true"] {
+  background: var(--fabric-sky);
+  color: var(--fabric-blue-hover);
+  border-color: var(--fabric-focus);
+}
+.voice-dictation {
+  background: none;
+  border: 0;
+  color: var(--fabric-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 8px 4px;
+}
+.voice-dictation:hover {color: var(--fabric-blue); text-decoration: underline}
+.voice-status {margin: 10px 0 0; font-size: 12px; color: var(--fabric-muted); line-height: 1.6}
+.voice-status:empty {margin: 0}
+@media (max-width: 760px) {
+  .fabric-portal .composer-foot {align-items: stretch; flex-direction: column}
+  .fabric-portal .composer-foot small {max-width: none}
+  .composer-actions #ask-submit {margin-inline-start: auto}
+}
 .fabric-portal .service-card button {background: var(--fabric-blue); border: 0; border-radius: 8px; color: #fff; padding: 7px 11px}
 
 .fabric-portal.kg-page {
@@ -346,3 +369,34 @@
   .fabric-portal .hero > .date-tag {display: none}
   .fabric-portal .hero::after {inset-inline-start: 18%}
 }
+
+.result-code-dialog {
+  box-sizing: border-box;
+  width: min(390px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  padding: 22px;
+  border: 1px solid var(--fabric-line);
+  border-radius: 16px;
+  background: var(--fabric-surface);
+  color: var(--fabric-ink);
+  box-shadow: 0 18px 72px #10273a50;
+}
+.result-code-dialog::backdrop {background: #1018249c}
+.result-code-dialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.result-code-dialog h2 {font-size: 19px; margin: 0}
+.result-code-image {
+  width: min(232px, 100%);
+  margin: 20px auto 14px;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--fabric-line);
+}
+.result-code-image canvas {display: block; width: 100%; height: auto}
+.result-code-dialog p {margin: 9px 0; font-size: 13px; line-height: 1.6; color: var(--fabric-muted)}
+.result-code-dialog .result-code-expiry {font-size: 12px}
+.result-code-actions {display: flex; justify-content: flex-end; margin-top: 16px}

@@ -142,8 +142,9 @@ class IntakeLLM:
                   and os.getenv('MEDFABRIC_DEEPSEEK_API_KEY'))),
         ]
         default=cls.default_provider()
-        definitions.append(('ollama','本地 Ollama',os.getenv('MEDFABRIC_OLLAMA_MODEL','gemma4:12b'),
-                            bool(os.getenv('MEDFABRIC_OLLAMA_URL','http://127.0.0.1:11434'))))
+        if default=='ollama':
+            definitions.append(('ollama','本地 Ollama',os.getenv('MEDFABRIC_OLLAMA_MODEL','cjl-model:latest'),
+                                bool(os.getenv('MEDFABRIC_OLLAMA_URL','http://127.0.0.1:11434'))))
         available=[item[0] for item in definitions if item[3]]
         if default not in available and available:
             default=available[0]
@@ -168,7 +169,7 @@ class IntakeLLM:
             self.timeout=float(timeout or os.getenv('MEDFABRIC_DEEPSEEK_TIMEOUT','300'))
         else:
             self.base_url=(base_url or os.getenv('MEDFABRIC_OLLAMA_URL','http://127.0.0.1:11434')).rstrip('/')
-            self.model=model or os.getenv('MEDFABRIC_OLLAMA_MODEL','gemma4:12b')
+            self.model=model or os.getenv('MEDFABRIC_OLLAMA_MODEL','cjl-model:latest')
             self.api_key=''
             self.timeout=float(timeout or os.getenv('MEDFABRIC_OLLAMA_TIMEOUT','300'))
 
@@ -210,8 +211,6 @@ class IntakeLLM:
         else:
             payload={'model':self.model,'stream':False,'format':schema or 'json','keep_alive':'10m',
                      'messages':messages}
-            if self.model.split(':', 1)[0] in ('qwen3', 'gemma4'):
-                payload['think'] = False
             if options:
                 payload['options']=options
             headers={'Content-Type':'application/json'}

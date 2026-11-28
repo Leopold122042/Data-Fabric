@@ -17,6 +17,7 @@ class WorkspaceEntriesTest(unittest.TestCase):
     def test_logged_out_pages_return_to_their_own_workspace(self):
         targets = {
             '/user?page=ask': '/user/login',
+            '/user?page=query&flow=FLOW-example&delivery=DEL-example': '/user/login',
             '/user/services': '/user/login',
             '/admin': '/admin/login',
             '/admin/accounts': '/admin/login',

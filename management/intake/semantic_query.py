@@ -12,7 +12,7 @@ from platform_core.storage import DomainError, new_id
 from management.intake.ollama import IntakeLLM
 from management.intake.professional import professional_shape, workbench_policy
 from management.intake.calculations import (DIABETES_COUNTS, DIAGNOSIS, DIABETES_SCOPES,
-    DIABETES_AGE, DIABETES_AGE_OUTPUTS, DORIS_PEOPLE, DORIS_PEOPLE_SCOPES, SUMMARY_TABLES, person_identifier)
+    DIABETES_AGE, DIABETES_AGE_OUTPUTS, DORIS_PEOPLE, SUMMARY_TABLES, person_identifier)
 from management.catalog.query_links import executable_links, shortest_paths, orient_path, describe_links
 from management.catalog.field_library import FieldLibrary
 from contracts.execution.filters import filter_values, scalar
@@ -56,18 +56,14 @@ def interpret(text, catalog, correction=None, client=None, permission_context=No
 查询患者列表且没指定输出时，默认返回 patient_id 及本次用于筛选的字段，说明此默认选择；不要输出身份证、姓名等额外信息。
 confirmed_links 是平台已登记可执行的关系。输出、过滤和排序字段可来自不同逻辑表，平台会搜索并补齐中间表。优先保留用户所需字段和筛选。不要仅因为字段分散在多表而询问用户关联字段或要求提供患者 ID。
 明细支持AND条件（= != < <= > >=）、目录中的已登记关联、排序和1至200条限制。单值计数将outputs和order_by设为空数组，limit=1。问“有多少条记录”用selection=count，问“有多少人”用selection=count_people。患者或作者标识可以通过已登记的关系关联；由平台搜索实际路径并按人员标识去重。字典条目、设备、论文及业务事件没有人员口径时请明确原因并列出可选方向。无法统计人数时不要自动改成记录数或明细。
+summary_scopes 是目录登记的汇总口径。使用这种表统计人数时，只支持用 cohort_field 等于一个登记值筛选。口径未确定时，filters 留空，唯一问题使用 question_keys=["filter.summary_scope"]。如果用户还要求此表无法应用的其他条件，保留这些条件并明确说明限制；不要用固定汇总代替有额外条件的统计。
 集合使用op=in和数组，例如["E10","E11"]。闭区间使用op=between和两个端点。编码前缀使用op=prefix和前缀文字，value里不写通配符。保留用户指定的上下界及是否包含端点。
 用户要年龄时优先选择目录中由出生日期计算的age_years，age_basis说明是否估算。如果要按人列出结果且关联会产生重复记录，选人员编号和所需字段并设distinct=true。
 没有指定条数默认200并说明；最近N条必须找到记录自身的时间字段，降序且limit=N；不足N条返回实际记录。
 “最近”必须按具有时间语义的字段排序，绝不能按patient_id等标识符代替时间排序。没有文书时间或就诊关联不能借用其他记录时间排序；询问用户，不能任意选N条。用户明确允许全量无序时移除排序条件。
 性别等枚举值遵循字段定义；没有映射时保留用户原值，不编造编码。
 区分需要返回的列与仅用于筛选/排序的列；不要遗漏或改写用户的任何条件。
-<<<<<<< HEAD
 超过支持范围（OR、分组统计、无法确定关联、歧义）返回具体questions；不得丢弃条件改成近似操作。
-=======
-用户明确指定输出字段时，outputs只能包含这些字段；姓名用于识别患者时仅放在filters中，不得附加到outputs。例如请求性别和就诊科室，只返回性别和科室，不返回姓名或患者编号。
-超过支持范围（OR、聚合统计、无法确定关联、歧义）返回具体questions；不得丢弃条件改成近似操作。
->>>>>>> 2d691b8132b9578092b71926c2f64ad18a898450
 permission_context 由平台按当前账户生成，是本次可见范围的事实依据。guidance 用1至3句向用户说明当前所处阶段、实际原因和下一步，只能使用目录及permission_context中提供的事实。
 questions非空时，要明确当前还没有可执行查询、没有读取数据，并点明必须补充的口径。
 只有请求字段或对象确实无法与当前目录唯一匹配时，才描述为目录未匹配；若缺口是筛选值、统计口径、记录时间或其他操作条件，应直接说明对应缺项。
@@ -81,9 +77,17 @@ request为原始问题，clarifications为按时间顺序记录的已确认问�
 '''
     # Send only useful semantics, not opaque IDs or UI state. Reserve context for
     # both catalog and the structured operation so long catalogs are not truncated.
-    metadata=[{'table':t['name'],'connected':bool(t.get('connected')),'fields':[{'name':f['name'],'label':f['label'],
-        'definition':f.get('definition',''),'ref':t['name']+'.'+f['name']} for f in t['fields']],
-        'confirmed_links':t.get('confirmed_links',[])} for t in catalog]
+    metadata=[]
+    for table in catalog:
+        name=table['name']
+        entry={'table':name,'connected':bool(table.get('connected')),
+               'fields':[{'name':f['name'],'label':f['label'],'definition':f.get('definition',''),
+                          'ref':name+'.'+f['name']} for f in table['fields']],
+               'confirmed_links':table.get('confirmed_links',[])}
+        scopes=registered_summary_scopes(table)
+        if scopes:
+            entry.update(cohort_field=f'{name}.cohort',summary_scopes=dict(scopes))
+        metadata.append(entry)
     result = client.complete_json([
         {'role': 'system', 'content': prompt},
         {'role': 'user', 'content': json.dumps({'request': text, 'catalog': metadata,
@@ -262,6 +266,76 @@ def supported_diabetes_services(catalog):
     return {name for name,needed in requirements.items() if needed<=confirmed.get(name,set())}
 
 
+SUMMARY_SCOPE_KEY = 'filter.summary_scope'
+QUERY_VERBS = r'(?:请)?(?:帮我)?(?:查(?:询|一下)?|统计(?:一下)?|数一下)?'
+PEOPLE_TOTAL = r'(?:一共|总共)?(?:有)?(?:多少|几)(?:[个位名]?(?:人|患者|病人|作者)|[个位名])'
+PEOPLE_MEASURE = rf'(?:{PEOPLE_TOTAL}|(?:患者|病人|作者)?(?:去重|总)?人数|人数统计|患者数)'
+SCOPE_QUESTIONS = {'人数汇总需要选择一个已登记的统计口径','请选择统计口径','请选择统计范围'}
+
+
+def registered_summary_scopes(table):
+    if table['source']=='doris-nju' and table['name'] in SUMMARY_TABLES:
+        confirmed={field['name'] for field in table['fields'] if field['status']=='confirmed'}
+        if {'cohort','patient_count'}<=confirmed:
+            return SUMMARY_TABLES[table['name']][1]
+    return ()
+
+
+def count_option(key, label, table, filters, recommended):
+    return {'id':key,'label':label,'recommended':recommended,'intent':{
+        'selection':'count_people','entity':table,'summary':f'按「{label}」统计去重人数。',
+        'outputs':[],'filters':filters,'order_by':[],'limit':1,'questions':[]}}
+
+
+def summary_count_options(table, scopes):
+    return [count_option(key,label,table,[{'field':f'{table}.cohort','op':'=','value':key}],index==0)
+            for index,(key,label) in enumerate(scopes)]
+
+
+def published_scope_choice(intent, catalog, clarifications):
+    """Offer registered choices when scope is the only open part of a scalar count."""
+    if (intent.get('selection')!='count_people' or intent.get('outputs')!=[] or intent.get('order_by')!=[]
+            or intent.get('join_path') or intent.get('count_field')
+            or any(item.get('decision_key')==SUMMARY_SCOPE_KEY for item in clarifications)):
+        return intent,[]
+    name=intent.get('entity')
+    if not isinstance(name,str) or name not in SUMMARY_TABLES:
+        return intent,[]
+    tables=[table for table in catalog if table['name']==name]
+    scopes=registered_summary_scopes(tables[0]) if len(tables)==1 else ()
+    if not scopes:
+        return intent,[]
+    questions=intent.get('questions')
+    if questions!=[] and not (isinstance(questions,list) and len(questions)==1
+            and isinstance(questions[0],str)
+            and (decision_key(intent,0)==SUMMARY_SCOPE_KEY or question_key(questions[0]) in SCOPE_QUESTIONS)):
+        return intent,[]
+    filters=intent.get('filters')
+    guidance='已找到人数统计服务。服务只按所列范围汇总，请核对选项是否覆盖你的需求。'
+    if isinstance(filters,list) and len(filters)==1 and isinstance(filters[0],dict):
+        scope=filters[0]
+        if scope.get('field')==f'{name}.cohort' and scope.get('op')=='=':
+            value=scope.get('value')
+            match=tuple((key,label) for key,label in scopes if value in (key,label))
+            if match:
+                if questions:
+                    scopes=match
+                else:
+                    return {**intent,'filters':[{**scope,'value':match[0][0]}]},[]
+            elif isinstance(value,str) and value:
+                guidance='模型给出的范围与登记口径未能对应。服务只按所列范围汇总，如需保留其他筛选条件，请修改需求。'
+            elif value not in (None,''):
+                return intent,[]
+        else:
+            return intent,[]
+    elif filters!=[]:
+        return intent,[]
+    return {'summary':'选择本次去重人数的统计范围',
+            'questions':['请选择统计范围。此服务按选定的范围汇总。'],
+            'question_keys':[SUMMARY_SCOPE_KEY],
+            'guidance':guidance},summary_count_options(name,scopes)
+
+
 PERSON_COUNT_DATASETS = (
     ('his','patient','HIS 患者主索引 · 患者人数'),
     ('his','visit','HIS 就诊数据集 · 到诊患者人数'),
@@ -283,9 +357,9 @@ def people_count_options(catalog):
         if source.startswith('cloud-'):
             continue
         confirmed={f['name']:f for f in table['fields'] if f['status']=='confirmed'}
-        if source=='doris-nju' and name==DORIS_PEOPLE and {'cohort','patient_count'}<=set(confirmed):
-            for scope,label in DORIS_PEOPLE_SCOPES:
-                options.append((source,name,label,[{'field':f'{name}.cohort','op':'=','value':scope}]))
+        if name==DORIS_PEOPLE:
+            for option in summary_count_options(name,registered_summary_scopes(table)):
+                options.append((source,name,option['label'],option['intent']['filters']))
         elif any(person_identifier({'source_id':source,'table':name},field) for field in confirmed.values()):
             label=known.get((source,name)) or f"{table.get('source_label') or name} · {table.get('label') or name} · 人数"
             options.append((source,name,label,[]))
@@ -294,25 +368,24 @@ def people_count_options(catalog):
 
 
 def people_question(text, catalog):
-    question=text.strip().rstrip('？?。！!').strip()
-    match=re.fullmatch(r'(?:请)?(?:帮我)?(?:统计|查询)?\s*(?:(HIS|LIS|PACS|EMR|IoT|Doris|OpenAlex)\s*'
-                        r'(?:(诊断|检验)(?:数据集)?)?\s*(?:中的|的|中)?\s*)?'
-                        r'(患者人数|作者人数|人数统计|去重人数|人数|有多少(?:位|名)?(?:人|患者|作者))',question,re.I)
+    question=re.sub(r'\s+','',unicodedata.normalize('NFKC',text)).rstrip('?。!')
+    match=re.fullmatch(rf'{QUERY_VERBS}(?:(HIS|LIS|PACS|EMR|IoT|Doris|OpenAlex)'
+                       rf'(?:(诊断|检验)(?:数据集)?)?(?:中的|的|中)?)?'
+                       rf'((?:(?:患者|病人|作者)(?:的)?)?{PEOPLE_MEASURE})',question,re.I)
     if not match:
         return None,[]
     source,clinical_scope,measure=match.groups()
     source=source.casefold() if source else None
     source='doris-nju' if source=='doris' else source
     options=[]
+    patient_measure='患者' in measure or '病人' in measure
     for dataset,name,label,filters in people_count_options(catalog):
         is_author=dataset=='openalex'
-        if (source and dataset!=source) or ('患者' in measure and is_author) or ('作者' in measure and not is_author):
+        if (source and dataset!=source) or (patient_measure and is_author) or ('作者' in measure and not is_author):
             continue
         if clinical_scope and clinical_scope not in label:
             continue
-        options.append({'id':f'people-{len(options)}','label':label,'recommended':not options,'intent':{
-            'selection':'count_people','entity':name,'summary':f'统计{label}，按人员标识去重。',
-            'outputs':[],'filters':filters,'order_by':[],'limit':1,'questions':[]}})
+        options.append(count_option(f'people-{len(options)}',label,name,filters,not options))
     if not options:
         raise DomainError('当前可用目录中没有符合要求的人数统计口径，请联系管理员核对人员标识和数据范围。',409)
     return {'summary':'选择要统计人数的数据集','questions':['统计哪个数据集的人数？']},options
@@ -370,7 +443,13 @@ def diabetes_details_question(text,catalog,clarifications):
 def diabetes_question(text, catalog):
     """Match published services only when the request has no additional conditions."""
     question=text.strip().rstrip('？?。！!').strip()
-    people=r'(?:请|帮我)?(?:统计|查询)?糖尿病(?:患者|病人)?的?(?:有多少人|有几人|人数|总人数|有多少(?:位|名)?(?:患者|病人)|患者数)'
+    compact=re.sub(r'\s+','',unicodedata.normalize('NFKC',question))
+    diagnosis=r'(?P<type>[12一二]型)?糖尿病'
+    people=re.fullmatch(rf'{QUERY_VERBS}(?:Doris(?:的|中|中的)?)?(?:患有|患|得了?)?{diagnosis}'
+                        rf'的?(?:(?:患者|病人|人群|人)的?)?{PEOPLE_MEASURE}',compact,re.I)
+    if not people:
+        people=re.fullmatch(rf'{QUERY_VERBS}(?:Doris(?:的|中|中的)?)?{PEOPLE_TOTAL}'
+                            rf'(?:患有|患|得了?){diagnosis}',compact,re.I)
     records=r'(?:请|帮我)?(?:统计|查询)?糖尿病的?诊断记录(?:数|有多少条|有几条|有多少)'
     age=asks_diabetes_age(question)
     supported=supported_diabetes_services(catalog)
@@ -384,7 +463,7 @@ def diabetes_question(text, catalog):
             for index,(key,label,*_) in enumerate(DIABETES_SCOPES)]
         return {'summary':'糖尿病患者年龄查询','questions':['请选择计算平均周岁的 ICD‑10 诊断范围。'],
                 'guidance':'已找到诊断记录到患者主索引的关联。会按患者编号去重，并展示关联人数和可计算年龄人数。'},options
-    if re.fullmatch(people,question) or age:
+    if people or age:
         table,selection,measure=DIABETES_COUNTS,'count_people','去重人数'
     elif re.fullmatch(records,question):
         table,selection,measure=DIAGNOSIS,'count','诊断记录数'
@@ -394,14 +473,19 @@ def diabetes_question(text, catalog):
         if age:return None,[]
         raise DomainError('当前账户可用目录中没有已发布的这项糖尿病统计服务，请联系管理员核对数据范围和服务登记。',409)
     intent={'summary':f'统计糖尿病{measure}','questions':['请选择本次统计采用的 ICD‑10 诊断范围。']}
-    options=[]
-    for key,label,start,end in DIABETES_SCOPES:
-        filters=([{'field':f'{table}.cohort','op':'=','value':key}] if selection=='count_people' else
-                 [{'field':f'{table}.icd10_code','op':'>=','value':start},
-                  {'field':f'{table}.icd10_code','op':'<','value':end}])
-        options.append({'id':key,'label':label,'recommended':not options,'intent':{
-            'selection':selection,'entity':table,'summary':f'按{label}统计{measure}。',
-            'outputs':[],'filters':filters,'order_by':[],'limit':1,'questions':[]}})
+    if selection=='count_people':
+        scope_type=people['type'] if people else None
+        scope_key='diabetes_type1' if scope_type in ('1型','一型') else 'diabetes_type2'
+        scopes=SUMMARY_TABLES[table][1]
+        options=summary_count_options(table,[(key,label) for key,label in scopes if not scope_type or key==scope_key])
+        intent['question_keys']=[SUMMARY_SCOPE_KEY]
+    else:
+        options=[{'id':key,'label':label,'recommended':index==0,'intent':{
+            'selection':selection,'entity':table,'summary':f'按{label}统计{measure}。','outputs':[],
+            'filters':[{'field':f'{table}.icd10_code','op':'>=','value':start},
+                       {'field':f'{table}.icd10_code','op':'<','value':end}],
+            'order_by':[],'limit':1,'questions':[]}}
+            for index,(key,label,start,end) in enumerate(DIABETES_SCOPES)]
     if age:
         intent={'summary':'糖尿病患者年龄查询','questions':['如改为统计人数，请选择 ICD‑10 诊断范围。'],
                 'guidance':'Doris 已发布的诊断范围可以统计去重人数。计算年龄还需要已确认的患者与出生日期关联。'}
@@ -549,6 +633,10 @@ def prepare(runtime, text, actor, catalog, existing=None, provider=None, permiss
         for attempt in range(2):
             try:
                 intent=interpret(text,catalog,feedback,client,permission_context,clarifications=clarifications)
+                intent,options=published_scope_choice(intent,catalog,clarifications)
+                if options:
+                    shape=None
+                    break
                 # The model may identify the fields and still try to delegate a join.
                 intent,shape=try_link_resolution(intent,store,set(by_id))
                 if not intent.get('questions') and re.search('多少人|几个人|患者人数|去重人数',text.split('\n')[0]):

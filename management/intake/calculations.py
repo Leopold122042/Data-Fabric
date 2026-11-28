@@ -46,6 +46,7 @@ def summary_count_kind(table, field):
 
 
 def validate_summary_scope(kind, filters, cohort_field):
-    if (len(filters) != 1 or filters[0]['field'] != cohort_field
-            or filters[0]['op'] != '=' or filters[0]['value'] not in SUMMARY_SCOPES[kind]):
+    if any(item['field']!=cohort_field for item in filters):
+        raise DomainError('这项汇总服务只支持已登记的统计范围，无法应用其他筛选条件。请选择支持这些条件的数据集。')
+    if len(filters)!=1 or filters[0]['op']!='=' or filters[0]['value'] not in SUMMARY_SCOPES[kind]:
         raise DomainError('人数汇总需要选择一个已登记的统计口径')

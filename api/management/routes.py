@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter, Request, Depends, Response
 from fastapi.responses import JSONResponse
 from datetime import datetime, timedelta, timezone
 from copy import deepcopy
@@ -1068,19 +1068,22 @@ def create_router(runtime,identity):
 
     @router.post('/intake/flows/{flow_id}/read-delivery')
     @query_actions.post('/queries/{flow_id}/result')
-    async def read_intake_delivery(flow_id:str,request:Request):
+    async def read_intake_delivery(flow_id:str,request:Request,response:Response,delivery_id:str|None=None):
         user=who(request,action='delivery.read')
-        flow=m.store.require('intake_flow',flow_id);own('demand',flow['demand_id'],user)
-        if flow.get('state')!='query_completed' or not flow.get('delivery_id'):
-            raise DomainError('当前流程还没有可读取的查询结果',409)
-        plan=runtime.execution.get(flow.get('execution_plan_id',''),flow.get('execution_plan_version'))
-        runtime.execution.current(plan)
-        require_plan_scope(user,runtime,plan)
         with runtime.execution.lock,m.store.lock:
+            flow=m.store.require('intake_flow',flow_id);own('demand',flow['demand_id'],user)
+            if delivery_id is not None and flow.get('delivery_id')!=delivery_id:
+                raise DomainError('二维码对应的查询结果已不可用，请从原查询获取当前结果。',410)
+            if flow.get('state')!='query_completed' or not flow.get('delivery_id'):
+                raise DomainError('当前流程还没有可读取的查询结果',409)
+            plan=runtime.execution.get(flow.get('execution_plan_id',''),flow.get('execution_plan_version'))
+            runtime.execution.current(plan)
+            require_plan_scope(user,runtime,plan)
             delivery=runtime.execution.delivery.read(flow['delivery_id'],user['id'],plan)
             flow=m.store.save('intake_flow',flow_id,{**flow,'delivery_result_read_at':datetime.now(timezone.utc).isoformat()},
                 flow['version'],user['id'],'用户读取受控查询交付结果')
         grant=runtime.execution.store.require('grant',delivery['grant_id'])
+        response.headers['Cache-Control']='no-store'
         return {'flow':flow,'delivery_id':delivery['id'],
                 'result':project_result(delivery['result'],user,grant.get('min_group_size',5),
                                         calculation=plan.get('execution_policy',{}).get('calculation')),

@@ -70,19 +70,6 @@ class Catalog:
                 for mapping in self.store.list('mapping'):
                     if mapping.get('status')=='confirmed' and affected.intersection(mapping.get('fields',[])):
                         self.store.save('mapping',mapping['id'],{**mapping,'status':'review_required'},mapping['version'],reason='源结构变化，需复核')
-            # Recheck confirmed patient links after every source scan. Annotation
-            # changes remain valid; structural changes require explicit review.
-            from management.intake.flow import IntakeFlow
-            helper = object.__new__(IntakeFlow)
-            helper.store = self.store
-            for relation in self.store.list('relation'):
-                if relation.get('type') != 'same_patient_id' or relation.get('status') != 'confirmed':
-                    continue
-                if not helper._has_confirmed_patient_id_link(relation['source'], relation['target']):
-                    self.store.save('relation', relation['id'], {**relation,
-                        'status': 'review_required',
-                        'review_reason': '患者关联字段结构已变化或被删除，请重新核验并确认'},
-                        relation['version'], reason='目录扫描后患者关联失效，需复核')
             from management.catalog.field_library import FieldLibrary
             FieldLibrary(self.store).sync()
             if source_id=='his' and self.store.environment=='demo':
@@ -204,18 +191,10 @@ class Catalog:
             note=str(body.get('confirmation_note') or '').strip()
             if not note:raise DomainError('登记患者身份关系需要记录人工确认依据')
             existing=next((item for item in self.store.list('relation')
-                if item.get('type')=='same_patient_id'
+                if item.get('type')=='same_patient_id' and item.get('status')=='confirmed'
                 and {item.get('source'),item.get('target')}=={source['id'],target['id']}),None)
-            if existing:
-                from management.intake.flow import IntakeFlow
-                helper = object.__new__(IntakeFlow)
-                helper.store = self.store
-                if helper._has_confirmed_patient_id_link(source['id'], target['id']):
-                    return existing
-                body = {**existing, **body, 'id': existing['id'],
-                    'expected_version': body.get('expected_version', existing['version'])}
+            if existing:return existing
             body={**body,'status':'confirmed','confirmed_by':actor,'confirmation_note':note,
-                'review_reason':None,
                 'field_versions':{source['id']:source['version'],target['id']:target['version']},
                 'source_systems':[source.get('source_id'),target.get('source_id')]}
         return self.store.save('relation',body.get('id') or new_id('REL'),body,body.get('expected_version',0),actor,'登记跨对象依赖')

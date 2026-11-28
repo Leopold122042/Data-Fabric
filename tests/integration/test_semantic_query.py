@@ -1,7 +1,8 @@
 import sqlite3
 from unittest.mock import patch
 from tests.integration.test_portal import PortalTest
-from management.intake.semantic_query import compile_intent
+from management.intake.calculations import DIABETES_COUNTS, DORIS_PEOPLE, SUMMARY_TABLES
+from management.intake.semantic_query import compile_intent, diabetes_question
 from platform_core.storage import DomainError
 from management.catalog.sources import SQLiteSource
 from management.catalog.field_library import FieldLibrary
@@ -131,6 +132,61 @@ class SemanticQueryTest(PortalTest):
             ready=self.post(url+'/retry-understanding',{'expected_version':stalled['version']})['flow']
         self.assertEqual(model.call_args.kwargs['clarifications'],stalled['clarification_answers'])
         self.assertEqual(ready['state'],'waiting_manual_spec_confirmation')
+
+    def test_registered_people_counts_can_recover_a_missing_scope(self):
+        self.m.catalog.ingest('doris-nju',{'tables':{
+            name:{'columns':['cohort','patient_count']} for name in SUMMARY_TABLES}})
+        library=FieldLibrary(self.m.store)
+        for field in library.items():
+            if field['status']=='confirmed':
+                continue
+            saved=library.save(field['id'],{'expected_version':field['version'],'label':field['name'],
+                'definition':'测试登记人数的筛选范围和汇总字段','basis':'Synthetic test fixture'},'demo-platform')
+            library.save(field['id'],{'expected_version':saved['version'],'confirmation_note':'Fixture reviewed'},
+                         'demo-platform',confirm=True)
+        cases=((DIABETES_COUNTS,[],[]), (DORIS_PEOPLE,['采用哪项登记范围？'],['filter.summary_scope']))
+        for table,questions,keys in cases:
+            with self.subTest(table=table):
+                scopes=SUMMARY_TABLES[table][1]
+                intent=self.intent(selection='count_people',entity=table,outputs=[],filters=[],order_by=[],
+                    limit=1,questions=questions,question_keys=keys)
+                flow=self.ask(intent,'请汇总已登记数据集的去重人员数量')
+                self.assertEqual(flow['state'],'awaiting_chain_confirmation')
+                binding=flow['field_bindings'][0]
+                self.assertEqual([option['id'] for option in binding['options']],[key for key,_ in scopes])
+                with patch('management.intake.semantic_query.interpret',side_effect=AssertionError('范围已经选择')):
+                    ready=self.post('/api/portal/queries/'+flow['id']+'/clarify',{'expected_version':flow['version'],
+                        'answers':[{'intent_id':binding['intent_id'],'option_id':scopes[-1][0]}]})['flow']
+                self.assertEqual(ready['state'],'waiting_manual_spec_confirmation')
+                self.assertEqual(ready['professional_preview']['filters'][0]['value'],scopes[-1][0])
+                unmatched={**intent,'questions':[],'filters':[
+                    {'field':table+'.cohort','op':'=','value':'模型未对应的范围'}]}
+                recoverable=self.ask(unmatched,'请汇总已登记数据集的去重人员数量')
+                self.assertIn('与登记口径未能对应',recoverable['user_guidance'])
+                self.assertEqual(recoverable['state'],'awaiting_chain_confirmation')
+                self.assertIsNone(recoverable['query_draft'])
+                extra={**intent,'questions':[],'filters':[
+                    {'field':table+'.cohort','op':'=','value':scopes[0][0]},
+                    {'field':'observations.observed_at','op':'>=','value':'2025-01-01'}]}
+                blocked=self.ask(extra,'统计 2025 年以来的去重人数')
+                self.assertEqual(blocked['state'],'attention')
+                self.assertEqual(blocked['field_bindings'],[])
+        self.assertFalse(self.e.store.list('job'))
+
+    def test_diabetes_count_variants_keep_the_scope_and_operation(self):
+        catalog=[{'name':DIABETES_COUNTS,'source':'doris-nju',
+                  'fields':[{'name':name,'status':'confirmed'} for name in ('cohort','patient_count')]}]
+        for text in ('糖尿病的患者有多少人','一共有几个人患有糖尿病？','帮我查一下得糖尿病的病人总人数'):
+            with self.subTest(text=text):
+                _,options=diabetes_question(text,catalog)
+                self.assertEqual([option['id'] for option in options],
+                                 ['diabetes_all','diabetes_type2','diabetes_type1'])
+        _,options=diabetes_question('Doris 中的２型糖尿病患者有多少位？',catalog)
+        self.assertEqual([option['id'] for option in options],['diabetes_type2'])
+        for text in ('去年糖尿病的患者有多少人','糖尿病的女性患者有多少人','模拟 HIS 的糖尿病有多少人',
+                     '糖尿病患者人数和年龄'):
+            with self.subTest(text=text):
+                self.assertEqual(diabetes_question(text,catalog),(None,[]))
 
     def test_follow_up_keeps_distinct_questions_and_prior_choices(self):
         draft=self.intent(questions=['先确认组别。'],question_keys=['filter.group'],choices=[['A 组','B 组']])
